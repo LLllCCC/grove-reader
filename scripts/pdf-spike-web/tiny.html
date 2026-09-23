@@ -1,0 +1,48 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>body{background:#555}canvas{border:1px solid #888}</style></head>
+<body><pre id="log"></pre><canvas id="c"></canvas>
+<script type="module">
+const log = (...m) => { document.getElementById('log').textContent += m.join(' ') + String.fromCharCode(10) }
+console.error = (...a) => { log('[console.error]', ...a) }
+try {
+	const workerMod = await import('./pdf.worker.min.mjs')
+	globalThis.pdfjsWorker = workerMod
+	const pdfjs = await import('./pdf.min.mjs')
+	const b64 = "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAzMDAgMjAwXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgPj4gPj4gPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA1NyA+PgpzdHJlYW0KQlQgL0YxIDIwIFRmIDIwIDEyMCBUZCAoSGVsbG8gR3JvdmUgUmVhZGVyIFBERiAxMjMpIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKNSAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jhc2VGb250IC9IZWx2ZXRpY2EgPj4KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDI0MSAwMDAwMCBuIAowMDAwMDAwMzQ4IDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNiAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKNDE4CiUlRU9G"
+	const bin = atob(b64)
+	const data = new Uint8Array(bin.length)
+	for (let i = 0; i < bin.length; i++) data[i] = bin.charCodeAt(i)
+	const doc = await pdfjs.getDocument({ data }).promise
+	log('pages:', doc.numPages)
+	const page = await doc.getPage(1)
+	const vp = page.getViewport({ scale: 2 })
+	const canvas = document.getElementById('c')
+	canvas.width = Math.floor(vp.width)
+	canvas.height = Math.floor(vp.height)
+	const ctx = canvas.getContext('2d')
+	await page.render({ canvasContext: ctx, viewport: vp }).promise
+	log('render done')
+	const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+	let dark = 0
+	for (let i = 0; i < d.length; i += 4) {
+		if (d[i] < 200) dark++
+	}
+	log('dark px:', dark)
+	try {
+		const div = document.createElement('div')
+		div.style.position = 'relative'
+		div.style.setProperty('--total-scale-factor', '2')
+		document.body.append(div)
+		const tl = new pdfjs.TextLayer({ textContentSource: page.streamTextContent(), container: div, viewport: vp })
+		await tl.render()
+		log('textlayer spans:', div.querySelectorAll('span').length)
+	} catch (e) {
+		log('textlayer FAILED:', e && e.message ? e.message : String(e))
+	}
+	log('SPIKE-OK')
+} catch (e) {
+	log('FATAL:', e && e.message ? e.message : String(e), e && e.stack ? e.stack : '')
+	log('SPIKE-FAIL')
+}
+</script>
+</body></html>

@@ -1,0 +1,843 @@
+.grove-content {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	padding: 0;
+	position: relative;
+}
+
+.grove-hidden {
+	display: none;
+}
+
+/* ---------- 工具栏 ---------- */
+
+.grove-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	flex: none;
+	flex-wrap: wrap;
+}
+
+.grove-icon-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.grove-toc {
+	flex: 0 1 auto;
+	min-width: 0;
+}
+
+.grove-toc-select {
+	max-width: 220px;
+}
+
+.grove-progress {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: 1 1 160px;
+	min-width: 140px;
+}
+
+.grove-progress input[type='range'] {
+	flex: 1;
+	margin: 0;
+}
+
+.grove-progress-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.grove-sep {
+	width: 1px;
+	align-self: stretch;
+	margin: 2px 4px;
+	background: var(--background-modifier-border);
+}
+
+.grove-color-dot {
+	width: 20px;
+	height: 20px;
+	border-radius: 50%;
+	border: 1px solid var(--background-modifier-border);
+	padding: 0;
+	cursor: pointer;
+	flex: none;
+}
+
+.grove-color-dot:hover {
+	box-shadow: 0 0 0 2px var(--background-modifier-hover);
+}
+
+.grove-flex-spacer {
+	flex: 1;
+}
+
+/* ---------- 阅读区 ---------- */
+
+.grove-body {
+	flex: 1;
+	display: flex;
+	min-height: 0;
+}
+
+.grove-reader {
+	flex: 1;
+	position: relative;
+	min-width: 0;
+}
+
+.grove-reader foliate-view {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+
+.grove-empty {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 100%;
+	color: var(--text-muted);
+	padding: 32px;
+	text-align: center;
+}
+
+/* ---------- 批注侧栏 ---------- */
+
+.grove-sidebar {
+	width: 300px;
+	flex: none;
+	border-left: 1px solid var(--background-modifier-border);
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+}
+
+.grove-sidebar.grove-hidden {
+	display: none;
+}
+
+.grove-sidebar-head {
+	padding: 8px 10px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	font-weight: 600;
+	flex: none;
+}
+
+.grove-ann-list {
+	overflow-y: auto;
+	padding: 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	flex: 1;
+}
+
+.grove-ann-empty {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	padding: 8px 4px;
+}
+
+.grove-sidebar-controls {
+	padding: 8px 8px 0;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	flex: none;
+}
+
+.grove-ann-search {
+	width: 100%;
+}
+
+.grove-ann-filters {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.grove-filter-dot {
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	border: 1px solid var(--background-modifier-border);
+	cursor: pointer;
+	padding: 0;
+	flex: none;
+}
+
+.grove-filter-dot.is-active {
+	box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 3.5px var(--interactive-accent);
+}
+
+.grove-filter-clear {
+	margin-left: auto;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	background: transparent;
+	border: none;
+	cursor: pointer;
+	padding: 0 4px;
+}
+
+.grove-filter-clear:hover {
+	color: var(--text-normal);
+}
+
+.grove-ann-group-head {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 2px;
+	cursor: pointer;
+	color: var(--text-muted);
+	font-weight: 600;
+	font-size: var(--font-ui-smaller);
+	position: sticky;
+	top: -8px;
+	background: var(--background-primary);
+	z-index: 1;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.grove-ann-group-chev {
+	display: inline-flex;
+	flex: none;
+}
+
+.grove-ann-group-title {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.grove-ann-group-count {
+	color: var(--text-faint);
+	flex: none;
+}
+
+.grove-font-preview {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	padding: 6px 8px;
+	font-size: 15px;
+	text-align: center;
+	color: var(--text-normal);
+}
+
+.grove-ann {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	padding: 8px;
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-ann.grove-ann-revealed {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 2px var(--interactive-accent);
+	animation: grove-ann-reveal-fade 2s ease;
+}
+
+@keyframes grove-ann-reveal-fade {
+	0% {
+		background-color: var(--background-modifier-active-hover);
+	}
+	100% {
+		background-color: transparent;
+	}
+}
+
+.grove-ann-head {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 4px;
+}
+
+.grove-ann-dot {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	flex: none;
+	border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.grove-ann-chapter {
+	color: var(--text-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.grove-ann-text {
+	cursor: pointer;
+	line-height: 1.5;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.grove-ann-text:hover {
+	color: var(--text-accent);
+}
+
+.grove-ann-note {
+	margin-top: 4px;
+	color: var(--text-faint);
+	font-style: italic;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.grove-ann-actions {
+	display: flex;
+	gap: 2px;
+	margin-top: 6px;
+	justify-content: flex-end;
+}
+
+.grove-mini-btn {
+	padding: 2px;
+	height: auto;
+}
+
+/* ---------- 弹窗 ---------- */
+
+.grove-comment-input {
+	width: 100%;
+	min-height: 130px;
+	resize: vertical;
+}
+
+.grove-folder-input {
+	width: 100%;
+}
+
+.grove-setting-sub {
+	border: none;
+	padding-left: 24px;
+}
+
+/* ---------- 右下角悬浮翻页按钮 ---------- */
+
+.grove-reader-inner {
+	position: absolute;
+	inset: 0;
+}
+
+.grove-page-btns {
+	position: absolute;
+	right: 16px;
+	bottom: 16px;
+	display: flex;
+	gap: 8px;
+	z-index: 12;
+	opacity: 0.35;
+	transition: opacity 0.2s ease;
+}
+
+.grove-reader:hover .grove-page-btns {
+	opacity: 1;
+}
+
+.grove-page-btn {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 50%;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+	width: 36px;
+	height: 36px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+/* ---------- 阅读外观面板 ---------- */
+
+.grove-appear-panel {
+	position: absolute;
+	top: 44px;
+	right: 12px;
+	width: 340px;
+	max-height: calc(100% - 60px);
+	overflow-y: auto;
+	z-index: 40;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 10px;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+	padding: 12px 14px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.grove-appear-panel.grove-hidden {
+	display: none;
+}
+
+.grove-appear-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.grove-appear-label {
+	flex: none;
+	width: 48px;
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+
+.grove-appear-col {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.grove-appear-slider {
+	flex: 1;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.grove-appear-slider input[type='range'] {
+	flex: 1;
+	margin: 0;
+}
+
+.grove-appear-value {
+	flex: none;
+	width: 56px;
+	text-align: right;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+}
+
+.grove-appear-swatches {
+	flex: 1;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.grove-appear-chip {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 999px;
+	padding: 2px 10px;
+	background: transparent;
+	color: var(--text-normal);
+	cursor: pointer;
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-appear-chip.is-active {
+	border-color: var(--interactive-accent);
+	color: var(--interactive-accent);
+}
+
+.grove-appear-swatch {
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	border: 1px solid var(--background-modifier-border);
+	padding: 0;
+	cursor: pointer;
+	flex: none;
+	position: relative;
+}
+
+.grove-appear-swatch.is-active {
+	box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 4px var(--interactive-accent);
+}
+
+.grove-appear-custom input[type='color'] {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	opacity: 0;
+	cursor: pointer;
+	border: none;
+	padding: 0;
+}
+
+.grove-appear-foot {
+	display: flex;
+	justify-content: flex-end;
+}
+
+/* ---------- 书架 ---------- */
+
+.grove-shelf-content {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	padding: 12px 16px;
+	gap: 10px;
+	overflow-y: auto;
+}
+
+.grove-shelf-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex: none;
+}
+
+.grove-shelf-title {
+	font-size: 22px;
+	font-weight: 700;
+}
+
+.grove-shelf-count {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.grove-shelf-folders {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-wrap: wrap;
+	flex: none;
+}
+
+.grove-shelf-folders-label {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-shelf-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 999px;
+	padding: 2px 10px;
+	font-size: var(--font-ui-smaller);
+	cursor: default;
+}
+
+.grove-shelf-chip-x {
+	cursor: pointer;
+	color: var(--text-muted);
+	font-weight: 700;
+	padding: 0 2px;
+}
+
+.grove-shelf-chip-x:hover {
+	color: var(--text-error);
+}
+
+.grove-shelf-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+	gap: 16px;
+	align-content: start;
+	flex: 1;
+}
+
+.grove-shelf-card {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	cursor: pointer;
+	border-radius: 8px;
+	padding: 6px;
+}
+
+.grove-shelf-card:hover {
+	background: var(--background-secondary);
+}
+
+.grove-shelf-cover {
+	width: 100%;
+	aspect-ratio: 2 / 3;
+	border-radius: 6px;
+	overflow: hidden;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.grove-shelf-card:hover .grove-shelf-cover {
+	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+}
+
+.grove-shelf-cover img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+}
+
+.grove-shelf-cover-empty {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	text-align: center;
+	padding: 8px;
+	word-break: break-all;
+}
+
+.grove-shelf-booktitle {
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.grove-shelf-author {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-height: 1em;
+}
+
+.grove-shelf-publisher {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-height: 1em;
+}
+
+.grove-shelf-lists {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-wrap: wrap;
+	flex: none;
+}
+
+.grove-shelf-tools {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: none;
+}
+
+.grove-shelf-search {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: 1;
+	max-width: 320px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	padding: 0 8px;
+}
+
+.grove-shelf-search:focus-within {
+	border-color: var(--interactive-accent);
+}
+
+.grove-shelf-search-icon {
+	display: inline-flex;
+	color: var(--text-muted);
+	flex: none;
+}
+
+.grove-shelf-search input {
+	border: none;
+	background: transparent;
+	box-shadow: none;
+	height: 28px;
+	padding: 0;
+	width: 100%;
+}
+
+.grove-shelf-tools select {
+	height: 30px;
+	flex: none;
+}
+
+.grove-info-label {
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	margin-top: 10px;
+}
+
+.grove-shelf-list-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 999px;
+	padding: 2px 12px;
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+	user-select: none;
+}
+
+.grove-shelf-list-chip:hover {
+	background: var(--background-modifier-hover);
+}
+
+.grove-shelf-list-chip.is-active {
+	background: var(--interactive-accent);
+	border-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.grove-shelf-list-chip.is-drop-target {
+	border-color: var(--interactive-accent);
+	background: var(--background-modifier-hover);
+	transform: scale(1.06);
+}
+
+.grove-shelf-dup {
+	color: var(--text-warning, #e0a93f);
+	border: 1px solid var(--background-modifier-border);
+	background: transparent;
+}
+
+.grove-shelf-list-new {
+	border-style: dashed;
+	color: var(--text-muted);
+}
+
+.grove-shelf-meta {
+	display: flex;
+	gap: 6px;
+	flex-wrap: wrap;
+	min-height: 18px;
+}
+
+.grove-shelf-badge {
+	font-size: var(--font-ui-smaller);
+	background: var(--background-modifier-hover);
+	border-radius: 4px;
+	padding: 0 6px;
+}
+
+.grove-shelf-progress {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-accent);
+}
+
+.grove-shelf-empty {
+	grid-column: 1 / -1;
+	color: var(--text-muted);
+	padding: 32px 8px;
+	text-align: center;
+}
+
+/* ---------- PDF 阅读视图 ---------- */
+
+.grove-pdf-content {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	padding: 0;
+	position: relative;
+}
+
+.grove-pdf-pages {
+	flex: 1;
+	overflow: auto;
+	background: var(--background-secondary-alt);
+	padding: 16px 0 40px;
+	position: relative;
+	user-select: text;
+	-webkit-user-select: text;
+}
+
+.grove-pdf-page {
+	position: relative;
+	margin: 0 auto 16px;
+	background: #ffffff;
+	box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+	overflow: hidden;
+}
+
+.grove-pdf-page canvas {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+}
+
+.grove-pdf-textlayer {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	line-height: 1;
+	text-size-adjust: none;
+	forced-color-adjust: none;
+	opacity: 1;
+	user-select: text;
+	-webkit-user-select: text;
+}
+
+.grove-pdf-textlayer span {
+	color: transparent;
+	position: absolute;
+	white-space: pre;
+	cursor: text;
+	transform-origin: 0% 0%;
+}
+
+.grove-pdf-textlayer span::selection {
+	background: rgba(59, 130, 246, 0.35);
+}
+
+.grove-pdf-hllayer {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+
+.grove-pdf-hl {
+	position: absolute;
+	border-radius: 2px;
+	opacity: 0.35;
+	mix-blend-mode: multiply;
+}
+
+.grove-pdf-popup {
+	position: absolute;
+	z-index: 60;
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	padding: 5px 8px;
+	border-radius: 8px;
+	border-style: solid;
+	border-width: 1px;
+	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+.grove-pdf-popup-btn {
+	border: none;
+	cursor: pointer;
+	padding: 3px 8px;
+	border-radius: 6px;
+	font-size: 12px;
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}

@@ -1,0 +1,9 @@
+{
+	"id": "grove-reader",
+	"name": "Grove Reader",
+	"version": "0.1.0",
+	"minAppVersion": "1.4.0",
+	"description": "EPUB 阅读器：阅读 → 划线批注 → 生成 Markdown 笔记 → 一键回跳原文（个人自用）",
+	"author": "grove",
+	"isDesktopOnly": true
+}

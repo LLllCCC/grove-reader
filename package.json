@@ -1,0 +1,25 @@
+{
+	"name": "grove-reader",
+	"version": "0.1.0",
+	"description": "Grove Reader — 在 Obsidian 中阅读电子书，划线批注，一键生成 Markdown 笔记并可回跳原文",
+	"main": "main.js",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"deploy": "node scripts/install-vault.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production && node scripts/sync-pdfjs-assets.mjs",
+		"types": "tsc -noEmit -skipLibCheck",
+		"sample": "node scripts/make-sample-epub.mjs",
+		"smoke": "node esbuild.config.mjs production && node scripts/smoke.mjs"
+	},
+	"devDependencies": {
+		"@types/node": "^22.10.2",
+		"builtin-modules": "^4.0.0",
+		"esbuild": "^0.25.0",
+		"fflate": "^0.8.2",
+		"obsidian": "^1.8.7",
+		"typescript": "^5.7.2"
+	},
+	"dependencies": {
+		"pdfjs-dist": "^5.7.284"
+	}
+}

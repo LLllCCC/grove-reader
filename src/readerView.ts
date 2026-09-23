@@ -1,0 +1,1138 @@
+import { ItemView, Menu, MenuItem, Notice, TFile, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
+import type GroveReaderPlugin from './main'
+import {
+	Annotation,
+	BookData,
+	BACKGROUND_PRESETS,
+	DEFAULT_APPEARANCE,
+	HIGHLIGHT_COLORS,
+	ReaderAppearance,
+	colorCss,
+} from './types'
+import { CommentModal, ConfirmModal } from './modals'
+import { Overlayer } from '../lib/foliate-js/overlayer.js'
+import { basenameOf, contrastFg, formatAuthor, formatLanguageMap, isDarkColor, randomId, truncate } from './util'
+import '../lib/foliate-js/view.js'
+
+export const VIEW_TYPE_GROVE_READER = 'grove-reader-view'
+
+interface FoliateTOCItem {
+	label?: string
+	href?: string
+	subitems?: FoliateTOCItem[]
+}
+
+interface FoliateBook {
+	metadata?: { title?: unknown; author?: unknown }
+	toc?: FoliateTOCItem[]
+}
+
+interface FoliateRenderer {
+	setStyles?: (css: string) => void
+	setAttribute(name: string, value: string): void
+}
+
+interface FoliateView extends HTMLElement {
+	open(input: File): Promise<void>
+	init(options: { lastLocation?: string; showTextStart?: boolean }): Promise<void>
+	close(): void
+	goTo(target: string | number): Promise<unknown>
+	select(target: string): Promise<unknown>
+	goToFraction(fraction: number): Promise<void>
+	addAnnotation(annotation: { value: string } & Record<string, unknown>): Promise<{ index: number; label?: string } | undefined>
+	deleteAnnotation(annotation: { value: string } & Record<string, unknown>): Promise<unknown>
+	resolveNavigation(target: string): { index?: number } | undefined
+	getCFI(index: number, range: Range): string
+	deselect(): void
+	goLeft(): void
+	goRight(): void
+	renderer?: FoliateRenderer
+	book?: FoliateBook
+}
+
+interface RelocateDetail {
+	cfi?: string
+	fraction?: number
+	section?: { current: number; total: number }
+	location?: { current: number; total: number }
+	pageItem?: { label: string } | null
+	tocItem?: { label?: string; href?: string } | null
+}
+
+interface PendingSelection {
+	cfi: string
+	text: string
+	index: number
+}
+
+const PAGE_KEYS = new Set(['ArrowLeft', 'ArrowRight'])
+const POPUP_WIDTH = 232
+
+const FONT_PRESETS: Array<{ label: string; value: string }> = [
+	{ label: '跟随书籍', value: '' },
+	{ label: '系统衬线', value: 'serif' },
+	{ label: '系统无衬线', value: 'sans-serif' },
+	{ label: '宋体', value: '"Songti SC", "SimSun", "Noto Serif CJK SC", serif' },
+	{ label: '黑体', value: '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif' },
+	{ label: '楷体', value: '"KaiTi", "STKaiti", "Kaiti SC", serif' },
+	{ label: '仿宋', value: '"FangSong", "STFangsong", "Fang Song", serif' },
+	{ label: '霞鹜文楷', value: '"LXGW WenKai", "LXGW WenKai GB", "LXGW WenKai Screen", KaiTi, serif' },
+	{ label: '思源宋体', value: '"Source Han Serif SC", "Noto Serif CJK SC", "SimSun", serif' },
+	{ label: '思源黑体', value: '"Source Han Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif' },
+]
+
+export class ReaderView extends ItemView {
+	bookPath = ''
+	bookTitle = ''
+
+	private foliate: FoliateView | null = null
+	private data: BookData | null = null
+	private loadedPath: string | null = null
+	private pendingCfi: string | null = null
+	private pending: PendingSelection | null = null
+	private saveTimer: number | null = null
+	private lastSavedCfi: string | null = null
+	private sliderActive = false
+	private popup: HTMLElement | null = null
+
+	private readerEl!: HTMLElement
+	private readerInnerEl!: HTMLElement
+	private sidebarEl!: HTMLElement
+	private annListEl!: HTMLElement
+	private annCountEl!: HTMLElement
+	private tocSelect!: HTMLSelectElement
+	private slider!: HTMLInputElement
+	private progressLabel!: HTMLElement
+	private appearPanelEl!: HTMLElement
+
+	private sidebarQuery = ''
+	private sidebarColor: string | null = null
+	private annCollapsed: Set<string> | null = null
+	private searchInput!: HTMLInputElement
+	private clearBtnEl!: HTMLButtonElement
+	private filterDotEls = new Map<string, HTMLElement>()
+	private annItemEls = new Map<string, HTMLElement>()
+	private revealTimer: number | null = null
+
+	constructor(leaf: WorkspaceLeaf, private plugin: GroveReaderPlugin) {
+		super(leaf)
+		this.navigation = false
+	}
+
+	getViewType(): string {
+		return VIEW_TYPE_GROVE_READER
+	}
+
+	getDisplayText(): string {
+		return this.bookTitle || 'Grove Reader'
+	}
+
+	getIcon(): string {
+		return 'book-open'
+	}
+
+	get ready(): boolean {
+		return !!(this.foliate && this.data)
+	}
+
+	snapshot(): BookData | null {
+		return this.data
+	}
+
+	// ------------------------------------------------------------------
+	// 生命周期与状态
+	// ------------------------------------------------------------------
+
+	async onOpen(): Promise<void> {
+		this.#buildDom()
+		if (this.bookPath) await this.#openBook(this.pendingCfi ?? undefined)
+		else this.#showEmpty('从左侧功能区的书本图标打开书架，或在文件列表中直接点击一本电子书。')
+	}
+
+	async onClose(): Promise<void> {
+		this.#flushSave()
+		this.#teardownBook()
+	}
+
+	getState(): Record<string, unknown> {
+		const base = super.getState() as Record<string, unknown>
+		return { ...base, bookPath: this.bookPath || undefined }
+	}
+
+	async setState(state: unknown, result?: ViewStateResult): Promise<void> {
+		const s = (state ?? {}) as { bookPath?: string; file?: string; cfi?: string }
+		const newCfi = s.cfi ?? null
+		// 点击文件列表中的电子书时，Obsidian 通过 state.file 传入路径
+		const incoming = s.bookPath ?? (s.file ? String(s.file) : '')
+		if (incoming) this.bookPath = incoming
+		if (newCfi) this.pendingCfi = newCfi
+		await super.setState(state, result ?? { history: false })
+		if (!this.readerEl) return // onOpen 尚未执行，onOpen 会带上 pendingCfi
+		if (!this.bookPath) return
+		if (!this.foliate || this.loadedPath !== this.bookPath) {
+			this.#teardownBook()
+			await this.#openBook(this.pendingCfi ?? undefined)
+			return
+		}
+		if (newCfi) void this.#jumpToCfi(newCfi)
+	}
+
+	// ------------------------------------------------------------------
+	// DOM 结构
+	// ------------------------------------------------------------------
+
+	#buildDom(): void {
+		const root = this.contentEl
+		root.empty()
+		root.addClass('grove-content')
+
+		const toolbar = root.createDiv('grove-toolbar')
+
+		const tocWrap = toolbar.createDiv('grove-toc')
+		this.tocSelect = tocWrap.createEl('select', { cls: 'dropdown grove-toc-select' })
+		this.tocSelect.createEl('option', { value: '', text: '目录' })
+		this.tocSelect.addEventListener('change', () => {
+			const href = this.tocSelect.value
+			if (href && this.foliate) void this.foliate.goTo(href)
+		})
+
+		const progress = toolbar.createDiv('grove-progress')
+		this.slider = progress.createEl('input', { attr: { type: 'range', min: '0', max: '1', step: '0.001' } })
+		this.slider.addEventListener('pointerdown', () => {
+			this.sliderActive = true
+		})
+		this.slider.addEventListener('pointerup', () => {
+			this.sliderActive = false
+		})
+		this.slider.addEventListener('input', () => {
+			const v = Number.parseFloat(this.slider.value)
+			if (Number.isFinite(v) && this.foliate) void this.foliate.goToFraction(v)
+		})
+		this.progressLabel = progress.createSpan('grove-progress-label')
+		this.progressLabel.setText('0%')
+
+		toolbar.createDiv('grove-sep')
+
+		for (const c of HIGHLIGHT_COLORS) {
+			const dot = toolbar.createEl('button', { cls: 'clickable-icon grove-color-dot', attr: { 'aria-label': `高亮（${c.name}）` } })
+			dot.style.backgroundColor = c.css
+			dot.addEventListener('click', () => void this.#createHighlightFromPending(c.key))
+		}
+
+		const commentBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '为划选文字添加评论' } })
+		setIcon(commentBtn, 'message-square-plus')
+		commentBtn.addEventListener('click', () => void this.#commentOnPending())
+
+		toolbar.createDiv('grove-flex-spacer')
+
+		const appearBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '阅读外观（字体 / 背景 / 行距）' } })
+		setIcon(appearBtn, 'type')
+		appearBtn.addEventListener('click', e => {
+			e.stopPropagation()
+			this.#toggleAppearancePanel()
+		})
+
+		const noteBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '生成 / 更新阅读笔记' } })
+		setIcon(noteBtn, 'file-text')
+		noteBtn.addEventListener('click', () => void this.plugin.generateNoteFor(this))
+
+		const sideBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '批注列表' } })
+		setIcon(sideBtn, 'list')
+		sideBtn.addEventListener('click', () => this.sidebarEl.classList.toggle('grove-hidden'))
+
+		// 外观面板（绝对定位于工具栏下方）
+		this.appearPanelEl = root.createDiv('grove-appear-panel grove-hidden')
+		this.registerDomEvent(this.contentEl, 'click', e => {
+			const t = e.target
+			if (this.appearPanelEl.classList.contains('grove-hidden')) return
+			if (t instanceof Element && !t.closest('.grove-appear-panel')) this.appearPanelEl.addClass('grove-hidden')
+		}, { capture: true })
+
+		const body = root.createDiv('grove-body')
+		this.readerEl = body.createDiv('grove-reader')
+		this.readerInnerEl = this.readerEl.createDiv('grove-reader-inner')
+
+		// 右下角悬浮翻页按钮
+		const pageBtns = this.readerEl.createDiv('grove-page-btns')
+		const prevBtn = pageBtns.createEl('button', { cls: 'clickable-icon grove-page-btn', attr: { 'aria-label': '上一页（←）' } })
+		setIcon(prevBtn, 'chevron-left')
+		prevBtn.addEventListener('click', () => this.foliate?.goLeft())
+		const nextBtn = pageBtns.createEl('button', { cls: 'clickable-icon grove-page-btn', attr: { 'aria-label': '下一页（→）' } })
+		setIcon(nextBtn, 'chevron-right')
+		nextBtn.addEventListener('click', () => this.foliate?.goRight())
+
+		this.sidebarEl = body.createDiv('grove-sidebar')
+		const sideHead = this.sidebarEl.createDiv('grove-sidebar-head')
+		this.annCountEl = sideHead.createSpan('grove-ann-count')
+		this.annCountEl.setText('0 个批注')
+
+		const controls = this.sidebarEl.createDiv('grove-sidebar-controls')
+		this.searchInput = controls.createEl('input', {
+			cls: 'grove-ann-search',
+			attr: { type: 'search', placeholder: '搜索批注（摘录 / 评论 / 章节）…' },
+		})
+		this.searchInput.addEventListener('input', () => {
+			this.sidebarQuery = this.searchInput.value.trim()
+			this.#renderSidebar()
+		})
+		const filterRow = controls.createDiv('grove-ann-filters')
+		for (const c of HIGHLIGHT_COLORS) {
+			const dot = filterRow.createEl('button', { cls: 'grove-filter-dot', attr: { 'aria-label': `只看${c.name}色批注`, title: `只看${c.name}色` } })
+			dot.style.backgroundColor = c.css
+			dot.addEventListener('click', () => {
+				this.sidebarColor = this.sidebarColor === c.key ? null : c.key
+				this.#renderSidebar()
+			})
+			this.filterDotEls.set(c.key, dot)
+		}
+		this.clearBtnEl = filterRow.createEl('button', { cls: 'grove-filter-clear grove-hidden', text: '清除筛选' })
+		this.clearBtnEl.addEventListener('click', () => {
+			this.sidebarQuery = ''
+			this.sidebarColor = null
+			this.searchInput.value = ''
+			this.#renderSidebar()
+		})
+
+		this.annListEl = this.sidebarEl.createDiv('grove-ann-list')
+
+		this.registerDomEvent(this.contentEl, 'keydown', (e: KeyboardEvent) => {
+			if (!PAGE_KEYS.has(e.key) || !this.foliate) return
+			if (e.key === 'ArrowLeft') this.foliate.goLeft()
+			else this.foliate.goRight()
+		})
+	}
+
+	#showEmpty(message: string): void {
+		this.readerInnerEl.empty()
+		this.readerInnerEl.createDiv('grove-empty').setText(message)
+	}
+
+	// ------------------------------------------------------------------
+	// 打开 / 关闭书籍
+	// ------------------------------------------------------------------
+
+	async #openBook(cfi?: string): Promise<void> {
+		const target = this.bookPath
+		this.pendingCfi = cfi ?? null
+		if (!target) return
+		this.readerInnerEl.empty()
+		this.readerInnerEl.createDiv('grove-empty').setText('正在打开…')
+		try {
+			const data = this.plugin.store.load(target)
+			this.data = data
+
+			const buf = await this.plugin.readBookBytes(target)
+			const name = basenameOf(target)
+			const foliate = document.createElement('foliate-view') as unknown as FoliateView
+			this.foliate = foliate
+			foliate.addEventListener('load', this.#onLoad as EventListener)
+			foliate.addEventListener('relocate', this.#onRelocate as EventListener)
+			foliate.addEventListener('draw-annotation', this.#onDrawAnnotation as EventListener)
+			foliate.addEventListener('create-overlay', this.#onCreateOverlay as EventListener)
+			foliate.addEventListener('show-annotation', this.#onShowAnnotation as EventListener)
+
+			await foliate.open(new File([buf], name))
+			this.loadedPath = target
+			this.readerInnerEl.empty()
+			this.readerInnerEl.appendChild(foliate)
+
+			const meta = foliate.book?.metadata
+			const shelfEntry = this.plugin.shelfCache.get(target)
+			// 书架上手动编辑过的书名/作者优先于内嵌元数据（笔记标题取 data.title）
+			this.bookTitle = shelfEntry?.title || formatLanguageMap(meta?.title) || name.replace(/\.[^.]+$/, '')
+			if (!data.title) {
+				data.title = this.bookTitle
+				data.author = shelfEntry?.author || formatAuthor(meta?.author)
+				this.#scheduleSave(true)
+			}
+			this.#updateHeaderTitle()
+			this.#applyAppearance()
+			this.#buildToc(foliate.book?.toc ?? [])
+			await foliate.init({ lastLocation: data.lastLocation?.cfi || undefined })
+			if (this.pendingCfi) {
+				const c = this.pendingCfi
+				this.pendingCfi = null
+				await this.#jumpToCfi(c)
+			}
+			this.#resetSidebarFilters()
+			this.#renderSidebar()
+			this.sidebarEl.classList.toggle('grove-hidden', !this.plugin.settings.openSidebarWithBook)
+		} catch (e) {
+			console.error('[Grove Reader] 打开书籍失败', e)
+			this.#showEmpty(`打开失败：${e instanceof Error ? e.message : String(e)}`)
+			this.foliate = null
+		}
+	}
+
+	#teardownBook(): void {
+		this.#hidePopup()
+		if (this.saveTimer != null) {
+			window.clearTimeout(this.saveTimer)
+			this.saveTimer = null
+		}
+		const foliate = this.foliate
+		this.foliate = null
+		if (foliate) {
+			try {
+				foliate.close()
+			} catch {
+				// ignore
+			}
+			foliate.remove()
+		}
+	}
+
+	#updateHeaderTitle(): void {
+		const header = this.containerEl.children[0] as HTMLElement | undefined
+		const el = header?.querySelector('.view-header-title')
+		if (el) el.textContent = this.bookTitle || 'Grove Reader'
+	}
+
+	// ------------------------------------------------------------------
+	// 阅读外观（背景 / 字体 / 排版）
+	// ------------------------------------------------------------------
+
+	applyAppearance(): void {
+		this.#applyAppearance()
+		this.#syncAppearanceControls()
+	}
+
+	#applyAppearance(): void {
+		const a = this.plugin.settings.appearance
+		const renderer = this.foliate?.renderer
+		if (renderer) {
+			try {
+				// foliate 将属性值原样用作 CSS 长度，必须带 px 单位，否则整条布局声明失效
+				renderer.setAttribute('margin', `${a.pageMargin}px`)
+				renderer.setAttribute('max-inline-size', `${a.maxInlineSize}px`)
+			} catch {
+				// ignore
+			}
+		}
+		if (!renderer?.setStyles) return
+		const css = this.#appearanceCss(a)
+		try {
+			renderer.setStyles(css)
+		} catch (e) {
+			console.error('[Grove Reader] 应用外观失败', e)
+		}
+	}
+
+	#appearanceCss(a: ReaderAppearance): string {
+		let bg: string
+		let fg: string
+		let dark: boolean
+		if (a.followTheme) {
+			const style = getComputedStyle(document.body)
+			dark = document.body.classList.contains('theme-dark')
+			bg = style.getPropertyValue('--background-primary').trim() || (dark ? '#1e1e20' : '#ffffff')
+			fg = style.getPropertyValue('--text-normal').trim() || (dark ? '#dcddde' : '#2b2b2b')
+		} else {
+			const preset = BACKGROUND_PRESETS.find(p => p.key === a.bgKey)
+			bg = a.bgKey === 'custom' ? a.customBg : (preset?.bg ?? '#ffffff')
+			fg = a.bgKey === 'custom' ? contrastFg(bg) : (preset?.fg ?? contrastFg(bg))
+			dark = isDarkColor(bg)
+		}
+		const themeFont = getComputedStyle(document.body).getPropertyValue('--font-text').trim()
+		const font = a.fontFamily || themeFont || 'serif'
+		const rules = [
+			`html { color-scheme: ${dark ? 'dark' : 'light'}; }`,
+			`body { color: ${fg}; background-color: ${bg}; font-family: ${font}; font-size: ${a.fontSize}% !important; }`,
+			`p, li, blockquote, dd { line-height: ${a.lineHeight} !important; }`,
+		]
+		if (a.paragraphSpacing > 0) {
+			rules.push(`p { margin-top: ${a.paragraphSpacing}em !important; margin-bottom: ${a.paragraphSpacing}em !important; }`)
+		}
+		rules.push('pre, code { white-space: pre-wrap; }')
+		return rules.join('\n')
+	}
+
+	#toggleAppearancePanel(): void {
+		const hidden = this.appearPanelEl.classList.contains('grove-hidden')
+		if (hidden) {
+			this.#renderAppearancePanel()
+			this.appearPanelEl.removeClass('grove-hidden')
+		} else {
+			this.appearPanelEl.addClass('grove-hidden')
+		}
+	}
+
+	#renderAppearancePanel(): void {
+		const a = this.plugin.settings.appearance
+		const panel = this.appearPanelEl
+		panel.empty()
+
+		// —— 背景 ——
+		const bgRow = panel.createDiv('grove-appear-row')
+		bgRow.createSpan('grove-appear-label').setText('背景')
+		const swatches = bgRow.createDiv('grove-appear-swatches')
+		const themeChip = swatches.createEl('button', { cls: 'grove-appear-chip' })
+		themeChip.setText('跟随主题')
+		themeChip.addEventListener('click', () => this.#patchAppearance({ followTheme: true }))
+		if (a.followTheme) themeChip.addClass('is-active')
+
+		for (const p of BACKGROUND_PRESETS) {
+			const sw = swatches.createEl('button', { cls: 'grove-appear-swatch', attr: { 'aria-label': p.name, title: p.name } })
+			sw.style.backgroundColor = p.bg
+			if (!a.followTheme && a.bgKey === p.key) sw.addClass('is-active')
+			sw.addEventListener('click', () => this.#patchAppearance({ followTheme: false, bgKey: p.key }))
+		}
+		const customWrap = swatches.createDiv('grove-appear-swatch grove-appear-custom')
+		customWrap.style.backgroundColor = a.customBg
+		if (!a.followTheme && a.bgKey === 'custom') customWrap.addClass('is-active')
+		const colorInput = customWrap.createEl('input', { attr: { type: 'color', title: '自定义背景色' } })
+		colorInput.value = /^#[0-9a-fA-F]{6}$/.test(a.customBg) ? a.customBg : '#ffffff'
+		colorInput.addEventListener('input', () => {
+			this.#patchAppearance({ followTheme: false, bgKey: 'custom', customBg: colorInput.value })
+			customWrap.style.backgroundColor = colorInput.value
+		})
+
+		// —— 字体 ——
+		const fontRow = panel.createDiv('grove-appear-row')
+		fontRow.createSpan('grove-appear-label').setText('字体')
+		const fontCol = fontRow.createDiv('grove-appear-col')
+		const fontSelect = fontCol.createEl('select', { cls: 'dropdown' })
+		for (const f of FONT_PRESETS) fontSelect.createEl('option', { value: f.value, text: f.label })
+		const presetValue = FONT_PRESETS.some(f => f.value === a.fontFamily) ? a.fontFamily : ''
+		fontSelect.value = presetValue
+		const customFont = fontCol.createEl('input', { attr: { type: 'text', placeholder: '自定义字体名（可留空），如 霞鹜文楷' } })
+		if (!presetValue && a.fontFamily) customFont.value = a.fontFamily.replace(/["']/g, '')
+		const themeFont = getComputedStyle(document.body).getPropertyValue('--font-text').trim()
+		const preview = fontCol.createDiv('grove-font-preview')
+		preview.setText('永 Aa 阅读字体预览 123')
+		preview.style.fontFamily = a.fontFamily || themeFont || 'serif'
+		const updatePreview = (family: string): void => {
+			preview.style.fontFamily = family || themeFont || 'serif'
+		}
+		fontSelect.addEventListener('change', () => {
+			updatePreview(fontSelect.value)
+			this.#patchAppearance({ fontFamily: fontSelect.value })
+		})
+		customFont.addEventListener('change', () => {
+			const raw = customFont.value.trim()
+			const family = raw ? raw.split(',').map(s => `"${s.trim()}"`).join(', ') : ''
+			updatePreview(family)
+			this.#patchAppearance({ fontFamily: family })
+		})
+
+		// —— 滑杆 ——
+		const sliders: Array<{ label: string; key: keyof ReaderAppearance; min: number; max: number; step: number; fmt: (v: number) => string }> = [
+			{ label: '字号', key: 'fontSize', min: 80, max: 180, step: 5, fmt: v => `${Math.round(v)}%` },
+			{ label: '行距', key: 'lineHeight', min: 1.2, max: 2.4, step: 0.05, fmt: v => v.toFixed(2) },
+			{ label: '上下留白', key: 'pageMargin', min: 0, max: 200, step: 4, fmt: v => `${Math.round(v)}px` },
+			{ label: '段间距', key: 'paragraphSpacing', min: 0, max: 2, step: 0.1, fmt: v => (v <= 0 ? '跟随书籍' : `${v.toFixed(1)}em`) },
+			{ label: '版心宽', key: 'maxInlineSize', min: 480, max: 1200, step: 20, fmt: v => `${Math.round(v)}px` },
+		]
+		for (const s of sliders) {
+			const row = panel.createDiv('grove-appear-row')
+			row.createSpan('grove-appear-label').setText(s.label)
+			const wrap = row.createDiv('grove-appear-slider')
+			const range = wrap.createEl('input', {
+				attr: { type: 'range', min: String(s.min), max: String(s.max), step: String(s.step) },
+			})
+			const valueEl = wrap.createSpan('grove-appear-value')
+			const current = Number(a[s.key]) || s.min
+			range.value = String(current)
+			valueEl.setText(s.fmt(current))
+			range.addEventListener('input', () => {
+				const v = Number.parseFloat(range.value)
+				valueEl.setText(s.fmt(v))
+				this.#patchAppearance({ [s.key]: v } as Partial<ReaderAppearance>)
+			})
+		}
+
+		const foot = panel.createDiv('grove-appear-foot')
+		const reset = foot.createEl('button', { text: '恢复默认' })
+		reset.addEventListener('click', () => {
+			Object.assign(this.plugin.settings.appearance, DEFAULT_APPEARANCE)
+			this.#applyAppearance()
+			void this.plugin.persistSettingsNow()
+			this.#renderAppearancePanel()
+		})
+	}
+
+	#patchAppearance(patch: Partial<ReaderAppearance>): void {
+		Object.assign(this.plugin.settings.appearance, patch)
+		this.#applyAppearance()
+		this.plugin.persistSettingsSoon()
+		// 背景相关变化需要刷新选中态
+		if ('followTheme' in patch || 'bgKey' in patch) this.#renderAppearancePanel()
+	}
+
+	#syncAppearanceControls(): void {
+		if (!this.appearPanelEl.classList.contains('grove-hidden')) this.#renderAppearancePanel()
+	}
+
+	// ------------------------------------------------------------------
+	// foliate 事件
+	// ------------------------------------------------------------------
+
+	#onLoad = (e: Event): void => {
+		const { doc, index } = (e as CustomEvent<{ doc: Document; index: number }>).detail
+		doc.addEventListener('pointerup', (ev: PointerEvent) => {
+			const t = ev.target
+			if (t instanceof Element && t.closest('.grove-sel-popup')) return
+			window.setTimeout(() => this.#captureSelection(doc, index), 0)
+		})
+		doc.addEventListener('keydown', (ke: KeyboardEvent) => {
+			if (!PAGE_KEYS.has(ke.key)) return
+			const sel = doc.defaultView?.getSelection()
+			if (sel && !sel.isCollapsed) return // 正在用键盘选字时不翻页
+			if (ke.key === 'ArrowLeft') this.foliate?.goLeft()
+			else if (ke.key === 'ArrowRight') this.foliate?.goRight()
+		})
+	}
+
+	#onRelocate = (e: Event): void => {
+		const d = (e as CustomEvent<RelocateDetail>).detail
+		const percent = Math.round((d.fraction ?? 0) * 100)
+		this.progressLabel.setText(
+			`${percent}%${d.pageItem ? ` · 第 ${d.pageItem.label} 页` : d.location ? ` · Loc ${d.location.current}` : ''}`,
+		)
+		if (!this.sliderActive) this.slider.value = String(d.fraction ?? 0)
+		if (d.tocItem?.href) {
+			const match = Array.from(this.tocSelect.options).find(o => o.value === d.tocItem!.href)
+			if (match) this.tocSelect.value = d.tocItem.href
+		}
+		if (d.cfi && d.cfi !== this.lastSavedCfi && this.data) {
+			this.lastSavedCfi = d.cfi
+			this.data.lastLocation = {
+				cfi: d.cfi,
+				index: d.section?.current ?? 0,
+				fraction: d.fraction,
+				updatedAt: Date.now(),
+			}
+			this.#scheduleSave()
+		}
+	}
+
+	#onDrawAnnotation = (e: Event): void => {
+		const { draw, annotation } = (e as CustomEvent<{
+			draw: (func: typeof Overlayer.highlight, options?: Record<string, unknown>) => void
+			annotation: { color?: string }
+		}>).detail
+		draw(Overlayer.highlight, { color: annotation.color ?? '#ffe066' })
+	}
+
+	#onCreateOverlay = (e: Event): void => {
+		const { index } = (e as CustomEvent<{ index: number }>).detail
+		for (const a of this.data?.annotations ?? []) {
+			if (this.#sectionIndexOf(a) === index) void this.#drawAnnotation(a)
+		}
+	}
+
+	#onShowAnnotation = (e: Event): void => {
+		const detail = (e as CustomEvent<{ value: string; index: number; range: Range }>).detail
+		const a = this.data?.annotations.find(x => x.cfi === detail.value)
+		if (!a) return
+		this.#revealInSidebar(a)
+		const menu = new Menu()
+		menu.addItem(item => item.setTitle('编辑评论').setIcon('message-square').onClick(() => this.#editComment(a)))
+		menu.addItem(item => {
+			// setSubmenu 运行时存在但未包含在官方类型定义中
+			const sub = (item.setTitle('更改颜色').setIcon('palette') as unknown as { setSubmenu(): Menu }).setSubmenu()
+			for (const c of HIGHLIGHT_COLORS) {
+				sub.addItem((ci: MenuItem) => ci.setTitle(c.name).onClick(() => void this.#changeColor(a, c.key)))
+			}
+		})
+		menu.addSeparator()
+		menu.addItem(item =>
+			item.setTitle('复制原文').setIcon('copy').onClick(() => {
+				void navigator.clipboard.writeText(a.text)
+				new Notice('Grove Reader：已复制')
+			}))
+		menu.addItem(item => item.setTitle('删除批注').setIcon('trash-2').onClick(() => this.#confirmDelete(a)))
+		menu.showAtPosition(this.#hostCoords(detail.range))
+	}
+
+	// ------------------------------------------------------------------
+	// 划选 → 高亮 / 评论
+	// ------------------------------------------------------------------
+
+	#captureSelection(doc: Document, index: number): void {
+		if (!this.foliate) return
+		const sel = doc.defaultView?.getSelection()
+		if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+			this.#clearPending()
+			return
+		}
+		const range = sel.getRangeAt(0)
+		const text = sel.toString().replace(/\r/g, '')
+		if (!text.trim()) {
+			this.#clearPending()
+			return
+		}
+		let cfi: string
+		try {
+			cfi = this.foliate.getCFI(index, range)
+		} catch {
+			return
+		}
+		this.pending = { cfi, text: text.trim(), index }
+		this.#showPopup(doc, range)
+	}
+
+	#clearPending(): void {
+		this.pending = null
+		this.#hidePopup()
+	}
+
+	#showPopup(doc: Document, range: Range): void {
+		this.#hidePopup()
+		const dark = document.body.classList.contains('theme-dark')
+		const popup = doc.createElement('div')
+		popup.className = 'grove-sel-popup'
+		popup.style.cssText = [
+			'position:fixed',
+			'z-index:2147483000',
+			'display:flex',
+			'gap:6px',
+			'align-items:center',
+			'padding:5px 8px',
+			'border-radius:8px',
+			'box-shadow:0 4px 14px rgba(0,0,0,.25)',
+			`background:${dark ? '#26262b' : '#ffffff'}`,
+			`border:1px solid ${dark ? '#3f3f46' : '#d0d0d6'}`,
+		].join(';')
+		popup.addEventListener('mousedown', e => e.preventDefault())
+
+		for (const c of HIGHLIGHT_COLORS) {
+			const dot = doc.createElement('button')
+			dot.title = `高亮（${c.name}）`
+			dot.style.cssText = `width:18px;height:18px;border-radius:50%;border:1px solid rgba(0,0,0,.25);cursor:pointer;background:${c.css};padding:0;flex:none;`
+			dot.addEventListener('click', e => {
+				e.preventDefault()
+				void this.#createHighlightFromPending(c.key)
+			})
+			popup.appendChild(dot)
+		}
+
+		const commentBtn = doc.createElement('button')
+		commentBtn.textContent = '评论'
+		commentBtn.style.cssText = `border:none;cursor:pointer;padding:3px 8px;border-radius:6px;font-size:12px;background:${dark ? '#3a3a42' : '#ececf0'};color:${dark ? '#dcddde' : '#1f1f23'};`
+		commentBtn.addEventListener('click', e => {
+			e.preventDefault()
+			void this.#commentOnPending()
+		})
+		popup.appendChild(commentBtn)
+
+		const copyBtn = doc.createElement('button')
+		copyBtn.textContent = '复制'
+		copyBtn.style.cssText = commentBtn.style.cssText
+		copyBtn.addEventListener('click', e => {
+			e.preventDefault()
+			if (this.pending) void navigator.clipboard.writeText(this.pending.text).then(() => new Notice('Grove Reader：已复制'))
+			this.#clearPending()
+		})
+		popup.appendChild(copyBtn)
+
+		doc.body.appendChild(popup)
+		this.popup = popup
+
+		const rect = range.getBoundingClientRect()
+		const vw = doc.defaultView?.innerWidth ?? rect.left + 320
+		const vh = doc.defaultView?.innerHeight ?? rect.bottom + 320
+		let left = rect.left + rect.width / 2 - POPUP_WIDTH / 2
+		left = Math.max(8, Math.min(left, vw - POPUP_WIDTH - 8))
+		let top = rect.bottom + 8
+		if (top + 50 > vh) top = Math.max(8, rect.top - 50)
+		popup.style.left = `${Math.round(left)}px`
+		popup.style.top = `${Math.round(top)}px`
+	}
+
+	#hidePopup(): void {
+		this.popup?.remove()
+		this.popup = null
+	}
+
+	async #createHighlightFromPending(color: string): Promise<void> {
+		const pending = this.pending
+		if (!pending) {
+			new Notice('Grove Reader：请先在正文中划选文字')
+			return
+		}
+		if (!this.foliate || !this.data) return
+		const now = Date.now()
+		let a = this.data.annotations.find(x => x.cfi === pending.cfi)
+		if (a) {
+			a.color = color
+			a.updatedAt = now
+		} else {
+			a = {
+				id: randomId(),
+				cfi: pending.cfi,
+				text: pending.text,
+				color,
+				note: '',
+				createdAt: now,
+				updatedAt: now,
+			}
+			this.data.annotations.push(a)
+		}
+		await this.#drawAnnotation(a)
+		this.#clearPending()
+		try {
+			this.foliate.deselect()
+		} catch {
+			// ignore
+		}
+		this.#scheduleSave(true)
+		this.#renderSidebar()
+	}
+
+	async #commentOnPending(): Promise<void> {
+		const pending = this.pending
+		if (!pending) {
+			new Notice('Grove Reader：请先在正文中划选文字')
+			return
+		}
+		if (!this.data) return
+		let a = this.data.annotations.find(x => x.cfi === pending.cfi)
+		if (!a) {
+			const now = Date.now()
+			a = {
+				id: randomId(),
+				cfi: pending.cfi,
+				text: pending.text,
+				color: 'yellow',
+				note: '',
+				createdAt: now,
+				updatedAt: now,
+			}
+			this.data.annotations.push(a)
+			await this.#drawAnnotation(a)
+			this.#clearPending()
+			try {
+				this.foliate?.deselect()
+			} catch {
+				// ignore
+			}
+		}
+		this.#editComment(a)
+	}
+
+	async #drawAnnotation(a: Annotation): Promise<void> {
+		if (!this.foliate) return
+		try {
+			const result = await this.foliate.addAnnotation({ ...a, value: a.cfi })
+			if (result) {
+				a.sectionIndex = result.index
+				if (result.label) a.chapter = result.label
+			}
+		} catch (err) {
+			console.error('[Grove Reader] 绘制批注失败', err)
+		}
+	}
+
+	#sectionIndexOf(a: Annotation): number | null {
+		if (typeof a.sectionIndex === 'number') return a.sectionIndex
+		try {
+			return this.foliate?.resolveNavigation(a.cfi)?.index ?? null
+		} catch {
+			return null
+		}
+	}
+
+	#hostCoords(range: Range): { x: number; y: number } {
+		const host = this.readerEl.getBoundingClientRect()
+		try {
+			const r = range.getBoundingClientRect()
+			return {
+				x: Math.round(host.left + r.left + Math.min(r.width, 200) / 2),
+				y: Math.round(host.top + r.bottom + 6),
+			}
+		} catch {
+			return { x: Math.round(host.left + host.width / 2), y: Math.round(host.top + host.height / 2) }
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// 批注操作
+	// ------------------------------------------------------------------
+
+	#editComment(a: Annotation): void {
+		new CommentModal(this.app, a.note ?? '', note => {
+			a.note = note
+			a.updatedAt = Date.now()
+			this.#scheduleSave(true)
+			this.#renderSidebar()
+		}).open()
+	}
+
+	async #changeColor(a: Annotation, color: string): Promise<void> {
+		a.color = color
+		a.updatedAt = Date.now()
+		await this.#drawAnnotation(a)
+		this.#scheduleSave(true)
+		this.#renderSidebar()
+	}
+
+	#confirmDelete(a: Annotation): void {
+		new ConfirmModal(this.app, `删除这条批注？「${truncate(a.text.replace(/\s+/g, ' ').trim(), 40)}」`, () => void this.#deleteAnnotation(a)).open()
+	}
+
+	async #deleteAnnotation(a: Annotation): Promise<void> {
+		const arr = this.data?.annotations
+		if (!arr) return
+		const i = arr.indexOf(a)
+		if (i >= 0) arr.splice(i, 1)
+		try {
+			await this.foliate?.deleteAnnotation({ ...a, value: a.cfi })
+		} catch {
+			// ignore
+		}
+		this.#scheduleSave(true)
+		this.#renderSidebar()
+		new Notice('Grove Reader：批注已删除（历史备份仍保留在插件数据目录中）')
+	}
+
+	// ------------------------------------------------------------------
+	// 目录 / 进度 / 侧栏
+	// ------------------------------------------------------------------
+
+	#buildToc(toc: FoliateTOCItem[]): void {
+		this.tocSelect.empty()
+		this.tocSelect.createEl('option', { value: '', text: '目录' })
+		const add = (items: FoliateTOCItem[], depth: number): void => {
+			for (const item of items ?? []) {
+				if (!item?.href) continue
+				const label = `${'\u00a0\u00a0'.repeat(depth)}${item.label ?? '（无标题）'}`
+				this.tocSelect.createEl('option', { value: item.href, text: truncate(label, 60) })
+				if (item.subitems?.length) add(item.subitems, depth + 1)
+			}
+		}
+		add(toc, 0)
+		this.tocSelect.disabled = this.tocSelect.options.length <= 1
+	}
+
+	#renderSidebar(): void {
+		const all = [...(this.data?.annotations ?? [])].sort((x, y) => {
+			const ix = x.sectionIndex ?? Number.MAX_SAFE_INTEGER
+			const iy = y.sectionIndex ?? Number.MAX_SAFE_INTEGER
+			if (ix !== iy) return ix - iy
+			return x.cfi < y.cfi ? -1 : x.cfi > y.cfi ? 1 : 0
+		})
+		const q = this.sidebarQuery.toLowerCase()
+		const filtering = !!q || !!this.sidebarColor
+		const filtered = all.filter(a => {
+			if (this.sidebarColor && a.color !== this.sidebarColor) return false
+			if (!q) return true
+			return `${a.text}\n${a.note ?? ''}\n${a.chapter ?? ''}`.toLowerCase().includes(q)
+		})
+
+		this.annCountEl.setText(filtering ? `${filtered.length} / ${all.length} 个批注` : `${all.length} 个批注`)
+		this.clearBtnEl.toggleClass('grove-hidden', !filtering)
+		for (const [key, dot] of this.filterDotEls) dot.toggleClass('is-active', this.sidebarColor === key)
+
+		this.annListEl.empty()
+		this.annItemEls.clear()
+		if (!all.length) {
+			this.annListEl.createDiv('grove-ann-empty').setText('暂无批注。在正文中划选文字即可添加高亮与评论。')
+			return
+		}
+		if (!filtered.length) {
+			this.annListEl.createDiv('grove-ann-empty').setText('没有匹配的批注。')
+			return
+		}
+
+		if (this.annCollapsed === null) this.#loadCollapsedState()
+		const collapsedSet: Set<string> = this.annCollapsed ?? new Set<string>()
+		const groups = new Map<string, Annotation[]>()
+		for (const a of filtered) {
+			const key = (a.chapter ?? '').trim() || '未命名章节'
+			const arr = groups.get(key)
+			if (arr) arr.push(a)
+			else groups.set(key, [a])
+		}
+		for (const [chapter, items] of groups) {
+			const group = this.annListEl.createDiv('grove-ann-group')
+			const head = group.createDiv('grove-ann-group-head')
+			const chev = head.createSpan('grove-ann-group-chev')
+			setIcon(chev, 'chevron-down')
+			head.createSpan('grove-ann-group-title').setText(chapter)
+			head.createSpan('grove-ann-group-count').setText(String(items.length))
+			const bodyEl = group.createDiv('grove-ann-group-body')
+			const collapsed = !filtering && collapsedSet.has(chapter)
+			if (collapsed) {
+				bodyEl.addClass('grove-hidden')
+				setIcon(chev, 'chevron-right')
+			}
+			head.addEventListener('click', () => {
+				const hidden = bodyEl.hasClass('grove-hidden')
+				if (hidden) {
+					bodyEl.removeClass('grove-hidden')
+					setIcon(chev, 'chevron-down')
+					collapsedSet.delete(chapter)
+				} else {
+					bodyEl.addClass('grove-hidden')
+					setIcon(chev, 'chevron-right')
+					collapsedSet.add(chapter)
+				}
+				this.#saveCollapsedState()
+			})
+			for (const a of items) bodyEl.appendChild(this.#renderAnnItem(a))
+		}
+	}
+
+	#renderAnnItem(a: Annotation): HTMLElement {
+		const item = document.createElement('div')
+		item.addClass('grove-ann')
+		this.annItemEls.set(a.id, item)
+		const head = item.createDiv('grove-ann-head')
+		head.createSpan('grove-ann-dot').style.backgroundColor = colorCss(a.color)
+		head.createSpan('grove-ann-chapter').setText(a.chapter || '')
+		const text = item.createDiv('grove-ann-text')
+		text.setText(truncate(a.text.trim(), 160))
+		text.addEventListener('click', () => void this.#jumpToCfi(a.cfi))
+		if (a.note) item.createDiv('grove-ann-note').setText(truncate(a.note.trim(), 120))
+		const actions = item.createDiv('grove-ann-actions')
+
+		const jump = actions.createEl('button', { cls: 'clickable-icon grove-mini-btn', attr: { 'aria-label': '跳转到原文' } })
+		setIcon(jump, 'arrow-up-left')
+		jump.addEventListener('click', () => void this.#jumpToCfi(a.cfi))
+
+		const edit = actions.createEl('button', { cls: 'clickable-icon grove-mini-btn', attr: { 'aria-label': '编辑评论' } })
+		setIcon(edit, 'message-square')
+		edit.addEventListener('click', () => this.#editComment(a))
+
+		const del = actions.createEl('button', { cls: 'clickable-icon grove-mini-btn', attr: { 'aria-label': '删除批注' } })
+		setIcon(del, 'trash-2')
+		del.addEventListener('click', () => this.#confirmDelete(a))
+		return item
+	}
+
+	#collapsedKey(): string {
+		return `grove-ann-collapsed:${this.plugin.store.bookId(this.bookPath)}`
+	}
+
+	/** 正文点击批注后：展开侧栏、清掉挡住该批注的筛选/折叠，滚动定位并闪烁提示 */
+	#revealInSidebar(a: Annotation): void {
+		this.sidebarEl.classList.remove('grove-hidden')
+		const chapter = (a.chapter ?? '').trim() || '未命名章节'
+		const q = this.sidebarQuery.toLowerCase()
+		const filteredOut =
+			(this.sidebarColor && a.color !== this.sidebarColor) ||
+			(!!q && !`${a.text}\n${a.note ?? ''}\n${a.chapter ?? ''}`.toLowerCase().includes(q))
+		const collapsed = this.annCollapsed?.has(chapter) ?? false
+		if (filteredOut) {
+			this.sidebarQuery = ''
+			this.sidebarColor = null
+			if (this.searchInput) this.searchInput.value = ''
+		}
+		if (collapsed && this.annCollapsed) {
+			this.annCollapsed.delete(chapter)
+			this.#saveCollapsedState()
+		}
+		if (filteredOut || collapsed) this.#renderSidebar()
+		const el = this.annItemEls.get(a.id)
+		if (!el) return
+		el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+		if (this.revealTimer != null) window.clearTimeout(this.revealTimer)
+		this.revealTimer = window.setTimeout(() => {
+			this.revealTimer = null
+			el.removeClass('grove-ann-revealed')
+		}, 2000)
+		el.addClass('grove-ann-revealed')
+	}
+
+	#loadCollapsedState(): void {
+		try {
+			const raw = localStorage.getItem(this.#collapsedKey())
+			this.annCollapsed = new Set<string>(raw ? (JSON.parse(raw) as string[]) : [])
+		} catch {
+			this.annCollapsed = new Set<string>()
+		}
+	}
+
+	#saveCollapsedState(): void {
+		if (!this.annCollapsed) return
+		try {
+			localStorage.setItem(this.#collapsedKey(), JSON.stringify([...this.annCollapsed]))
+		} catch {
+			// ignore
+		}
+	}
+
+	#resetSidebarFilters(): void {
+		this.sidebarQuery = ''
+		this.sidebarColor = null
+		this.annCollapsed = null
+		if (this.searchInput) this.searchInput.value = ''
+	}
+
+	// ------------------------------------------------------------------
+	// 跳转与持久化
+	// ------------------------------------------------------------------
+
+	async #jumpToCfi(cfi: string): Promise<void> {
+		if (!this.foliate) return
+		try {
+			await this.foliate.select(cfi)
+		} catch {
+			try {
+				await this.foliate.goTo(cfi)
+			} catch (err) {
+				console.error('[Grove Reader] 跳转失败', err)
+			}
+		}
+	}
+
+	jumpTo(cfi: string): void {
+		void this.#jumpToCfi(cfi)
+	}
+
+	/** 书架手动编辑信息后同步：更新内存数据并落盘，标题即时生效 */
+	syncMeta(title: string, author: string): void {
+		if (title) {
+			this.bookTitle = title
+			this.#updateHeaderTitle()
+		}
+		if (!this.data) return
+		this.data.title = title || this.data.title
+		if (author) this.data.author = author
+		this.#scheduleSave(true)
+	}
+
+	#scheduleSave(immediate = false): void {
+		if (!this.data) return
+		if (this.saveTimer != null) window.clearTimeout(this.saveTimer)
+		if (immediate) {
+			this.plugin.store.save(this.data)
+			// 批注/元数据变更走即时保存，顺带防抖刷新已存在的阅读笔记
+			this.plugin.scheduleNoteRefresh(this)
+			return
+		}
+		this.saveTimer = window.setTimeout(() => {
+			this.saveTimer = null
+			if (this.data) this.plugin.store.save(this.data)
+		}, 1500)
+	}
+
+	#flushSave(): void {
+		if (this.saveTimer != null) {
+			window.clearTimeout(this.saveTimer)
+			this.saveTimer = null
+		}
+		if (this.data) this.plugin.store.save(this.data)
+	}
+
+	// ------------------------------------------------------------------
+	// 命令入口（供 main.ts 调用）
+	// ------------------------------------------------------------------
+
+	nextPage(): void {
+		this.foliate?.goRight()
+	}
+
+	prevPage(): void {
+		this.foliate?.goLeft()
+	}
+
+	highlight(color: string): void {
+		void this.#createHighlightFromPending(color)
+	}
+
+	comment(): void {
+		void this.#commentOnPending()
+	}
+}
