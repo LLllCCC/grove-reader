@@ -3,7 +3,7 @@ import path from 'node:path'
 import os from 'node:os'
 import assert from 'node:assert'
 import { BookStore } from '../src/store'
-import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, renderNoteTemplate } from '../src/notes'
+import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, NOTE_BEGIN, NOTE_END, renderNoteTemplate } from '../src/notes'
 import { BookData } from '../src/types'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-data-'))
@@ -135,5 +135,42 @@ assert.ok(withTpl.includes('- 1 高亮一'))
 const updatedTpl = buildNote({ ...data, annotations: [data.annotations[0]] }, 'id123', withTpl, custom)
 assert.ok(updatedTpl.includes('- 1 高亮一'))
 assert.ok(!updatedTpl.includes('高亮二'))
+
+// 10. GROVE:END 标记丢失 → BEGIN 之后整体视为生成区，反复生成不再无限追加
+const brokenEnd = `手写内容\n\n${NOTE_BEGIN}\n\n旧生成内容（END 标记被误删）`
+const fixed1 = buildNote(data, 'id123', brokenEnd)
+const fixed2 = buildNote(data, 'id123', fixed1)
+assert.ok(fixed1.startsWith('手写内容'), 'END 丢失时 BEGIN 前的手写内容应保留')
+assert.ok(!fixed1.includes('旧生成内容'), '损坏的生成区应被覆盖')
+assert.equal((fixed2.match(new RegExp(NOTE_BEGIN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) ?? []).length, 1,
+	'END 丢失后反复生成不得累积多个生成区')
+assert.equal((fixed2.match(new RegExp(NOTE_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) ?? []).length, 1)
+
+// 11. maxBackups = 0：完全不写备份
+const tmp0 = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-nobackup-'))
+const store0 = new BookStore(tmp0, 0)
+const p0 = 'Zero/备份关闭.epub'
+const s0 = store0.load(p0)
+s0.title = 't'
+store0.save(s0)
+store0.save(store0.load(p0))
+const backups0 = path.join(tmp0, 'data', 'backups', store0.bookId(p0))
+assert.ok(!fs.existsSync(backups0) || fs.readdirSync(backups0).length === 0, 'maxBackups=0 不应留下备份')
+
+// 12. 陈旧 .tmp 清理：超过一天的删，一天内的留
+const tmpT = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-tmp-'))
+const storeT = new BookStore(tmpT, 2)
+const pT = 'Tmp/清理测试.epub'
+storeT.load(pT)
+const booksDirT = path.join(tmpT, 'data', 'books')
+const staleTmp = path.join(booksDirT, 'deadbeef.json.tmp')
+fs.writeFileSync(staleTmp, '{}', 'utf-8')
+const old = new Date(Date.now() - 25 * 60 * 60 * 1000)
+fs.utimesSync(staleTmp, old, old)
+const freshTmp = path.join(booksDirT, 'alive.json.tmp')
+fs.writeFileSync(freshTmp, '{}', 'utf-8')
+storeT.load(pT)
+assert.ok(!fs.existsSync(staleTmp), '超过一天的 .tmp 应被清理')
+assert.ok(fs.existsSync(freshTmp), '一天内的 .tmp 不应被误删')
 
 console.log('SMOKE OK')
