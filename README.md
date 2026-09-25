@@ -50,6 +50,8 @@ npm run build     # 类型检查 + 打包 main.js
 npm run smoke     # 数据层冒烟测试（无需 Obsidian）
 npm run sample    # 生成示例 EPUB
 npm run dev       # watch 模式
+npm run foliate:check  # 校验内置 foliate-js 与上游基准的差异（见 lib/foliate-js/UPSTREAM.md）
+npm run obsidian:eval "<js>"  # 在运行中的 Obsidian 里执行 JS（需以 --remote-debugging-port=9222 启动）
 ```
 
 ## 已知限制

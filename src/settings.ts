@@ -100,6 +100,17 @@ export class GroveSettingTab extends PluginSettingTab {
 			.addButton(button =>
 				button.setButtonText('立即备份').onClick(() => void this.plugin.exportDataBackup()))
 		new Setting(containerEl)
+			.setName('备份额外保存到（可选）')
+			.setDesc('填一个本机其他盘或优盘的路径（如 G:\\Grove备份），「立即备份」时会额外复制一份过去——同一块盘上的备份防不了磁盘故障。留空则只备份到库内')
+			.addText(text =>
+				text
+					.setPlaceholder('例如 G:\\Grove备份')
+					.setValue(this.plugin.settings.backupTargetDir ?? '')
+					.onChange(async value => {
+						this.plugin.settings.backupTargetDir = value.trim()
+						await this.plugin.saveSettings()
+					}))
+		new Setting(containerEl)
 			.setName('最大备份数')
 			.setDesc('每本书的批注数据最多保留多少份自动备份（每 10 分钟最多写一份）')
 			.addText(text =>

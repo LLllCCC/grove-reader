@@ -146,6 +146,8 @@ export interface GroveSettings {
 	openSidebarWithBook: boolean
 	/** 新增/修改批注时，自动刷新已生成的阅读笔记（标记区外手写内容保留） */
 	autoUpdateNote: boolean
+	/** 「备份批注数据到库内」执行时额外复制一份的本机路径（另一块盘/优盘）；空 = 关闭 */
+	backupTargetDir?: string
 	appearance: ReaderAppearance
 }
 

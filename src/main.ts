@@ -1,5 +1,6 @@
 import { FileSystemAdapter, Notice, Plugin, TFile, normalizePath } from 'obsidian'
 import fs from 'node:fs'
+import fsp from 'node:fs/promises'
 import pathModule from 'node:path'
 import { BookStore } from './store'
 import { ShelfCache } from './bookshelf'
@@ -519,6 +520,7 @@ export default class GroveReaderPlugin extends Plugin {
 	/**
 	 * 把全部批注/书架数据导出到库内普通文件夹（随库同步，删除/重装插件都不受影响）。
 	 * 批注 JSON 的权威副本仍在插件 data/ 下；这里是可带走的保险副本，防插件目录被误删。
+	 * 设置了 backupTargetDir 时额外复制一份过去（同盘备份防不了磁盘故障）。
 	 */
 	async exportDataBackup(): Promise<void> {
 		if (!this.vaultBase) {
@@ -531,28 +533,36 @@ export default class GroveReaderPlugin extends Plugin {
 		const root = pathModule.join(this.vaultBase, BACKUP_FOLDER_NAME)
 		try {
 			// 只清我们自己的文件，不动用户可能放进该文件夹的其他内容
-			const prune = (dir: string, filter: (name: string) => boolean): void => {
+			const prune = async (dir: string, filter: (name: string) => boolean): Promise<void> => {
+				let names: string[] = []
 				try {
-					for (const name of fs.readdirSync(dir)) {
-						if (!filter(name)) continue
-						fs.rmSync(pathModule.join(dir, name), { force: true, recursive: true })
-					}
+					names = await fsp.readdir(dir)
 				} catch {
-					// 目录不存在
+					return // 目录不存在
+				}
+				for (const name of names) {
+					if (!filter(name)) continue
+					await fsp.rm(pathModule.join(dir, name), { force: true, recursive: true }).catch(() => { })
 				}
 			}
-			prune(pathModule.join(root, 'books'), name => name.endsWith('.json'))
-			prune(pathModule.join(root, 'covers'), () => true)
+			await prune(pathModule.join(root, 'books'), name => name.endsWith('.json'))
+			await prune(pathModule.join(root, 'covers'), () => true)
 			for (const name of ['shelf.json', 'lists.json', 'data.json']) {
-				fs.rmSync(pathModule.join(root, name), { force: true })
+				await fsp.rm(pathModule.join(root, name), { force: true }).catch(() => { })
 			}
 
 			let bookCount = 0
 			const booksDir = pathModule.join(this.dataRoot, 'data', 'books')
-			fs.mkdirSync(pathModule.join(root, 'books'), { recursive: true })
-			for (const name of fs.existsSync(booksDir) ? fs.readdirSync(booksDir) : []) {
+			await fsp.mkdir(pathModule.join(root, 'books'), { recursive: true })
+			let bookNames: string[] = []
+			try {
+				bookNames = await fsp.readdir(booksDir)
+			} catch {
+				// 尚无任何批注数据
+			}
+			for (const name of bookNames) {
 				if (!name.endsWith('.json')) continue
-				fs.copyFileSync(pathModule.join(booksDir, name), pathModule.join(root, 'books', name))
+				await fsp.copyFile(pathModule.join(booksDir, name), pathModule.join(root, 'books', name))
 				bookCount++
 			}
 			for (const [src, dst] of [
@@ -560,14 +570,17 @@ export default class GroveReaderPlugin extends Plugin {
 				[pathModule.join(this.dataRoot, 'data', 'lists.json'), 'lists.json'],
 				[pathModule.join(this.dataRoot, 'data.json'), 'data.json'],
 			] as const) {
-				if (fs.existsSync(src)) fs.copyFileSync(src, pathModule.join(root, dst))
+				await fsp.copyFile(src, pathModule.join(root, dst)).catch(() => { })
 			}
 			const coversDir = pathModule.join(this.dataRoot, 'data', 'covers')
-			if (fs.existsSync(coversDir)) {
-				fs.mkdirSync(pathModule.join(root, 'covers'), { recursive: true })
-				for (const name of fs.readdirSync(coversDir)) {
-					fs.copyFileSync(pathModule.join(coversDir, name), pathModule.join(root, 'covers', name))
+			try {
+				const covers = await fsp.readdir(coversDir)
+				await fsp.mkdir(pathModule.join(root, 'covers'), { recursive: true })
+				for (const name of covers) {
+					await fsp.copyFile(pathModule.join(coversDir, name), pathModule.join(root, 'covers', name))
 				}
+			} catch {
+				// 尚无封面
 			}
 			const guide = [
 				'本文件夹由 Grove Reader 的「备份批注数据到库内」命令生成，是批注数据的保险副本。',
@@ -581,8 +594,20 @@ export default class GroveReaderPlugin extends Plugin {
 				'',
 				`最近备份时间：${new Date().toLocaleString('zh-CN', { hour12: false })}`,
 			].join('\n')
-			fs.writeFileSync(pathModule.join(root, '说明.md'), guide, 'utf-8')
-			new Notice(`Grove Reader：已备份 ${bookCount} 本书的批注数据到库内「${BACKUP_FOLDER_NAME}」`)
+			await fsp.writeFile(pathModule.join(root, '说明.md'), guide, 'utf-8')
+
+			let extra = ''
+			const target = this.settings.backupTargetDir?.trim()
+			if (target) {
+				try {
+					await copyDirAsync(root, pathModule.join(target, BACKUP_FOLDER_NAME))
+					extra = `，并已复制一份到 ${target}`
+				} catch (e) {
+					console.error('[Grove Reader] 复制备份到额外位置失败', e)
+					extra = `（额外位置 ${target} 复制失败，库内备份已完成；请检查路径/磁盘是否可用）`
+				}
+			}
+			new Notice(`Grove Reader：已备份 ${bookCount} 本书的批注数据到库内「${BACKUP_FOLDER_NAME}」${extra}`)
 		} catch (e) {
 			console.error('[Grove Reader] 备份批注数据失败', e)
 			new Notice(`Grove Reader：备份失败（${e instanceof Error ? e.message : String(e)}）`)
@@ -623,4 +648,21 @@ export default class GroveReaderPlugin extends Plugin {
 		await this.saveData(this.settings)
 		if (this.store) this.store.maxBackups = this.settings.maxBackups
 	}
+}
+
+/** 递归复制目录（fs.promises 版，不阻塞 UI 线程），返回复制的文件数 */
+async function copyDirAsync(src: string, dst: string): Promise<number> {
+	await fsp.mkdir(dst, { recursive: true })
+	let n = 0
+	for (const name of await fsp.readdir(src)) {
+		const s = pathModule.join(src, name)
+		const d = pathModule.join(dst, name)
+		const st = await fsp.stat(s)
+		if (st.isDirectory()) n += await copyDirAsync(s, d)
+		else {
+			await fsp.copyFile(s, d)
+			n++
+		}
+	}
+	return n
 }
