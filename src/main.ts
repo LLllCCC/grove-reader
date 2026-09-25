@@ -11,6 +11,7 @@ import {
 	GroveSettings,
 	HIGHLIGHT_COLORS,
 	SUPPORTED_BOOK_EXTS,
+	BACKUP_FOLDER_NAME,
 } from './types'
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
@@ -304,13 +305,11 @@ export default class GroveReaderPlugin extends Plugin {
 			name: '生成 / 更新阅读笔记',
 			checkCallback: checking => this.withAnyReader(checking, v => this.generateNoteFor(v)),
 		})
-	}
-
-	private withReader(checking: boolean, run: (view: ReaderView) => unknown): boolean {
-		const view = this.activeReader()
-		if (!view?.ready) return false
-		if (!checking) run(view)
-		return true
+		this.addCommand({
+			id: 'backup-data',
+			name: '备份批注数据到库内',
+			callback: () => void this.exportDataBackup(),
+		})
 	}
 
 	// ------------------------------------------------------------------
@@ -332,13 +331,35 @@ export default class GroveReaderPlugin extends Plugin {
 		const fileName = `${sanitizeFileName(bookName)} - 阅读笔记.md`
 
 		let noteFile: TFile | null = null
+		let createPath = normalizePath(`${folder}/${fileName}`)
 		if (data.notePath) {
 			const f = this.app.vault.getAbstractFileByPath(data.notePath)
 			if (f instanceof TFile) noteFile = f
 		}
 		if (!noteFile) {
-			const f = this.app.vault.getAbstractFileByPath(normalizePath(`${folder}/${fileName}`))
-			if (f instanceof TFile) noteFile = f
+			// 同名书（如同书的 epub + pdf）会撞默认文件名：按 frontmatter 的
+			// grove-book 认领自己的笔记；被其他书占用的名字依次尝试 (2)(3)…
+			// 没有 grove-book 字段的既有文件沿用旧认领逻辑（可能是用户自建的同名笔记）
+			const bookId = bookIdFor(data.bookPath)
+			const stem = fileName.replace(/\.md$/, '')
+			for (let i = 1; i < 100; i++) {
+				const p = normalizePath(i === 1 ? `${folder}/${fileName}` : `${folder}/${stem} ${i}.md`)
+				const f = this.app.vault.getAbstractFileByPath(p)
+				if (!(f instanceof TFile)) {
+					createPath = p
+					break
+				}
+				const fm = this.app.metadataCache.getFileCache(f)?.frontmatter
+				const owner = fm && typeof fm['grove-book'] === 'string' ? fm['grove-book'] : null
+				if (!owner || owner === bookId) {
+					noteFile = f
+					break
+				}
+			}
+			// 所有候选名都被其他书占用时（几乎不可能），退化为时间戳文件名
+			if (!noteFile && this.app.vault.getAbstractFileByPath(createPath)) {
+				createPath = normalizePath(`${folder}/${stem} ${Date.now()}.md`)
+			}
 		}
 
 		// 笔记文件夹被修改后，把旧笔记挪到新文件夹（目标已有同名文件时直接续用该文件）
@@ -370,7 +391,7 @@ export default class GroveReaderPlugin extends Plugin {
 		// 模板：读取指定模板文件；解析失败则回退默认
 		const markdown = await this.#composeNoteMarkdown(data, existing, true)
 		if (noteFile) await this.app.vault.modify(noteFile, markdown)
-		else noteFile = await this.app.vault.create(normalizePath(`${folder}/${fileName}`), markdown)
+		else noteFile = await this.app.vault.create(createPath, markdown)
 
 		data.notePath = noteFile.path
 		this.store.save(data)
@@ -493,6 +514,79 @@ export default class GroveReaderPlugin extends Plugin {
 		let f = this.app.vault.getAbstractFileByPath(path)
 		if (!(f instanceof TFile)) f = await this.app.vault.create(path, usageDocMarkdown())
 		if (f instanceof TFile) await this.app.workspace.getLeaf('tab').openFile(f)
+	}
+
+	/**
+	 * 把全部批注/书架数据导出到库内普通文件夹（随库同步，删除/重装插件都不受影响）。
+	 * 批注 JSON 的权威副本仍在插件 data/ 下；这里是可带走的保险副本，防插件目录被误删。
+	 */
+	async exportDataBackup(): Promise<void> {
+		if (!this.vaultBase) {
+			new Notice('Grove Reader：无法定位库目录，备份失败')
+			return
+		}
+		// 刷盘挂起的写入，保证导出的是最新状态
+		this.shelfCache.saveNow()
+		this.lists.saveNow()
+		const root = pathModule.join(this.vaultBase, BACKUP_FOLDER_NAME)
+		try {
+			// 只清我们自己的文件，不动用户可能放进该文件夹的其他内容
+			const prune = (dir: string, filter: (name: string) => boolean): void => {
+				try {
+					for (const name of fs.readdirSync(dir)) {
+						if (!filter(name)) continue
+						fs.rmSync(pathModule.join(dir, name), { force: true, recursive: true })
+					}
+				} catch {
+					// 目录不存在
+				}
+			}
+			prune(pathModule.join(root, 'books'), name => name.endsWith('.json'))
+			prune(pathModule.join(root, 'covers'), () => true)
+			for (const name of ['shelf.json', 'lists.json', 'data.json']) {
+				fs.rmSync(pathModule.join(root, name), { force: true })
+			}
+
+			let bookCount = 0
+			const booksDir = pathModule.join(this.dataRoot, 'data', 'books')
+			fs.mkdirSync(pathModule.join(root, 'books'), { recursive: true })
+			for (const name of fs.existsSync(booksDir) ? fs.readdirSync(booksDir) : []) {
+				if (!name.endsWith('.json')) continue
+				fs.copyFileSync(pathModule.join(booksDir, name), pathModule.join(root, 'books', name))
+				bookCount++
+			}
+			for (const [src, dst] of [
+				[pathModule.join(this.dataRoot, 'data', 'shelf.json'), 'shelf.json'],
+				[pathModule.join(this.dataRoot, 'data', 'lists.json'), 'lists.json'],
+				[pathModule.join(this.dataRoot, 'data.json'), 'data.json'],
+			] as const) {
+				if (fs.existsSync(src)) fs.copyFileSync(src, pathModule.join(root, dst))
+			}
+			const coversDir = pathModule.join(this.dataRoot, 'data', 'covers')
+			if (fs.existsSync(coversDir)) {
+				fs.mkdirSync(pathModule.join(root, 'covers'), { recursive: true })
+				for (const name of fs.readdirSync(coversDir)) {
+					fs.copyFileSync(pathModule.join(coversDir, name), pathModule.join(root, 'covers', name))
+				}
+			}
+			const guide = [
+				'本文件夹由 Grove Reader 的「备份批注数据到库内」命令生成，是批注数据的保险副本。',
+				'它是普通库内文件：随库同步、随笔记一起备份，删除/重装插件都不受影响。',
+				'',
+				'恢复方法：',
+				'1. 关闭 Obsidian；',
+				'2. 把 books/、shelf.json、lists.json、covers/ 放回 <库>/.obsidian/plugins/grove-reader/data/；',
+				'3. 把 data.json 放回 <库>/.obsidian/plugins/grove-reader/（插件根目录）；',
+				'4. 重新打开 Obsidian。',
+				'',
+				`最近备份时间：${new Date().toLocaleString('zh-CN', { hour12: false })}`,
+			].join('\n')
+			fs.writeFileSync(pathModule.join(root, '说明.md'), guide, 'utf-8')
+			new Notice(`Grove Reader：已备份 ${bookCount} 本书的批注数据到库内「${BACKUP_FOLDER_NAME}」`)
+		} catch (e) {
+			console.error('[Grove Reader] 备份批注数据失败', e)
+			new Notice(`Grove Reader：备份失败（${e instanceof Error ? e.message : String(e)}）`)
+		}
 	}
 
 	// ------------------------------------------------------------------

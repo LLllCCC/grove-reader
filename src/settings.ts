@@ -95,6 +95,11 @@ export class GroveSettingTab extends PluginSettingTab {
 		// —— 数据安全 ——
 		containerEl.createEl('h3', { text: '数据安全' })
 		new Setting(containerEl)
+			.setName('备份批注数据到库内')
+			.setDesc('把全部书籍批注 JSON、书架缓存、书单与自定义封面导出到库内「Grove Reader 数据备份」文件夹。该文件夹是普通库内文件，随库同步，删除或重装插件都不受影响。建议定期执行（命令面板也有同名命令）')
+			.addButton(button =>
+				button.setButtonText('立即备份').onClick(() => void this.plugin.exportDataBackup()))
+		new Setting(containerEl)
 			.setName('最大备份数')
 			.setDesc('每本书的批注数据最多保留多少份自动备份（每 10 分钟最多写一份）')
 			.addText(text =>

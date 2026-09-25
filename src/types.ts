@@ -1,5 +1,8 @@
 export const DATA_VERSION = 1
 
+/** 库内备份文件夹名（「备份批注数据到库内」命令生成） */
+export const BACKUP_FOLDER_NAME = 'Grove Reader 数据备份'
+
 export const SUPPORTED_BOOK_EXTS = ['epub', 'mobi', 'azw3', 'fb2', 'fbz', 'cbz']
 
 /**
