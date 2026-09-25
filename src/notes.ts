@@ -294,12 +294,18 @@ export function buildNote(data: BookData, bookId: string, existing: string | nul
 	// 已有笔记：先同步插件维护的 frontmatter 字段，再替换标记区间
 	existing = refreshFrontmatter(existing, data, bookId)
 	const begin = existing.indexOf(NOTE_BEGIN)
-	const end = existing.indexOf(NOTE_END)
+	// 用最后一个 END：END 标记被误删时按「BEGIN 之后全是生成区」处理，
+	// 否则每次刷新都会在末尾追加一整块重复内容
+	const end = begin >= 0 ? existing.lastIndexOf(NOTE_END) : -1
 	if (begin >= 0 && end > begin) {
 		const before = existing.slice(0, begin).replace(/\n+$/, '')
 		const after = existing.slice(end + NOTE_END.length).replace(/^\n+/, '')
 		const head = before ? `${before}\n\n${inner}` : inner
 		return after ? `${head}\n\n${after}\n` : `${head}\n`
+	}
+	if (begin >= 0) {
+		const before = existing.slice(0, begin).replace(/\n+$/, '')
+		return `${before}\n\n${inner}\n`
 	}
 	return `${existing.replace(/\n+$/, '')}\n\n${inner}\n`
 }

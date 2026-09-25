@@ -47,12 +47,6 @@ export class ListsStore {
 		return this.data.members[path]
 	}
 
-	memberCount(id: string): number {
-		let n = 0
-		for (const lid of Object.values(this.data.members)) if (lid === id) n++
-		return n
-	}
-
 	create(name: string): BookList {
 		const list: BookList = { id: randomId(), name }
 		this.data.lists.push(list)

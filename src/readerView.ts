@@ -297,6 +297,9 @@ export class ReaderView extends ItemView {
 
 		this.registerDomEvent(this.contentEl, 'keydown', (e: KeyboardEvent) => {
 			if (!PAGE_KEYS.has(e.key) || !this.foliate) return
+			// 焦点在输入框/滑杆时方向键属于编辑操作，不能翻页
+			const t = e.target
+			if (t instanceof HTMLElement && t.closest('input, textarea, select, [contenteditable="true"]')) return
 			if (e.key === 'ArrowLeft') this.foliate.goLeft()
 			else this.foliate.goRight()
 		})
@@ -510,7 +513,8 @@ export class ReaderView extends ItemView {
 		})
 		customFont.addEventListener('change', () => {
 			const raw = customFont.value.trim()
-			const family = raw ? raw.split(',').map(s => `"${s.trim()}"`).join(', ') : ''
+			// 字体名里的引号会破坏后面拼进 CSS 的 font-family 声明，直接剔除
+			const family = raw ? raw.split(',').map(s => `"${s.trim().replace(/"/g, '')}"`).join(', ') : ''
 			updatePreview(family)
 			this.#patchAppearance({ fontFamily: family })
 		})

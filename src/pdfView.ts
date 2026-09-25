@@ -272,6 +272,9 @@ export class PdfView extends ItemView {
 			if (t instanceof Element && !t.closest('.grove-sel-popup')) this.#hidePopup()
 		}, { capture: true })
 		this.registerDomEvent(this.contentEl, 'keydown', (e: KeyboardEvent) => {
+			// 焦点在输入框/滑杆时方向键属于编辑操作，不能翻页
+			const t = e.target
+			if (t instanceof HTMLElement && t.closest('input, textarea, select, [contenteditable="true"]')) return
 			if (e.key === 'ArrowRight' || e.key === 'PageDown') { this.nextPage(); e.preventDefault() }
 			else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { this.prevPage(); e.preventDefault() }
 		})

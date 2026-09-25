@@ -41,6 +41,7 @@ export class BookStore {
 	load(vaultPath: string): BookData {
 		const id = this.bookId(vaultPath)
 		fs.mkdirSync(this.booksDir, { recursive: true })
+		this.#cleanStaleTmp()
 		let file = this.fileFor(id)
 		if (!fs.existsSync(file)) {
 			// 书被移动/重命名后 bookId 变了：按 bookPath 扫描找回旧数据
@@ -209,7 +210,26 @@ export class BookStore {
 		}
 	}
 
+	/** 清理进程被杀留下的陈旧 .tmp（写入后被杀会残留在 books 目录）；只动一天以上的，避免误删正在写的 */
+	#cleanStaleTmp(): void {
+		try {
+			const now = Date.now()
+			for (const name of fs.readdirSync(this.booksDir)) {
+				if (!name.endsWith('.tmp')) continue
+				const p = path.join(this.booksDir, name)
+				try {
+					if (now - fs.statSync(p).mtimeMs > 24 * 60 * 60 * 1000) fs.rmSync(p, { force: true })
+				} catch {
+					// ignore
+				}
+			}
+		} catch {
+			// 目录不存在
+		}
+	}
+
 	#maybeBackup(id: string, file: string): void {
+		if (this.maxBackups <= 0) return
 		const backups = this.#listBackups(id)
 		const latest = backups[0]
 		if (latest) {

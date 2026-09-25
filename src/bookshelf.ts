@@ -51,6 +51,8 @@ export class ShelfCache {
 	private coversDir: string
 	private data: ShelfCacheFile = { version: 1, entries: {} }
 	private saveTimer: NodeJS.Timeout | null = null
+	/** 封面 dataURL 缓存：卡片每次刷新都会取封面，避免反复同步读盘 + base64 */
+	private coverCache = new Map<string, string | null>()
 
 	constructor(rootDir: string) {
 		this.file = pathModule.join(rootDir, 'data', 'shelf.json')
@@ -116,6 +118,7 @@ export class ShelfCache {
 			const name = `${bookId}.${ext}`
 			const buf = Buffer.from(await blob.arrayBuffer())
 			fs.writeFileSync(pathModule.join(this.coversDir, name), buf)
+			this.coverCache.delete(name)
 			return name
 		} catch (e) {
 			console.error('[Grove Reader] 封面保存失败', e)
@@ -132,6 +135,7 @@ export class ShelfCache {
 			const name = `${bookId}-custom.${ext}`
 			const buf = Buffer.from(await file.arrayBuffer())
 			fs.writeFileSync(pathModule.join(this.coversDir, name), buf)
+			this.coverCache.delete(name)
 			return name
 		} catch (e) {
 			console.error('[Grove Reader] 自定义封面保存失败', e)
@@ -141,16 +145,20 @@ export class ShelfCache {
 
 	coverDataUrl(filename?: string): string | null {
 		if (!filename) return null
+		if (this.coverCache.has(filename)) return this.coverCache.get(filename) ?? null
+		let url: string | null = null
 		try {
 			const buf = fs.readFileSync(pathModule.join(this.coversDir, filename))
 			const mime = filename.endsWith('.png') ? 'image/png'
 				: filename.endsWith('.gif') ? 'image/gif'
 				: filename.endsWith('.webp') ? 'image/webp'
 				: 'image/jpeg'
-			return `data:${mime};base64,${buf.toString('base64')}`
+			url = `data:${mime};base64,${buf.toString('base64')}`
 		} catch {
-			return null
+			url = null
 		}
+		this.coverCache.set(filename, url)
+		return url
 	}
 }
 
@@ -226,6 +234,7 @@ export class BookshelfView extends ItemView {
 	private searchInput!: HTMLInputElement
 	private sortSelect!: HTMLSelectElement
 	private cardEls = new Map<string, HTMLElement>()
+	private searchTimer: number | null = null
 
 	constructor(leaf: WorkspaceLeaf, private plugin: GroveReaderPlugin) {
 		super(leaf)
@@ -277,7 +286,12 @@ export class BookshelfView extends ItemView {
 		this.searchInput.value = this.plugin.shelfSearch
 		this.searchInput.addEventListener('input', () => {
 			this.plugin.shelfSearch = this.searchInput.value.trim().toLowerCase()
-			void this.refresh()
+			// 搜索词变化不重建扫描缓存，只防抖刷新视图：每键全量重扫在书多时卡顿
+			if (this.searchTimer != null) window.clearTimeout(this.searchTimer)
+			this.searchTimer = window.setTimeout(() => {
+				this.searchTimer = null
+				void this.refresh()
+			}, 200)
 		})
 		this.sortSelect = this.toolsEl.createEl('select', { cls: 'dropdown' })
 		for (const [key, label] of SORT_OPTIONS) this.sortSelect.createEl('option', { value: key, text: label })
@@ -290,6 +304,10 @@ export class BookshelfView extends ItemView {
 	}
 
 	async onClose(): Promise<void> {
+		if (this.searchTimer != null) {
+			window.clearTimeout(this.searchTimer)
+			this.searchTimer = null
+		}
 		this.plugin.shelfCache.saveNow()
 		this.plugin.lists.saveNow()
 	}
@@ -509,6 +527,19 @@ export class BookshelfView extends ItemView {
 				lists.setMember(oldPath, null)
 			}
 			if (hasBookData) this.plugin.store.migrateData(oldPath, newPath)
+		}
+		// 文件已彻底消失且条目无个性化数据（自定义封面/手改信息）：清掉，
+		// 避免书架缓存无限膨胀；有个性化数据的保留，防移动硬盘临时掉线时误删
+		for (const [oldPath, entry] of cache.entries()) {
+			if (present.has(oldPath)) continue
+			if (entry.customCover || entry.manualMeta) continue
+			let gone = false
+			try {
+				gone = !fs.existsSync(this.#absPath(oldPath))
+			} catch {
+				continue
+			}
+			if (gone) cache.remove(oldPath)
 		}
 	}
 
