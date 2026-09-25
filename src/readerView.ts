@@ -113,6 +113,15 @@ export class ReaderView extends ItemView {
 	private filterDotEls = new Map<string, HTMLElement>()
 	private annItemEls = new Map<string, HTMLElement>()
 	private revealTimer: number | null = null
+	private lastStatsLoc: number | null = null
+
+	// 批注管理
+	private selectMode = false
+	private selectedIds = new Set<string>()
+	private sortMode: 'position' | 'recent' = 'position'
+	private sortBtnEl!: HTMLButtonElement
+	private selectBarEl!: HTMLElement
+	private selectCountEl!: HTMLElement
 
 	constructor(leaf: WorkspaceLeaf, private plugin: GroveReaderPlugin) {
 		super(leaf)
@@ -273,6 +282,7 @@ export class ReaderView extends ItemView {
 		})
 		this.searchInput.addEventListener('input', () => {
 			this.sidebarQuery = this.searchInput.value.trim()
+			this.#saveFilterState()
 			this.#renderSidebar()
 		})
 		const filterRow = controls.createDiv('grove-ann-filters')
@@ -281,6 +291,7 @@ export class ReaderView extends ItemView {
 			dot.style.backgroundColor = c.css
 			dot.addEventListener('click', () => {
 				this.sidebarColor = this.sidebarColor === c.key ? null : c.key
+				this.#saveFilterState()
 				this.#renderSidebar()
 			})
 			this.filterDotEls.set(c.key, dot)
@@ -290,8 +301,27 @@ export class ReaderView extends ItemView {
 			this.sidebarQuery = ''
 			this.sidebarColor = null
 			this.searchInput.value = ''
+			this.#saveFilterState()
 			this.#renderSidebar()
 		})
+		const manageRow = controls.createDiv('grove-ann-filters')
+		this.sortBtnEl = manageRow.createEl('button', { cls: 'grove-manage-btn', text: '排序：章节' })
+		this.sortBtnEl.addEventListener('click', () => {
+			this.sortMode = this.sortMode === 'position' ? 'recent' : 'position'
+			this.sortBtnEl.setText(this.sortMode === 'position' ? '排序：章节' : '排序：最近')
+			this.#saveFilterState()
+			this.#renderSidebar()
+		})
+		const multiBtn = manageRow.createEl('button', { cls: 'grove-manage-btn', text: '多选' })
+		multiBtn.addEventListener('click', () => this.#setSelectMode(!this.selectMode))
+
+		this.selectBarEl = controls.createDiv('grove-select-bar grove-hidden')
+		this.selectCountEl = this.selectBarEl.createSpan('grove-select-count')
+		this.selectCountEl.setText('已选 0 条')
+		const delBtn = this.selectBarEl.createEl('button', { text: '删除所选', cls: 'grove-select-delete' })
+		delBtn.addEventListener('click', () => this.#deleteSelected())
+		const cancelBtn = this.selectBarEl.createEl('button', { text: '取消', cls: 'grove-select-cancel' })
+		cancelBtn.addEventListener('click', () => this.#setSelectMode(false))
 
 		this.annListEl = this.sidebarEl.createDiv('grove-ann-list')
 
@@ -589,6 +619,11 @@ export class ReaderView extends ItemView {
 
 	#onRelocate = (e: Event): void => {
 		const d = (e as CustomEvent<RelocateDetail>).detail
+		// 阅读统计：位置变化计一次「翻页」（首次定位是基线，不计）
+		if (d.location && d.location.current !== this.lastStatsLoc) {
+			if (this.lastStatsLoc !== null) this.plugin.statsPageTurn(this.bookPath)
+			this.lastStatsLoc = d.location.current
+		}
 		const percent = Math.round((d.fraction ?? 0) * 100)
 		this.progressLabel.setText(
 			`${percent}%${d.pageItem ? ` · 第 ${d.pageItem.label} 页` : d.location ? ` · Loc ${d.location.current}` : ''}`,
@@ -891,6 +926,85 @@ export class ReaderView extends ItemView {
 	}
 
 	// ------------------------------------------------------------------
+	// 批注多选删除 / 筛选记忆
+	// ------------------------------------------------------------------
+
+	#setSelectMode(on: boolean): void {
+		this.selectMode = on
+		this.selectedIds.clear()
+		this.selectBarEl.toggleClass('grove-hidden', !on)
+		this.#refreshSelectBar()
+		this.#renderSidebar()
+	}
+
+	#refreshSelectBar(): void {
+		if (this.selectMode) this.selectCountEl.setText(`已选 ${this.selectedIds.size} 条`)
+	}
+
+	#toggleSelected(id: string): void {
+		if (this.selectedIds.has(id)) this.selectedIds.delete(id)
+		else this.selectedIds.add(id)
+		this.#refreshSelectBar()
+		const item = this.annItemEls.get(id)
+		item?.toggleClass('grove-ann-selected', this.selectedIds.has(id))
+	}
+
+	#deleteSelected(): void {
+		const ids = [...this.selectedIds]
+		if (!ids.length) return
+		new ConfirmModal(this.app, `删除所选的 ${ids.length} 条批注？此操作不可撤销。`, () => {
+			void this.#doDeleteSelected(ids)
+		}).open()
+	}
+
+	async #doDeleteSelected(ids: string[]): Promise<void> {
+		const arr = this.data?.annotations
+		if (!arr) return
+		for (const id of ids) {
+			const i = arr.findIndex(a => a.id === id)
+			if (i < 0) continue
+			const a = arr[i]
+			arr.splice(i, 1)
+			try {
+				await this.foliate?.deleteAnnotation({ ...a, value: a.cfi })
+			} catch {
+				// ignore
+			}
+		}
+		this.#scheduleSave(true)
+		this.selectedIds.clear()
+		this.#refreshSelectBar()
+		this.#renderSidebar()
+		new Notice(`Grove Reader：已删除 ${ids.length} 条批注（历史备份仍保留在插件数据目录中）`)
+	}
+
+	#filterKey(): string {
+		return `grove-ann-filter:${this.plugin.store.bookId(this.bookPath)}`
+	}
+
+	/** 批注栏搜索词/颜色筛选/排序按书记忆（localStorage） */
+	#loadFilterState(): void {
+		try {
+			const raw = localStorage.getItem(this.#filterKey())
+			const f = raw ? (JSON.parse(raw) as { q?: string; color?: string | null; sort?: 'position' | 'recent' }) : {}
+			this.sidebarQuery = f.q ?? ''
+			this.sidebarColor = f.color ?? null
+			if (f.sort === 'recent' || f.sort === 'position') this.sortMode = f.sort
+		} catch {
+			this.sidebarQuery = ''
+			this.sidebarColor = null
+		}
+	}
+
+	#saveFilterState(): void {
+		try {
+			localStorage.setItem(this.#filterKey(), JSON.stringify({ q: this.sidebarQuery, color: this.sidebarColor, sort: this.sortMode }))
+		} catch {
+			// ignore
+		}
+	}
+
+	// ------------------------------------------------------------------
 	// 目录 / 进度 / 侧栏
 	// ------------------------------------------------------------------
 
@@ -939,6 +1053,14 @@ export class ReaderView extends ItemView {
 			return
 		}
 
+		// 「最近」排序：平铺列出，不按章节分组
+		if (this.sortMode === 'recent') {
+			for (const a of [...filtered].sort((x, y) => y.createdAt - x.createdAt)) {
+				this.annListEl.appendChild(this.#renderAnnItem(a))
+			}
+			return
+		}
+
 		if (this.annCollapsed === null) this.#loadCollapsedState()
 		const collapsedSet: Set<string> = this.annCollapsed ?? new Set<string>()
 		const groups = new Map<string, Annotation[]>()
@@ -981,8 +1103,15 @@ export class ReaderView extends ItemView {
 	#renderAnnItem(a: Annotation): HTMLElement {
 		const item = document.createElement('div')
 		item.addClass('grove-ann')
+		item.toggleClass('grove-ann-selected', this.selectedIds.has(a.id))
 		this.annItemEls.set(a.id, item)
 		const head = item.createDiv('grove-ann-head')
+		if (this.selectMode) {
+			const check = head.createEl('input', { attr: { type: 'checkbox' }, cls: 'grove-ann-check' })
+			check.checked = this.selectedIds.has(a.id)
+			check.addEventListener('click', e => e.stopPropagation())
+			check.addEventListener('change', () => this.#toggleSelected(a.id))
+		}
 		head.createSpan('grove-ann-dot').style.backgroundColor = colorCss(a.color)
 		head.createSpan('grove-ann-chapter').setText(a.chapter || '')
 		const text = item.createDiv('grove-ann-text')
@@ -1022,6 +1151,7 @@ export class ReaderView extends ItemView {
 			this.sidebarQuery = ''
 			this.sidebarColor = null
 			if (this.searchInput) this.searchInput.value = ''
+			this.#saveFilterState()
 		}
 		if (collapsed && this.annCollapsed) {
 			this.annCollapsed.delete(chapter)
@@ -1058,10 +1188,11 @@ export class ReaderView extends ItemView {
 	}
 
 	#resetSidebarFilters(): void {
-		this.sidebarQuery = ''
-		this.sidebarColor = null
 		this.annCollapsed = null
-		if (this.searchInput) this.searchInput.value = ''
+		// 搜索词/颜色/排序按书记忆：开书时恢复
+		this.#loadFilterState()
+		if (this.searchInput) this.searchInput.value = this.sidebarQuery
+		if (this.sortBtnEl) this.sortBtnEl.setText(this.sortMode === 'position' ? '排序：章节' : '排序：最近')
 	}
 
 	// ------------------------------------------------------------------

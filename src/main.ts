@@ -5,6 +5,7 @@ import pathModule from 'node:path'
 import { BookStore } from './store'
 import { ShelfCache } from './bookshelf'
 import { ListsStore } from './lists'
+import { StatsStore } from './stats'
 import {
 	DEFAULT_APPEARANCE,
 	DEFAULT_SETTINGS,
@@ -17,7 +18,7 @@ import {
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
 import { PdfView, VIEW_TYPE_GROVE_PDF } from './pdfView'
-import { BookPickerModal } from './modals'
+import { BookPickerModal, ReadingStatsModal } from './modals'
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
 import { bookIdFor, isAbsolutePath, sanitizeFileName } from './util'
@@ -29,6 +30,7 @@ export default class GroveReaderPlugin extends Plugin {
 	store!: BookStore
 	shelfCache!: ShelfCache
 	lists!: ListsStore
+	stats!: StatsStore
 	vaultBase = ''
 	/** 书架搜索词：只活在本次会话，关掉书架页再打开还在，重启 Obsidian 清空 */
 	shelfSearch = ''
@@ -56,6 +58,8 @@ export default class GroveReaderPlugin extends Plugin {
 		this.shelfCache.load()
 		this.lists = new ListsStore(this.dataRoot)
 		this.lists.load()
+		this.stats = new StatsStore(pathModule.join(this.dataRoot, 'data', 'stats.json'))
+		this.stats.load()
 
 		this.registerView(VIEW_TYPE_GROVE_READER, leaf => new ReaderView(leaf, this))
 		this.registerView(VIEW_TYPE_GROVE_BOOKSHELF, leaf => new BookshelfView(leaf, this))
@@ -75,10 +79,35 @@ export default class GroveReaderPlugin extends Plugin {
 				if (view instanceof ReaderView) view.applyAppearance()
 			}
 		}))
+		this.#startStatsTracking()
 	}
 
 	onunload(): void {
 		// 各视图的 onClose 会负责落盘与销毁渲染器
+		this.stats?.saveNow()
+	}
+
+	// ------------------------------------------------------------------
+	// 阅读统计
+	// ------------------------------------------------------------------
+
+	/**
+	 * 每 15 秒采样一次阅读时长；仅当活动视图是阅读/PDF 视图且窗口有焦点时计入。
+	 * 翻页/换节次数由视图在事件里调用 statsPageTurn 记。
+	 */
+	#startStatsTracking(): void {
+		const INTERVAL = 15_000
+		this.registerInterval(window.setInterval(() => {
+			const view = this.app.workspace.getActiveViewOfType(ReaderView)
+				?? this.app.workspace.getActiveViewOfType(PdfView)
+			if (!view?.ready || !document.hasFocus()) return
+			this.stats.record(view.bookPath, INTERVAL / 1000, 0)
+		}, INTERVAL))
+	}
+
+	/** 视图翻页/换节时调用：当日翻页计数 +1 */
+	statsPageTurn(bookPath: string): void {
+		this.stats.record(bookPath, 0, 1)
 	}
 
 	private activeReader(): ReaderView | null {
@@ -310,6 +339,11 @@ export default class GroveReaderPlugin extends Plugin {
 			id: 'backup-data',
 			name: '备份批注数据到库内',
 			callback: () => void this.exportDataBackup(),
+		})
+		this.addCommand({
+			id: 'reading-stats',
+			name: '阅读统计',
+			callback: () => new ReadingStatsModal(this.app, this).open(),
 		})
 	}
 

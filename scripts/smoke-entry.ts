@@ -4,6 +4,7 @@ import os from 'node:os'
 import assert from 'node:assert'
 import { BookStore } from '../src/store'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, NOTE_BEGIN, NOTE_END, renderNoteTemplate } from '../src/notes'
+import { StatsStore, todayKey } from '../src/stats'
 import { BookData } from '../src/types'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-data-'))
@@ -172,5 +173,26 @@ fs.writeFileSync(freshTmp, '{}', 'utf-8')
 storeT.load(pT)
 assert.ok(!fs.existsSync(staleTmp), '超过一天的 .tmp 应被清理')
 assert.ok(fs.existsSync(freshTmp), '一天内的 .tmp 不应被误删')
+
+// 13. 阅读统计：跨天记录、按日合并、持久化往返
+const tmpS = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-stats-'))
+const stats = new StatsStore(path.join(tmpS, 'data', 'stats.json'))
+stats.load()
+stats.record('A/书一.epub', 300, 0, new Date('2026-09-24T10:00:00').getTime())
+stats.record('A/书一.epub', 120, 5, new Date('2026-09-25T10:00:00').getTime())
+stats.record('B/书二.pdf', 60, 3, new Date('2026-09-25T11:00:00').getTime())
+const bookA = stats.sortedBooks().find(([p]) => p === 'A/书一.epub')![1]
+assert.equal(bookA.seconds, 420)
+assert.equal(bookA.pages, 5)
+assert.equal(Object.keys(bookA.days).length, 2)
+const days = stats.recentDays(14, new Date('2026-09-25T12:00:00'))
+assert.equal(days[days.length - 1].seconds, 180, '今天应合并两本书的时长')
+assert.equal(days[days.length - 1].pages, 8)
+stats.saveNow()
+const stats2 = new StatsStore(path.join(tmpS, 'data', 'stats.json'))
+stats2.load()
+assert.equal(stats2.sortedBooks().length, 2)
+assert.equal(stats2.sortedBooks().find(([p]) => p === 'A/书一.epub')![1].seconds, 420, '统计应从磁盘完整恢复')
+assert.equal(todayKey(new Date('2026-09-25')).length, 10)
 
 console.log('SMOKE OK')

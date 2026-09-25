@@ -26,6 +26,7 @@ interface PdfPageProxy {
 	getViewport(params: { scale: number; rotation?: number }): PdfViewport
 	render(params: { canvasContext: CanvasRenderingContext2D; viewport: PdfViewport }): { promise: Promise<void>; cancel(): void }
 	streamTextContent(): unknown
+	getTextContent(): Promise<{ items: Array<{ str?: string }> }>
 	cleanup(): void
 }
 
@@ -66,6 +67,16 @@ interface PageEntry {
 	/** 同一页画布不允许并发 render：正在渲染时新请求排队，完成后补渲染 */
 	rendering: boolean
 	queued: boolean
+	/** 全文搜索缓存：拼接文本 + 各文字块起点偏移（与 textLayer 的 span 顺序一致） */
+	searchText?: { text: string; items: string[]; offsets: number[] } | null
+}
+
+interface SearchRange {
+	start: number
+	end: number
+	before: string
+	mid: string
+	after: string
 }
 
 const DPR = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2)
@@ -106,6 +117,25 @@ export class PdfView extends ItemView {
 	private annItemEls = new Map<string, HTMLElement>()
 	private revealTimer: number | null = null
 	private pointerDownAt: { x: number; y: number } | null = null
+
+	// 批注管理
+	private selectMode = false
+	private selectedIds = new Set<string>()
+	private sortMode: 'position' | 'recent' = 'position'
+
+	// 全文搜索
+	private sidebarTab: 'annotations' | 'search' = 'annotations'
+	private searchTaskId = 0
+	private pageMatches = new Map<number, SearchRange[]>()
+	private annTabBtn!: HTMLButtonElement
+	private searchTabBtn!: HTMLButtonElement
+	private annWrapEl!: HTMLElement
+	private searchWrapEl!: HTMLElement
+	private contentSearchInput!: HTMLInputElement
+	private searchCountEl!: HTMLElement
+	private searchResultsEl!: HTMLElement
+	private selectBarEl!: HTMLElement
+	private selectCountEl!: HTMLElement
 
 	constructor(leaf: WorkspaceLeaf, private plugin: GroveReaderPlugin) {
 		super(leaf)
@@ -283,16 +313,68 @@ export class PdfView extends ItemView {
 		const sideHead = this.sidebarEl.createDiv('grove-sidebar-head')
 		this.annCountEl = sideHead.createSpan('grove-ann-count')
 		this.annCountEl.setText('0 个批注')
-		const controls = this.sidebarEl.createDiv('grove-sidebar-controls')
+
+		// 页签：批注 / 全文搜索
+		const tabs = this.sidebarEl.createDiv('grove-sidebar-tabs')
+		this.annTabBtn = tabs.createEl('button', { text: '批注', cls: 'grove-sidebar-tab is-active' })
+		this.searchTabBtn = tabs.createEl('button', { text: '全文搜索', cls: 'grove-sidebar-tab' })
+		this.annTabBtn.addEventListener('click', () => this.#switchSidebarTab('annotations'))
+		this.searchTabBtn.addEventListener('click', () => this.#switchSidebarTab('search'))
+
+		// —— 批注页签 ——
+		this.annWrapEl = this.sidebarEl.createDiv('grove-tab-body')
+		const controls = this.annWrapEl.createDiv('grove-sidebar-controls')
 		this.searchInput = controls.createEl('input', {
 			cls: 'grove-ann-search',
 			attr: { type: 'search', placeholder: '搜索批注…' },
 		})
 		this.searchInput.addEventListener('input', () => {
 			this.sidebarQuery = this.searchInput.value.trim()
+			this.#saveFilterState()
 			this.#renderSidebar()
 		})
-		this.annListEl = this.sidebarEl.createDiv('grove-ann-list')
+		const manageRow = controls.createDiv('grove-ann-filters')
+		const sortBtn = manageRow.createEl('button', { cls: 'grove-manage-btn', text: '排序：位置' })
+		sortBtn.addEventListener('click', () => {
+			this.sortMode = this.sortMode === 'position' ? 'recent' : 'position'
+			sortBtn.setText(this.sortMode === 'position' ? '排序：位置' : '排序：最近')
+			this.#saveFilterState()
+			this.#renderSidebar()
+		})
+		const multiBtn = manageRow.createEl('button', { cls: 'grove-manage-btn', text: '多选' })
+		multiBtn.addEventListener('click', () => this.#setSelectMode(!this.selectMode))
+
+		this.selectBarEl = this.annWrapEl.createDiv('grove-select-bar grove-hidden')
+		this.selectCountEl = this.selectBarEl.createSpan('grove-select-count')
+		this.selectCountEl.setText('已选 0 条')
+		const delBtn = this.selectBarEl.createEl('button', { text: '删除所选', cls: 'grove-select-delete' })
+		delBtn.addEventListener('click', () => this.#deleteSelected())
+		const cancelBtn = this.selectBarEl.createEl('button', { text: '取消', cls: 'grove-select-cancel' })
+		cancelBtn.addEventListener('click', () => this.#setSelectMode(false))
+
+		this.annListEl = this.annWrapEl.createDiv('grove-ann-list')
+
+		// —— 全文搜索页签 ——
+		this.searchWrapEl = this.sidebarEl.createDiv('grove-tab-body grove-hidden')
+		const sControls = this.searchWrapEl.createDiv('grove-sidebar-controls')
+		this.contentSearchInput = sControls.createEl('input', {
+			cls: 'grove-ann-search',
+			attr: { type: 'search', placeholder: '输入关键词，回车搜索全文…' },
+		})
+		this.contentSearchInput.addEventListener('keydown', e => {
+			if (e.key === 'Enter') {
+				e.preventDefault()
+				this.#runContentSearch()
+			} else if (e.key === 'Escape') {
+				this.#clearContentSearch()
+			}
+		})
+		const sMeta = sControls.createDiv('grove-ann-filters')
+		this.searchCountEl = sMeta.createSpan('grove-filter-clear')
+		this.searchCountEl.setText('输入关键词后回车')
+		const clearSearchBtn = sMeta.createEl('button', { cls: 'grove-filter-clear', text: '清除' })
+		clearSearchBtn.addEventListener('click', () => this.#clearContentSearch())
+		this.searchResultsEl = this.searchWrapEl.createDiv('grove-ann-list')
 	}
 
 	#showEmpty(message: string): void {
@@ -399,6 +481,13 @@ export class PdfView extends ItemView {
 				this.pendingCfi = null
 				this.#jumpToCfi(c)
 			}
+			// 换书时重置搜索状态，恢复本书的记忆筛选
+			this.searchTaskId++
+			this.pageMatches.clear()
+			this.contentSearchInput.value = ''
+			this.searchResultsEl.empty()
+			this.#loadFilterState()
+			this.searchInput.value = this.sidebarQuery
 			this.#renderSidebar()
 			this.sidebarEl.classList.toggle('grove-hidden', !this.plugin.settings.openSidebarWithBook)
 		} catch (e) {
@@ -409,6 +498,7 @@ export class PdfView extends ItemView {
 	}
 
 	async #teardown(): Promise<void> {
+		this.searchTaskId++ // 取消进行中的全文搜索
 		this.#hidePopup()
 		if (this.saveTimer != null) {
 			window.clearTimeout(this.saveTimer)
@@ -572,7 +662,9 @@ export class PdfView extends ItemView {
 			const tl = new (pdfjsLib as unknown as {
 				TextLayer: new (o: { textContentSource: unknown; container: HTMLElement; viewport: PdfViewport }) => { render(): Promise<void> }
 			}).TextLayer({ textContentSource: page.streamTextContent(), container: p.textDiv, viewport: vp })
-			void tl.render().catch(e => console.error(`[Grove Reader] 第 ${n} 页文字层失败`, e))
+			tl.render()
+				.then(() => this.#applySearchHighlights(p))
+				.catch(e => console.error(`[Grove Reader] 第 ${n} 页文字层失败`, e))
 			return true
 		} catch (e) {
 			console.error(`[Grove Reader] 第 ${n} 页文字层创建失败`, e)
@@ -615,6 +707,7 @@ export class PdfView extends ItemView {
 		if (current !== this.currentPage && current >= 1 && current <= this.numPages) {
 			this.currentPage = current
 			this.progressLabel.setText(`${current} / ${this.numPages}`)
+			this.plugin.statsPageTurn(this.bookPath)
 			if (this.data) {
 				this.data.lastLocation = {
 					cfi: `page:${current}`,
@@ -952,11 +1045,236 @@ export class PdfView extends ItemView {
 	}
 
 	// ------------------------------------------------------------------
+	// 侧栏页签 / 全文搜索
+	// ------------------------------------------------------------------
+
+	#switchSidebarTab(tab: 'annotations' | 'search'): void {
+		this.sidebarTab = tab
+		this.annTabBtn.toggleClass('is-active', tab === 'annotations')
+		this.searchTabBtn.toggleClass('is-active', tab === 'search')
+		this.annWrapEl.toggleClass('grove-hidden', tab !== 'annotations')
+		this.searchWrapEl.toggleClass('grove-hidden', tab !== 'search')
+		if (tab === 'search') this.contentSearchInput.focus()
+	}
+
+	#clearContentSearch(): void {
+		this.searchTaskId++ // 取消进行中的搜索
+		this.pageMatches.clear()
+		this.contentSearchInput.value = ''
+		this.searchCountEl.setText('输入关键词后回车')
+		this.searchResultsEl.empty()
+		this.#unwrapSearchHits()
+	}
+
+	#findRanges(text: string, lowerQuery: string): SearchRange[] {
+		const hay = text.toLowerCase()
+		const out: SearchRange[] = []
+		let from = 0
+		for (;;) {
+			const start = hay.indexOf(lowerQuery, from)
+			if (start < 0) break
+			const end = start + lowerQuery.length
+			out.push({
+				start,
+				end,
+				before: text.slice(Math.max(0, start - 16), start),
+				mid: text.slice(start, end),
+				after: text.slice(end, end + 20),
+			})
+			from = end
+			if (out.length >= 500) break // 单页上限，防极端情况卡死
+		}
+		return out
+	}
+
+	/** 全文搜索：并发 4 提取各页文字（带缓存），大小写不敏感匹配 */
+	async #runContentSearch(): Promise<void> {
+		const q = this.contentSearchInput.value.trim()
+		const taskId = ++this.searchTaskId
+		this.pageMatches.clear()
+		this.#unwrapSearchHits()
+		this.searchResultsEl.empty()
+		if (!q) {
+			this.searchCountEl.setText('输入关键词后回车')
+			return
+		}
+		this.searchCountEl.setText('搜索中…')
+		const lower = q.toLowerCase()
+		const queue: number[] = []
+		for (let n = 1; n <= this.numPages; n++) queue.push(n)
+		let done = 0
+		const worker = async (): Promise<void> => {
+			while (queue.length) {
+				if (taskId !== this.searchTaskId) return
+				const n = queue.shift()!
+				let st = this.pages.get(n)?.searchText
+				if (!st) {
+					try {
+						const page = await this.pdfDoc?.getPage(n)
+						const tc = await page?.getTextContent()
+						if (taskId !== this.searchTaskId) return
+						const items = (tc?.items ?? []).map(i => i.str ?? '')
+						const offsets: number[] = []
+						let text = ''
+						for (const s of items) {
+							offsets.push(text.length)
+							text += s
+						}
+						st = { text, items, offsets }
+						const entry = this.pages.get(n)
+						if (entry) entry.searchText = st
+					} catch {
+						st = { text: '', items: [], offsets: [] }
+					}
+				}
+				const ranges = this.#findRanges(st.text, lower)
+				if (ranges.length) {
+					this.pageMatches.set(n, ranges)
+					// 已渲染的页面立即补高亮
+					const p = this.pages.get(n)
+					if (p && p.renderScale !== null && !p.rendering) this.#applySearchHighlights(p)
+				}
+				done++
+				if (taskId === this.searchTaskId) this.searchCountEl.setText(`搜索中… ${done} / ${this.numPages} 页`)
+			}
+		}
+		await Promise.all([worker(), worker(), worker(), worker()])
+		if (taskId !== this.searchTaskId) return
+		this.#renderSearchResults()
+	}
+
+	#renderSearchResults(): void {
+		this.searchResultsEl.empty()
+		const pages = [...this.pageMatches.keys()].sort((a, b) => a - b)
+		const total = pages.reduce((s, n) => s + this.pageMatches.get(n)!.length, 0)
+		this.searchCountEl.setText(total ? `${pages.length} 页中命中 ${total} 处` : '没有找到，试试更短的关键词')
+		if (!total) return
+		for (const n of pages) {
+			const group = this.searchResultsEl.createDiv('grove-search-group')
+			group.createDiv('grove-search-page').setText(`第 ${n} 页 · ${this.pageMatches.get(n)!.length} 处`)
+			for (const m of this.pageMatches.get(n)!) {
+				const item = group.createDiv('grove-search-item')
+				item.createSpan('grove-search-frag').setText(m.before)
+				item.createSpan('grove-search-hit-text').setText(m.mid)
+				item.createSpan('grove-search-frag').setText(m.after)
+				item.addEventListener('click', () => {
+					this.#scrollToPage(n)
+					// 高亮可能尚未包裹（页面还没渲染过）：到位渲染后会自动补
+				})
+			}
+		}
+	}
+
+	/** 把当前页文字层里命中的子串包上高亮 span（先清后包） */
+	#applySearchHighlights(p: PageEntry): void {
+		const n = Number(p.wrap.dataset.page)
+		const ranges = this.pageMatches.get(n)
+		this.#unwrapSearchHits(p)
+		if (!ranges?.length) return
+		const st = p.searchText
+		if (!st) return
+		const spans = Array.from(p.textDiv.querySelectorAll('span'))
+		for (let k = 0; k < st.items.length && k < spans.length; k++) {
+			if (!st.items[k]) continue
+			const itemStart = st.offsets[k]
+			const itemEnd = itemStart + st.items[k].length
+			// 同一 span 内多个命中按位置倒序包裹，避免拆分后偏移失效
+			const local = ranges
+				.filter(r => r.end > itemStart && r.start < itemEnd)
+				.map(r => ({ lo: Math.max(r.start, itemStart) - itemStart, hi: Math.min(r.end, itemEnd) - itemStart }))
+				.sort((a, b) => b.lo - a.lo)
+			for (const { lo, hi } of local) this.#wrapRange(spans[k], lo, hi)
+		}
+	}
+
+	#wrapRange(span: HTMLElement, lo: number, hi: number): void {
+		const node = span.firstChild
+		if (!node || node.nodeType !== Node.TEXT_NODE) return
+		const text = node.textContent ?? ''
+		if (lo >= hi || hi > text.length) return
+		const mid = document.createElement('span')
+		mid.className = 'grove-search-hit'
+		mid.textContent = text.slice(lo, hi)
+		const after = document.createTextNode(text.slice(hi))
+		node.textContent = text.slice(0, lo)
+		node.after(mid)
+		mid.after(after)
+	}
+
+	#unwrapSearchHits(p?: PageEntry): void {
+		const scopes = p ? [p.textDiv] : [...this.pages.values()].map(x => x.textDiv)
+		for (const scope of scopes) {
+			for (const mark of Array.from(scope.querySelectorAll('span.grove-search-hit'))) {
+				mark.replaceWith(document.createTextNode(mark.textContent ?? ''))
+				mark.parentNode?.normalize()
+			}
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// 批注多选删除
+	// ------------------------------------------------------------------
+
+	#setSelectMode(on: boolean): void {
+		this.selectMode = on
+		this.selectedIds.clear()
+		this.selectBarEl.toggleClass('grove-hidden', !on)
+		this.#refreshSelectBar()
+		this.#renderSidebar()
+	}
+
+	#refreshSelectBar(): void {
+		if (this.selectMode) this.selectCountEl.setText(`已选 ${this.selectedIds.size} 条`)
+	}
+
+	#toggleSelected(id: string): void {
+		if (this.selectedIds.has(id)) this.selectedIds.delete(id)
+		else this.selectedIds.add(id)
+		this.#refreshSelectBar()
+		const item = this.annItemEls.get(id)
+		item?.toggleClass('grove-ann-selected', this.selectedIds.has(id))
+	}
+
+	async #deleteSelected(): Promise<void> {
+		const ids = [...this.selectedIds]
+		if (!ids.length) return
+		new ConfirmModal(this.app, `删除所选的 ${ids.length} 条批注？此操作不可撤销。`, () => {
+			void this.#doDeleteSelected(ids)
+		}).open()
+	}
+
+	async #doDeleteSelected(ids: string[]): Promise<void> {
+		const arr = this.data?.annotations
+		if (!arr) return
+		const touchedPages = new Set<number>()
+		for (const id of ids) {
+			const i = arr.findIndex(a => a.id === id)
+			if (i < 0) continue
+			const a = arr[i]
+			if (a.pdf) touchedPages.add(a.pdf.page)
+			arr.splice(i, 1)
+		}
+		this.#scheduleSave(true)
+		this.selectedIds.clear()
+		this.#refreshSelectBar()
+		this.#renderSidebar()
+		for (const n of touchedPages) {
+			const p = this.pages.get(n)
+			if (p) this.#drawHighlightsOf(p.wrap)
+		}
+		new Notice(`Grove Reader：已删除 ${ids.length} 条批注（历史备份仍保留在插件数据目录中）`)
+	}
+
+	// ------------------------------------------------------------------
 	// 批注侧栏
 	// ------------------------------------------------------------------
 
 	#renderSidebar(): void {
-		const all = [...(this.data?.annotations ?? [])].sort((x, y) => (x.sectionIndex ?? 0) - (y.sectionIndex ?? 0))
+		const all = [...(this.data?.annotations ?? [])].sort((x, y) =>
+			this.sortMode === 'recent'
+				? y.createdAt - x.createdAt
+				: (x.sectionIndex ?? 0) - (y.sectionIndex ?? 0),
+		)
 		const q = this.sidebarQuery.toLowerCase()
 		const filtered = q ? all.filter(a => `${a.text}\n${a.note ?? ''}\n${a.chapter ?? ''}`.toLowerCase().includes(q)) : all
 		this.annCountEl.setText(q ? `${filtered.length} / ${all.length} 个批注` : `${all.length} 个批注`)
@@ -973,8 +1291,15 @@ export class PdfView extends ItemView {
 		for (const a of filtered) {
 			const item = document.createElement('div')
 			item.addClass('grove-ann')
+			item.toggleClass('grove-ann-selected', this.selectedIds.has(a.id))
 			this.annItemEls.set(a.id, item)
 			const head = item.createDiv('grove-ann-head')
+			if (this.selectMode) {
+				const check = head.createEl('input', { attr: { type: 'checkbox' }, cls: 'grove-ann-check' })
+				check.checked = this.selectedIds.has(a.id)
+				check.addEventListener('click', e => e.stopPropagation())
+				check.addEventListener('change', () => this.#toggleSelected(a.id))
+			}
 			const dot = head.createSpan('grove-ann-dot')
 			dot.style.backgroundColor = colorCss(a.color)
 			dot.title = '点击切换颜色'
@@ -1008,6 +1333,30 @@ export class PdfView extends ItemView {
 	// ------------------------------------------------------------------
 	// 持久化
 	// ------------------------------------------------------------------
+
+	/** 批注栏筛选/排序按书记忆（localStorage） */
+	#filterKey(): string {
+		return `grove-ann-filter:pdf:${this.plugin.store.bookId(this.bookPath)}`
+	}
+
+	#loadFilterState(): void {
+		try {
+			const raw = localStorage.getItem(this.#filterKey())
+			const f = raw ? (JSON.parse(raw) as { q?: string; sort?: 'position' | 'recent' }) : {}
+			this.sidebarQuery = f.q ?? ''
+			if (f.sort === 'recent' || f.sort === 'position') this.sortMode = f.sort
+		} catch {
+			this.sidebarQuery = ''
+		}
+	}
+
+	#saveFilterState(): void {
+		try {
+			localStorage.setItem(this.#filterKey(), JSON.stringify({ q: this.sidebarQuery, sort: this.sortMode }))
+		} catch {
+			// ignore
+		}
+	}
 
 	#scheduleSave(immediate = false): void {
 		if (!this.data) return

@@ -7,7 +7,7 @@ import type GroveReaderPlugin from './main'
 import { SUPPORTED_BOOK_EXTS, isReaderExt, isShelfExt } from './types'
 import { basenameOf, cleanPdfDisplayTitle, duplicateKeyOf, formatAuthor, formatBytes, formatLanguageMap, isAbsolutePath, truncate } from './util'
 import { readPdfShelfInfo } from './pdfThumbnail'
-import { BookInfoModal, ConfirmModal, FolderPromptModal, ListPickerModal, TextPromptModal } from './modals'
+import { BookInfoModal, ConfirmModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
 import type { BookInfoValues } from './modals'
 import type { BookList } from './lists'
 
@@ -268,6 +268,9 @@ export class BookshelfView extends ItemView {
 		const refreshBtn = head.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '重新扫描' } })
 		setIcon(refreshBtn, 'refresh-cw')
 		refreshBtn.addEventListener('click', () => void this.refresh())
+		const statsBtn = head.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '阅读统计' } })
+		setIcon(statsBtn, 'timer')
+		statsBtn.addEventListener('click', () => new ReadingStatsModal(this.app, this.plugin).open())
 
 		this.hintEl = root.createDiv('grove-shelf-folders')
 		this.listsEl = root.createDiv('grove-shelf-lists')

@@ -1,6 +1,9 @@
 import { App, AbstractInputSuggest, FuzzySuggestModal, Modal, Notice, TFile, TFolder } from 'obsidian'
 import { SUPPORTED_BOOK_EXTS } from './types'
 import type { BookList } from './lists'
+import { todayKey } from './stats'
+import type GroveReaderPlugin from './main'
+import { basenameOf } from './util'
 
 export class BookPickerModal extends FuzzySuggestModal<TFile> {
 	constructor(app: App, private onPick: (file: TFile) => void) {
@@ -240,6 +243,75 @@ export class FolderSuggest extends AbstractInputSuggest<TFolder> {
 		// AbstractInputSuggest.setValue 不触发 input/change 事件，需手动通知调用方保存
 		this.onPicked?.(folder.path)
 		this.close()
+	}
+}
+
+function formatDuration(seconds: number): string {
+	if (seconds < 60) return `${Math.round(seconds)} 秒`
+	if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟`
+	return `${(seconds / 3600).toFixed(1)} 小时`
+}
+
+function formatLastRead(ts: number): string {
+	if (!ts) return '—'
+	const days = Math.floor((Date.now() - ts) / 86_400_000)
+	if (days <= 0) return '今天'
+	if (days === 1) return '昨天'
+	if (days < 30) return `${days} 天前`
+	return new Date(ts).toLocaleDateString('zh-CN')
+}
+
+/** 阅读/翻页累计统计：按书 + 最近 14 天 */
+export class ReadingStatsModal extends Modal {
+	constructor(
+		app: App,
+		private plugin: GroveReaderPlugin,
+	) {
+		super(app)
+	}
+
+	onOpen(): void {
+		this.contentEl.empty()
+		this.contentEl.createEl('h3', { text: '阅读统计' })
+		const stats = this.plugin.stats
+		const books = stats.sortedBooks()
+
+		const table = this.contentEl.createEl('table', { cls: 'grove-stats-table' })
+		const head = table.createEl('tr')
+		for (const h of ['书名', '累计阅读', '天数', '今日', '最近阅读']) head.createEl('th', { text: h })
+		if (!books.length) {
+			table.createEl('tr').createEl('td', { text: '还没有阅读记录。打开一本书读一会儿，这里就会出现数据。', attr: { colspan: '5' } })
+		}
+		const today = todayKey()
+		for (const [bookPath, b] of books) {
+			const title = this.plugin.shelfCache.get(bookPath)?.title || basenameOf(bookPath).replace(/\.[^.]+$/, '')
+			const tr = table.createEl('tr')
+			tr.createEl('td', { text: title.length > 24 ? title.slice(0, 24) + '…' : title, attr: { title: bookPath } })
+			tr.createEl('td', { text: formatDuration(b.seconds) })
+			tr.createEl('td', { text: String(Object.keys(b.days).length) })
+			tr.createEl('td', { text: b.days[today] ? formatDuration(b.days[today].seconds) : '—' })
+			tr.createEl('td', { text: formatLastRead(b.lastRead) })
+		}
+
+		if (books.length) {
+			this.contentEl.createEl('h4', { text: '最近 14 天' })
+			const days = stats.recentDays(14)
+			const max = Math.max(...days.map(d => d.seconds), 1)
+			const daysEl = this.contentEl.createDiv('grove-stats-days')
+			for (const d of [...days].reverse()) {
+				const row = daysEl.createDiv('grove-stats-day')
+				row.createSpan('grove-stats-day-date').setText(d.day.slice(5))
+				const bar = row.createDiv('grove-stats-day-bar')
+				if (d.seconds > 0) bar.style.width = `${Math.max(3, Math.round((d.seconds / max) * 100))}%`
+				row.createSpan('grove-stats-day-val').setText(
+					d.seconds > 0 ? `${formatDuration(d.seconds)}${d.pages ? ` · ${d.pages} 页` : ''}` : '—',
+				)
+			}
+		}
+	}
+
+	onClose(): void {
+		this.contentEl.empty()
 	}
 }
 
