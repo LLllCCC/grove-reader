@@ -987,6 +987,11 @@
 
 /* ---------- 阅读统计 ---------- */
 
+.modal.grove-stats-modal {
+	min-width: 560px;
+	max-width: 780px;
+}
+
 .grove-stats-table {
 	width: 100%;
 	border-collapse: collapse;
@@ -997,43 +1002,105 @@
 	text-align: left;
 	color: var(--text-muted);
 	font-weight: 500;
-	padding: 4px 8px;
+	padding: 4px 10px;
 	border-bottom: 1px solid var(--background-modifier-border);
 }
 
 .grove-stats-table td {
-	padding: 5px 8px;
+	padding: 7px 10px;
 	border-bottom: 1px solid var(--background-modifier-border-hover);
 }
 
-.grove-stats-days {
-	display: flex;
-	flex-direction: column;
-	gap: 3px;
+.grove-stats-table tr:last-child td {
+	border-bottom: none;
 }
 
-.grove-stats-day {
+.grove-stats-table th:not(:first-child),
+.grove-stats-table td:not(:first-child) {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.grove-stats-table tr:hover td {
+	background: var(--background-modifier-hover);
+}
+
+.grove-stats-num.grove-stats-today {
+	color: var(--interactive-accent);
+	font-weight: 600;
+}
+
+.grove-stats-chart-head {
 	display: flex;
-	align-items: center;
-	gap: 8px;
+	align-items: baseline;
+	gap: 10px;
+	margin: 16px 2px 6px;
+}
+
+.grove-stats-chart-title {
+	font-weight: 600;
+}
+
+.grove-stats-chart-total {
+	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 }
 
-.grove-stats-day-date {
-	flex: none;
-	width: 46px;
-	color: var(--text-muted);
+/* 14 天柱状图：底对齐，空日为浅色占位槽，悬停看数值 */
+
+.grove-stats-chart {
+	display: flex;
+	align-items: stretch;
+	gap: 3px;
+	height: 116px;
+	padding: 2px 2px 0;
+}
+
+.grove-stats-col {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+}
+
+.grove-stats-col-track {
+	flex: 1;
+	width: 100%;
+	max-width: 22px;
+	display: flex;
+	align-items: flex-end;
+	justify-content: center;
+	background: var(--background-secondary);
+	border-radius: 4px;
+}
+
+.grove-stats-col-bar {
+	width: 72%;
+	border-radius: 3px;
+	background: var(--interactive-accent);
+	opacity: 0.8;
+	transition: opacity 0.15s ease;
+}
+
+.grove-stats-col:hover .grove-stats-col-bar {
+	opacity: 1;
+}
+
+.grove-stats-col.is-today .grove-stats-col-bar {
+	opacity: 1;
+}
+
+.grove-stats-col-date {
+	font-size: 9px;
+	line-height: 1;
+	color: var(--text-faint);
 	font-variant-numeric: tabular-nums;
 }
 
-.grove-stats-day-bar {
-	flex: none;
-	height: 10px;
-	border-radius: 3px;
-	background: var(--interactive-accent);
-	opacity: 0.75;
-}
-
-.grove-stats-day-val {
-	color: var(--text-muted);
+.grove-stats-col.is-today .grove-stats-col-date {
+	color: var(--interactive-accent);
+	font-weight: 700;
 }

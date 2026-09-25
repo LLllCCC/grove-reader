@@ -272,6 +272,7 @@ export class ReadingStatsModal extends Modal {
 
 	onOpen(): void {
 		this.contentEl.empty()
+		this.modalEl.addClass('grove-stats-modal')
 		this.contentEl.createEl('h3', { text: '阅读统计' })
 		const stats = this.plugin.stats
 		const books = stats.sortedBooks()
@@ -287,25 +288,41 @@ export class ReadingStatsModal extends Modal {
 			const title = this.plugin.shelfCache.get(bookPath)?.title || basenameOf(bookPath).replace(/\.[^.]+$/, '')
 			const tr = table.createEl('tr')
 			tr.createEl('td', { text: title.length > 24 ? title.slice(0, 24) + '…' : title, attr: { title: bookPath } })
-			tr.createEl('td', { text: formatDuration(b.seconds) })
-			tr.createEl('td', { text: String(Object.keys(b.days).length) })
-			tr.createEl('td', { text: b.days[today] ? formatDuration(b.days[today].seconds) : '—' })
+			tr.createEl('td', { cls: 'grove-stats-num', text: formatDuration(b.seconds) })
+			tr.createEl('td', { cls: 'grove-stats-num', text: String(Object.keys(b.days).length) })
+			const todayCell = tr.createEl('td', { cls: 'grove-stats-num' })
+			if (b.days[today]) {
+				todayCell.setText(formatDuration(b.days[today].seconds))
+				todayCell.addClass('grove-stats-today')
+			} else {
+				todayCell.setText('—')
+			}
 			tr.createEl('td', { text: formatLastRead(b.lastRead) })
 		}
 
 		if (books.length) {
-			this.contentEl.createEl('h4', { text: '最近 14 天' })
 			const days = stats.recentDays(14)
+			const totalSec = days.reduce((s, d) => s + d.seconds, 0)
+			const totalPages = days.reduce((s, d) => s + d.pages, 0)
+			const headRow = this.contentEl.createDiv('grove-stats-chart-head')
+			headRow.createSpan('grove-stats-chart-title').setText('最近 14 天')
+			headRow.createSpan('grove-stats-chart-total').setText(
+				`合计 ${formatDuration(totalSec)}${totalPages ? ` · ${totalPages} 页` : ''}`,
+			)
 			const max = Math.max(...days.map(d => d.seconds), 1)
-			const daysEl = this.contentEl.createDiv('grove-stats-days')
-			for (const d of [...days].reverse()) {
-				const row = daysEl.createDiv('grove-stats-day')
-				row.createSpan('grove-stats-day-date').setText(d.day.slice(5))
-				const bar = row.createDiv('grove-stats-day-bar')
-				if (d.seconds > 0) bar.style.width = `${Math.max(3, Math.round((d.seconds / max) * 100))}%`
-				row.createSpan('grove-stats-day-val').setText(
-					d.seconds > 0 ? `${formatDuration(d.seconds)}${d.pages ? ` · ${d.pages} 页` : ''}` : '—',
-				)
+			const chart = this.contentEl.createDiv('grove-stats-chart')
+			for (const d of days) {
+				const col = chart.createDiv('grove-stats-col')
+				col.title = d.seconds > 0
+					? `${d.day}：${formatDuration(d.seconds)}${d.pages ? ` · ${d.pages} 页` : ''}`
+					: `${d.day}：未阅读`
+				const track = col.createDiv('grove-stats-col-track')
+				if (d.seconds > 0) {
+					const bar = track.createDiv('grove-stats-col-bar')
+					bar.style.height = `${Math.max(4, Math.round((d.seconds / max) * 100))}%`
+				}
+				col.createDiv('grove-stats-col-date').setText(d.day.slice(8))
+				if (d.day === today) col.addClass('is-today')
 			}
 		}
 	}
