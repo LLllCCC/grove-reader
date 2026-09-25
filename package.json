@@ -9,7 +9,9 @@
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production && node scripts/sync-pdfjs-assets.mjs",
 		"types": "tsc -noEmit -skipLibCheck",
 		"sample": "node scripts/make-sample-epub.mjs",
-		"smoke": "node esbuild.config.mjs production && node scripts/smoke.mjs"
+		"smoke": "node esbuild.config.mjs production && node scripts/smoke.mjs",
+		"foliate:check": "node scripts/foliate-check.mjs",
+		"obsidian:eval": "node scripts/obsidian-eval.mjs"
 	},
 	"devDependencies": {
 		"@types/node": "^22.10.2",
