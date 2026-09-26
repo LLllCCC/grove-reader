@@ -1,6 +1,8 @@
-import { App, PluginSettingTab, Setting } from 'obsidian'
+import { App, Notice, PluginSettingTab, Setting } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import { FolderPromptModal, FolderSuggest } from './modals'
+import { BACKUP_FOLDER_NAME } from './types'
+import { isAbsolutePath } from './util'
 
 export class GroveSettingTab extends PluginSettingTab {
 	constructor(app: App, private plugin: GroveReaderPlugin) {
@@ -95,8 +97,35 @@ export class GroveSettingTab extends PluginSettingTab {
 		// —— 数据安全 ——
 		containerEl.createEl('h3', { text: '数据安全' })
 		new Setting(containerEl)
+			.setName('库内备份文件夹')
+			.setDesc('「立即备份」写入的库内文件夹（相对路径，可含子目录，如「00-Obsidian插件/插件运行时产生的文件/Grove Reader/数据备份」）。修改后光标离开输入框时，旧文件夹里的备份自动转移到新路径')
+			.addText(text => {
+				let committed = this.plugin.settings.backupFolder?.trim() || BACKUP_FOLDER_NAME
+				text
+					.setPlaceholder(BACKUP_FOLDER_NAME)
+					.setValue(committed)
+					.onChange(async value => {
+						this.plugin.settings.backupFolder = value.trim() || BACKUP_FOLDER_NAME
+						await this.plugin.saveSettings()
+					})
+				text.inputEl.addEventListener('blur', async () => {
+					const next = this.plugin.settings.backupFolder?.trim() || BACKUP_FOLDER_NAME
+					if (next === committed) return
+					if (isAbsolutePath(next)) {
+						new Notice('Grove Reader：这里请填库内相对路径（绝对路径请用下面的「备份额外保存到」）')
+						this.plugin.settings.backupFolder = committed
+						await this.plugin.saveSettings()
+						text.setValue(committed)
+						return
+					}
+					const prev = committed
+					committed = next
+					await this.plugin.migrateBackupFolder(prev, next)
+				})
+			})
+		new Setting(containerEl)
 			.setName('备份批注数据到库内')
-			.setDesc('把全部书籍批注 JSON、书架缓存、书单与自定义封面导出到库内「Grove Reader 数据备份」文件夹。该文件夹是普通库内文件，随库同步，删除或重装插件都不受影响。建议定期执行（命令面板也有同名命令）')
+			.setDesc('把全部书籍批注 JSON、书架缓存、书单与自定义封面导出到上面的「库内备份文件夹」。该文件夹是普通库内文件，随库同步，删除或重装插件都不受影响。建议定期执行（命令面板也有同名命令）')
 			.addButton(button =>
 				button.setButtonText('立即备份').onClick(() => void this.plugin.exportDataBackup()))
 		new Setting(containerEl)

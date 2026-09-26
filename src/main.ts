@@ -551,6 +551,11 @@ export default class GroveReaderPlugin extends Plugin {
 		if (f instanceof TFile) await this.app.workspace.getLeaf('tab').openFile(f)
 	}
 
+	/** 库内备份文件夹（设置里可改；空/异常时回退默认名） */
+	backupFolderRel(): string {
+		return this.settings.backupFolder?.trim() || BACKUP_FOLDER_NAME
+	}
+
 	/**
 	 * 把全部批注/书架数据导出到库内普通文件夹（随库同步，删除/重装插件都不受影响）。
 	 * 批注 JSON 的权威副本仍在插件 data/ 下；这里是可带走的保险副本，防插件目录被误删。
@@ -564,7 +569,8 @@ export default class GroveReaderPlugin extends Plugin {
 		// 刷盘挂起的写入，保证导出的是最新状态
 		this.shelfCache.saveNow()
 		this.lists.saveNow()
-		const root = pathModule.join(this.vaultBase, BACKUP_FOLDER_NAME)
+		const rel = this.backupFolderRel()
+		const root = pathModule.join(this.vaultBase, rel)
 		try {
 			// 只清我们自己的文件，不动用户可能放进该文件夹的其他内容
 			const prune = async (dir: string, filter: (name: string) => boolean): Promise<void> => {
@@ -634,17 +640,48 @@ export default class GroveReaderPlugin extends Plugin {
 			const target = this.settings.backupTargetDir?.trim()
 			if (target) {
 				try {
-					await copyDirAsync(root, pathModule.join(target, BACKUP_FOLDER_NAME))
+					await copyDirAsync(root, pathModule.join(target, rel))
 					extra = `，并已复制一份到 ${target}`
 				} catch (e) {
 					console.error('[Grove Reader] 复制备份到额外位置失败', e)
 					extra = `（额外位置 ${target} 复制失败，库内备份已完成；请检查路径/磁盘是否可用）`
 				}
 			}
-			new Notice(`Grove Reader：已备份 ${bookCount} 本书的批注数据到库内「${BACKUP_FOLDER_NAME}」${extra}`)
+			new Notice(`Grove Reader：已备份 ${bookCount} 本书的批注数据到库内「${rel}」${extra}`)
 		} catch (e) {
 			console.error('[Grove Reader] 备份批注数据失败', e)
 			new Notice(`Grove Reader：备份失败（${e instanceof Error ? e.message : String(e)}）`)
+		}
+	}
+
+	/** 设置里改了库内备份文件夹后，把旧文件夹的内容转移到新路径（同名覆盖，旧文件夹清空后删除） */
+	async migrateBackupFolder(from: string, to: string): Promise<void> {
+		if (!this.vaultBase) return
+		const src = pathModule.join(this.vaultBase, from)
+		const dst = pathModule.join(this.vaultBase, to)
+		if (src === dst) return
+		try {
+			await fsp.access(src)
+		} catch {
+			return // 旧文件夹还没生成过备份，无需转移
+		}
+		try {
+			await fsp.mkdir(pathModule.dirname(dst), { recursive: true })
+			try {
+				await fsp.access(dst)
+				// 新路径已存在：逐条合并，同名以旧文件夹里的为准（都是可再生的备份）
+				for (const name of await fsp.readdir(src)) {
+					await fsp.rm(pathModule.join(dst, name), { force: true, recursive: true }).catch(() => { })
+					await fsp.rename(pathModule.join(src, name), pathModule.join(dst, name))
+				}
+			} catch {
+				await fsp.rename(src, dst)
+			}
+			await fsp.rmdir(src).catch(() => { }) // 只在旧文件夹已空时才删得掉
+			new Notice(`Grove Reader：库内备份已转移到「${to}」`)
+		} catch (e) {
+			console.error('[Grove Reader] 转移备份文件夹失败', e)
+			new Notice(`Grove Reader：转移备份文件夹失败（${e instanceof Error ? e.message : String(e)}），已保留原路径`)
 		}
 	}
 

@@ -148,6 +148,8 @@ export interface GroveSettings {
 	autoUpdateNote: boolean
 	/** 「备份批注数据到库内」执行时额外复制一份的本机路径（另一块盘/优盘）；空 = 关闭 */
 	backupTargetDir?: string
+	/** 「备份批注数据到库内」写入的库内文件夹（相对路径）；改路径后旧备份自动转移 */
+	backupFolder: string
 	appearance: ReaderAppearance
 }
 
@@ -159,5 +161,6 @@ export const DEFAULT_SETTINGS: GroveSettings = {
 	shelfSort: 'default',
 	openSidebarWithBook: true,
 	autoUpdateNote: true,
+	backupFolder: BACKUP_FOLDER_NAME,
 	appearance: { ...DEFAULT_APPEARANCE },
 }
