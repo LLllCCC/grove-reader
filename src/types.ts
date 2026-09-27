@@ -94,7 +94,7 @@ export interface BackgroundPreset {
 export const BACKGROUND_PRESETS: BackgroundPreset[] = [
 	{ key: 'white', name: '纸白', bg: '#ffffff', fg: '#2b2b2b' },
 	{ key: 'sepia', name: '米黄', bg: '#f5efdc', fg: '#4a3b2a' },
-	{ key: 'green', name: '护眼', bg: '#cde6d0', fg: '#2c3a2f' },
+	{ key: 'green', name: '护眼', bg: '#c0edc6', fg: '#2c3a2f' },
 	{ key: 'night', name: '夜间', bg: '#191b1d', fg: '#b9bdc2' },
 ]
 

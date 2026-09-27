@@ -21,7 +21,7 @@ import { PdfView, VIEW_TYPE_GROVE_PDF } from './pdfView'
 import { BookPickerModal, ReadingStatsModal } from './modals'
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
-import { bookIdFor, isAbsolutePath, sanitizeFileName } from './util'
+import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
 import { isReaderExt } from './types'
 import { usageDocMarkdown, USAGE_DOC_NAME } from './usageDoc'
 
@@ -418,6 +418,9 @@ export default class GroveReaderPlugin extends Plugin {
 			}
 		}
 
+		// 书名清洗后笔记文件名里还带数字前缀的，先改名再写入
+		if (noteFile) noteFile = await this.#syncNoteFileName(data, noteFile)
+
 		const existing = noteFile ? await this.app.vault.read(noteFile) : null
 
 		// 使用指南：每个笔记文件夹只创建一次
@@ -442,6 +445,28 @@ export default class GroveReaderPlugin extends Plugin {
 		}
 		const leaf = this.app.workspace.getLeaf('split')
 		await leaf.openFile(target)
+	}
+
+	/** 书名清洗（去掉数字 ID 前缀）后，把仍带旧前缀的笔记文件一起改名并更新 notePath */
+	async #syncNoteFileName(data: BookData, file: TFile): Promise<TFile> {
+		const stem = file.basename.replace(/ - 阅读笔记( \d+)?$/, '')
+		const stripped = stripNumericTitlePrefix(stem)
+		if (!stripped || stripped === stem) return file
+		const folder = file.parent?.path ?? '/'
+		const targetPath = normalizePath(`${folder}/${stripped} - 阅读笔记.md`)
+		if (this.app.vault.getAbstractFileByPath(targetPath)) return file
+		try {
+			await this.app.fileManager.renameFile(file, targetPath)
+			if (data.notePath === file.path) {
+				data.notePath = targetPath
+				this.store.save(data)
+			}
+			const moved = this.app.vault.getAbstractFileByPath(targetPath)
+			return moved instanceof TFile ? moved : file
+		} catch (e) {
+			console.error('[Grove Reader] 笔记跟随书名清洗改名失败', e)
+			return file
+		}
 	}
 
 	/** 读取模板并把批注数据渲染成完整笔记 Markdown（含 frontmatter 与标记区） */
@@ -477,12 +502,13 @@ export default class GroveReaderPlugin extends Plugin {
 	async #autoRefreshNote(view: ReaderView | PdfView): Promise<void> {
 		const data = view.snapshot()
 		if (!data?.notePath) return
-		const file = this.app.vault.getAbstractFileByPath(data.notePath)
+		let file = this.app.vault.getAbstractFileByPath(data.notePath)
 		if (!(file instanceof TFile)) return
 		try {
-			const existing = await this.app.vault.read(file)
+			const synced = await this.#syncNoteFileName(data, file)
+			const existing = await this.app.vault.read(synced)
 			const markdown = await this.#composeNoteMarkdown(data, existing, false)
-			if (markdown !== existing) await this.app.vault.modify(file, markdown)
+			if (markdown !== existing) await this.app.vault.modify(synced, markdown)
 		} catch (e) {
 			console.error('[Grove Reader] 自动更新笔记失败', e)
 		}

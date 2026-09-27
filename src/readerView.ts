@@ -11,7 +11,7 @@ import {
 } from './types'
 import { CommentModal, ConfirmModal } from './modals'
 import { Overlayer } from '../lib/foliate-js/overlayer.js'
-import { basenameOf, contrastFg, formatAuthor, formatLanguageMap, isDarkColor, randomId, truncate } from './util'
+import { basenameOf, contrastFg, formatAuthor, formatLanguageMap, isDarkColor, randomId, stripNumericTitlePrefix, truncate } from './util'
 import '../lib/foliate-js/view.js'
 
 export const VIEW_TYPE_GROVE_READER = 'grove-reader-view'
@@ -372,13 +372,15 @@ export class ReaderView extends ItemView {
 			const meta = foliate.book?.metadata
 			const shelfEntry = this.plugin.shelfCache.get(target)
 			// 书架上手动编辑过的书名/作者优先于内嵌元数据（笔记标题取 data.title）
-			this.bookTitle = shelfEntry?.title || formatLanguageMap(meta?.title) || name.replace(/\.[^.]+$/, '')
+			this.bookTitle = shelfEntry?.title || stripNumericTitlePrefix(formatLanguageMap(meta?.title)) || name.replace(/\.[^.]+$/, '')
 			if (!data.title) {
 				data.title = this.bookTitle
 				data.author = shelfEntry?.author || formatAuthor(meta?.author)
 				this.#scheduleSave(true)
 			}
 			this.#updateHeaderTitle()
+			// 打开书即校正一次笔记标题/文件名（如数字 ID 前缀清洗），无变化时不会写盘
+			if (data.notePath) this.plugin.scheduleNoteRefresh(this)
 			this.#applyAppearance()
 			this.#buildToc(foliate.book?.toc ?? [])
 			await foliate.init({ lastLocation: data.lastLocation?.cfi || undefined })

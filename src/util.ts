@@ -88,6 +88,11 @@ export function basenameOf(p: string): string {
 	return p.split(/[\\/]/).filter(Boolean).pop() ?? p
 }
 
+/** 去掉下载站/书库给文件名加的数字 ID 前缀，如 `165293_一生受用的概率统计` → `一生受用的概率统计` */
+export function stripNumericTitlePrefix(t: string): string {
+	return t.replace(/^\d{3,}[_\-\s]+/, '')
+}
+
 /**
  * 清洗 PDF 文件名作为书架展示标题：
  * 去掉 [OCR]、(Z-Library) 等常见标记与尾部下载时间戳，
@@ -96,6 +101,7 @@ export function basenameOf(p: string): string {
 export function cleanPdfDisplayTitle(fileName: string): string {
 	const original = fileName.replace(/\.[^.]+$/, '')
 	let t = original
+	t = stripNumericTitlePrefix(t)
 	t = t.replace(/\.(layered|ocr)\b/gi, ' ')
 	t = t.replace(/\[\s*ocr\s*\]/gi, ' ')
 	t = t.replace(/\(\s*z[-\s]?lib(rary)?\s*\)/gi, ' ')

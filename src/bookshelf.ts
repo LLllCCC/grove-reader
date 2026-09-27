@@ -5,7 +5,7 @@ import { shell } from 'electron'
 import { makeBook } from '../lib/foliate-js/view.js'
 import type GroveReaderPlugin from './main'
 import { SUPPORTED_BOOK_EXTS, isReaderExt, isShelfExt } from './types'
-import { basenameOf, cleanPdfDisplayTitle, duplicateKeyOf, formatAuthor, formatBytes, formatLanguageMap, isAbsolutePath, truncate } from './util'
+import { basenameOf, cleanPdfDisplayTitle, duplicateKeyOf, formatAuthor, formatBytes, formatLanguageMap, isAbsolutePath, stripNumericTitlePrefix, truncate } from './util'
 import { readPdfShelfInfo } from './pdfThumbnail'
 import { BookInfoModal, ConfirmModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
 import type { BookInfoValues } from './modals'
@@ -62,7 +62,13 @@ export class ShelfCache {
 	load(): void {
 		try {
 			const parsed = JSON.parse(fs.readFileSync(this.file, 'utf-8')) as ShelfCacheFile
-			if (parsed && typeof parsed === 'object' && parsed.entries) this.data = parsed
+			if (parsed && typeof parsed === 'object' && parsed.entries) {
+				this.data = parsed
+				// 旧缓存里带数字 ID 前缀的书名一次性洗掉
+				for (const entry of Object.values(this.data.entries)) {
+					if (entry.title) entry.title = stripNumericTitlePrefix(entry.title)
+				}
+			}
 		} catch {
 			// 首次或损坏时使用空缓存
 		}
@@ -714,7 +720,7 @@ export class BookshelfView extends ItemView {
 				try {
 					const bytes = await plugin.readBookBytes(path)
 					const info = await readPdfShelfInfo(bytes, 300, rel => plugin.pdfjsAssetUrl(rel))
-					if (info.title) title = info.title
+					if (info.title) title = stripNumericTitlePrefix(info.title)
 					if (info.author) author = info.author
 					if (existing?.customCover && existing.cover && !force) {
 						coverName = existing.cover
@@ -754,7 +760,7 @@ export class BookshelfView extends ItemView {
 		try {
 			const bytes = await plugin.readBookBytes(path)
 			const book = await makeBook(new File([bytes], basenameOf(path)))
-			let title = formatLanguageMap(book.metadata?.title)
+			let title = stripNumericTitlePrefix(formatLanguageMap(book.metadata?.title))
 			let author = formatAuthor(book.metadata?.author)
 			let publisher = formatAuthor(book.metadata?.publisher)
 			// 手动编辑过的信息不被自动解析覆盖（「重新解析」除外）

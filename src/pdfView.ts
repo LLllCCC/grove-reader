@@ -438,6 +438,8 @@ export class PdfView extends ItemView {
 				this.#scheduleSave(true)
 			}
 			this.#updateHeaderTitle()
+			// 打开书即校正一次笔记标题/文件名（如数字 ID 前缀清洗），无变化时不会写盘
+			if (data.notePath) this.plugin.scheduleNoteRefresh(this)
 
 			this.pagesEl.empty()
 			this.observer?.disconnect()
