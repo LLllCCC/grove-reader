@@ -56,9 +56,9 @@ interface PdfSelection {
 
 interface PageEntry {
 	wrap: HTMLElement
-	canvas: HTMLCanvasElement
-	textDiv: HTMLElement
-	hlDiv: HTMLElement
+	canvas?: HTMLCanvasElement
+	textDiv?: HTMLElement
+	hlDiv?: HTMLElement
 	vp1w: number
 	vp1h: number
 	renderScale: number | null
@@ -67,8 +67,6 @@ interface PageEntry {
 	/** 同一页画布不允许并发 render：正在渲染时新请求排队，完成后补渲染 */
 	rendering: boolean
 	queued: boolean
-	/** 全文搜索缓存：拼接文本 + 各文字块起点偏移（与 textLayer 的 span 顺序一致） */
-	searchText?: { text: string; items: string[]; offsets: number[] } | null
 }
 
 interface SearchRange {
@@ -82,6 +80,8 @@ interface SearchRange {
 const DPR = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2)
 /** 单页画布像素预算：超大扫描页按比例降低渲染分辨率，防止内存爆炸 */
 const MAX_CANVAS_PIXELS = 2 ** 23
+const MAX_SEARCH_CACHE_CHARS = 1_000_000
+const MAX_SEARCH_RESULTS = 5_000
 
 export class PdfView extends ItemView {
 	bookPath = ''
@@ -131,6 +131,8 @@ export class PdfView extends ItemView {
 	// 全文搜索
 	private searchTaskId = 0
 	private pageMatches = new Map<number, SearchRange[]>()
+	private searchTextCache = new Map<number, { text: string; items: string[]; offsets: number[] }>()
+	private searchTextCacheChars = 0
 	private fullTextSearchEl!: HTMLDetailsElement
 	private contentSearchInput!: HTMLInputElement
 	private searchCountEl!: HTMLElement
@@ -453,11 +455,8 @@ export class PdfView extends ItemView {
 			for (let n = 1; n <= this.numPages; n++) {
 				const wrap = this.pagesEl.createDiv('grove-pdf-page')
 				wrap.dataset.page = String(n)
-				const canvas = wrap.createEl('canvas')
-				const textDiv = wrap.createDiv('grove-pdf-textlayer textLayer')
-				const hlDiv = wrap.createDiv('grove-pdf-hllayer')
 				this.pages.set(n, {
-					wrap, canvas, textDiv, hlDiv,
+					wrap,
 					vp1w: firstVp.width, vp1h: firstVp.height,
 					renderScale: null, task: null, textDone: false,
 					rendering: false, queued: false,
@@ -565,9 +564,7 @@ export class PdfView extends ItemView {
 			p.queued = false
 			this.renderQueue.delete(n)
 			this.renderedPages.delete(n)
-			p.canvas.width = 0
-			p.canvas.height = 0
-			p.textDiv.empty()
+			this.#releasePageLayers(p)
 			p.textDone = false
 			this.#drawHighlightsOf(p.wrap)
 		}
@@ -642,6 +639,7 @@ export class PdfView extends ItemView {
 		p.task?.cancel()
 		p.renderScale = scale
 		try {
+			this.#ensurePageLayers(p)
 			const page = await doc.getPage(n)
 			if (p.renderScale !== scale || this.scale !== scale || this.pdfDoc !== doc) {
 				if (this.pdfDoc === doc) p.renderScale = null
@@ -662,9 +660,10 @@ export class PdfView extends ItemView {
 				dpr = Math.max(1, Math.sqrt(MAX_CANVAS_PIXELS / cssPixels))
 			}
 			const vp = page.getViewport({ scale: scale * dpr })
-			p.canvas.width = Math.floor(vp.width)
-			p.canvas.height = Math.floor(vp.height)
-			const ctx = p.canvas.getContext('2d')
+			const canvas = p.canvas!
+			canvas.width = Math.floor(vp.width)
+			canvas.height = Math.floor(vp.height)
+			const ctx = canvas.getContext('2d')
 			if (!ctx) {
 				p.renderScale = null
 				this.#reportRenderError(n, new Error('无法获取 2D 画布上下文'))
@@ -695,14 +694,60 @@ export class PdfView extends ItemView {
 			p.rendering = false
 			this.renderingPages.delete(n)
 			if (p.renderScale === null) {
-				p.canvas.width = 0
-				p.canvas.height = 0
-				p.textDiv.empty()
+				this.#releasePageLayers(p)
 				p.textDone = false
 				this.renderedPages.delete(n)
 				void this.#cleanupPage(n)
 			}
 		}
+	}
+
+	#ensurePageLayers(p: PageEntry): void {
+		if (p.canvas) return
+		p.canvas = p.wrap.createEl('canvas')
+		p.textDiv = p.wrap.createDiv('grove-pdf-textlayer textLayer')
+		p.hlDiv = p.wrap.createDiv('grove-pdf-hllayer')
+	}
+
+	#releasePageLayers(p: PageEntry): void {
+		if (p.canvas) {
+			p.canvas.width = 0
+			p.canvas.height = 0
+			p.canvas.remove()
+			p.canvas = undefined
+		}
+		p.textDiv?.remove()
+		p.textDiv = undefined
+		p.hlDiv?.remove()
+		p.hlDiv = undefined
+		p.textDone = false
+	}
+
+	#cachePageSearchText(n: number, value: { text: string; items: string[]; offsets: number[] }): void {
+		const weight = value.text.length + value.items.reduce((sum, item) => sum + item.length, 0) + value.offsets.length
+		if (weight > MAX_SEARCH_CACHE_CHARS) return
+		const old = this.searchTextCache.get(n)
+		if (old) {
+			this.searchTextCacheChars -= old.text.length + old.items.reduce((sum, item) => sum + item.length, 0) + old.offsets.length
+			this.searchTextCache.delete(n)
+		}
+		while (this.searchTextCacheChars + weight > MAX_SEARCH_CACHE_CHARS) {
+			const oldest = this.searchTextCache.keys().next().value as number | undefined
+			if (oldest === undefined) break
+			const removed = this.searchTextCache.get(oldest)!
+			this.searchTextCacheChars -= removed.text.length + removed.items.reduce((sum, item) => sum + item.length, 0) + removed.offsets.length
+			this.searchTextCache.delete(oldest)
+		}
+		this.searchTextCache.set(n, value)
+		this.searchTextCacheChars += weight
+	}
+
+	#getPageSearchText(n: number): { text: string; items: string[]; offsets: number[] } | undefined {
+		const cached = this.searchTextCache.get(n)
+		if (!cached) return undefined
+		this.searchTextCache.delete(n)
+		this.searchTextCache.set(n, cached)
+		return cached
 	}
 
 	#releaseRenderedPage(n: number): void {
@@ -711,9 +756,7 @@ export class PdfView extends ItemView {
 		page.renderScale = null
 		page.queued = false
 		this.renderQueue.delete(n)
-		page.canvas.width = 0
-		page.canvas.height = 0
-		page.textDiv.empty()
+		this.#releasePageLayers(page)
 		page.textDone = false
 		this.renderedPages.delete(n)
 		void this.#cleanupPage(n)
@@ -730,11 +773,13 @@ export class PdfView extends ItemView {
 
 	async #drawTextLayer(page: PdfPageProxy, p: PageEntry, n: number): Promise<boolean> {
 		try {
-			p.textDiv.empty()
+			const textDiv = p.textDiv
+			if (!textDiv) return false
+			textDiv.empty()
 			const vp = page.getViewport({ scale: this.scale })
 			const tl = new (pdfjsLib as unknown as {
 				TextLayer: new (o: { textContentSource: unknown; container: HTMLElement; viewport: PdfViewport }) => { render(): Promise<void> }
-			}).TextLayer({ textContentSource: page.streamTextContent(), container: p.textDiv, viewport: vp })
+			}).TextLayer({ textContentSource: page.streamTextContent(), container: textDiv, viewport: vp })
 			await tl.render()
 			this.#applySearchHighlights(p)
 			return true
@@ -1147,7 +1192,7 @@ export class PdfView extends ItemView {
 		this.#unwrapSearchHits()
 	}
 
-	#findRanges(text: string, lowerQuery: string): SearchRange[] {
+	#findRanges(text: string, lowerQuery: string, limit = 500): SearchRange[] {
 		const hay = text.toLowerCase()
 		const out: SearchRange[] = []
 		let from = 0
@@ -1163,7 +1208,7 @@ export class PdfView extends ItemView {
 				after: text.slice(end, end + 20),
 			})
 			from = end
-			if (out.length >= 500) break // 单页上限，防极端情况卡死
+			if (out.length >= Math.min(500, limit)) break // 单页与全文上限，防极端情况卡死
 		}
 		return out
 	}
@@ -1184,11 +1229,12 @@ export class PdfView extends ItemView {
 		const queue: number[] = []
 		for (let n = 1; n <= this.numPages; n++) queue.push(n)
 		let done = 0
+		let matchCount = 0
 		const worker = async (): Promise<void> => {
-			while (queue.length) {
+			while (queue.length && matchCount < MAX_SEARCH_RESULTS) {
 				if (taskId !== this.searchTaskId) return
 				const n = queue.shift()!
-				let st = this.pages.get(n)?.searchText
+				let st = this.#getPageSearchText(n)
 				if (!st) {
 					try {
 						const page = await this.pdfDoc?.getPage(n)
@@ -1202,14 +1248,14 @@ export class PdfView extends ItemView {
 							text += s
 						}
 						st = { text, items, offsets }
-						const entry = this.pages.get(n)
-						if (entry) entry.searchText = st
+						this.#cachePageSearchText(n, st)
 					} catch {
 						st = { text: '', items: [], offsets: [] }
 					}
 				}
-				const ranges = this.#findRanges(st.text, lower)
+				const ranges = this.#findRanges(st.text, lower, MAX_SEARCH_RESULTS - matchCount)
 				if (ranges.length) {
+					matchCount += ranges.length
 					this.pageMatches.set(n, ranges)
 					// 已渲染的页面立即补高亮
 					const p = this.pages.get(n)
@@ -1252,8 +1298,8 @@ export class PdfView extends ItemView {
 		const ranges = this.pageMatches.get(n)
 		this.#unwrapSearchHits(p)
 		if (!ranges?.length) return
-		const st = p.searchText
-		if (!st) return
+		const st = this.#getPageSearchText(n)
+		if (!st || !p.textDiv) return
 		const spans = Array.from(p.textDiv.querySelectorAll('span'))
 		for (let k = 0; k < st.items.length && k < spans.length; k++) {
 			if (!st.items[k]) continue
@@ -1283,7 +1329,7 @@ export class PdfView extends ItemView {
 	}
 
 	#unwrapSearchHits(p?: PageEntry): void {
-		const scopes = p ? [p.textDiv] : [...this.pages.values()].map(x => x.textDiv)
+		const scopes = p ? (p.textDiv ? [p.textDiv] : []) : [...this.pages.values()].flatMap(x => x.textDiv ? [x.textDiv] : [])
 		for (const scope of scopes) {
 			for (const mark of Array.from(scope.querySelectorAll('span.grove-search-hit'))) {
 				mark.replaceWith(document.createTextNode(mark.textContent ?? ''))
