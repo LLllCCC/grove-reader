@@ -13,6 +13,9 @@ import type { BookList } from './lists'
 
 export const VIEW_TYPE_GROVE_BOOKSHELF = 'grove-bookshelf-view'
 
+const MAX_CACHED_COVERS = 32
+const MAX_CACHED_COVER_CHARS = 8_000_000
+
 // ------------------------------------------------------------------
 // 书架缓存：metadata + 封面，存于插件数据目录，避免每次进书架重复解析
 // ------------------------------------------------------------------
@@ -53,6 +56,7 @@ export class ShelfCache {
 	private saveTimer: NodeJS.Timeout | null = null
 	/** 封面 dataURL 缓存：卡片每次刷新都会取封面，避免反复同步读盘 + base64 */
 	private coverCache = new Map<string, string | null>()
+	private coverCacheChars = 0
 
 	constructor(rootDir: string) {
 		this.file = pathModule.join(rootDir, 'data', 'shelf.json')
@@ -124,7 +128,7 @@ export class ShelfCache {
 			const name = `${bookId}.${ext}`
 			const buf = Buffer.from(await blob.arrayBuffer())
 			fs.writeFileSync(pathModule.join(this.coversDir, name), buf)
-			this.coverCache.delete(name)
+			this.#deleteCoverCache(name)
 			return name
 		} catch (e) {
 			console.error('[Grove Reader] 封面保存失败', e)
@@ -141,7 +145,7 @@ export class ShelfCache {
 			const name = `${bookId}-custom.${ext}`
 			const buf = Buffer.from(await file.arrayBuffer())
 			fs.writeFileSync(pathModule.join(this.coversDir, name), buf)
-			this.coverCache.delete(name)
+			this.#deleteCoverCache(name)
 			return name
 		} catch (e) {
 			console.error('[Grove Reader] 自定义封面保存失败', e)
@@ -151,7 +155,12 @@ export class ShelfCache {
 
 	coverDataUrl(filename?: string): string | null {
 		if (!filename) return null
-		if (this.coverCache.has(filename)) return this.coverCache.get(filename) ?? null
+		if (this.coverCache.has(filename)) {
+			const cached = this.coverCache.get(filename) ?? null
+			this.coverCache.delete(filename)
+			this.coverCache.set(filename, cached)
+			return cached
+		}
 		let url: string | null = null
 		try {
 			const buf = fs.readFileSync(pathModule.join(this.coversDir, filename))
@@ -163,8 +172,22 @@ export class ShelfCache {
 		} catch {
 			url = null
 		}
-		this.coverCache.set(filename, url)
+		if (url !== null && url.length <= 2_000_000) {
+			while (this.coverCache.size >= MAX_CACHED_COVERS || this.coverCacheChars + url.length > MAX_CACHED_COVER_CHARS) {
+				const oldest = this.coverCache.keys().next().value as string | undefined
+				if (oldest === undefined) break
+				this.#deleteCoverCache(oldest)
+			}
+			this.coverCache.set(filename, url)
+			this.coverCacheChars += url.length
+		}
 		return url
+	}
+
+	#deleteCoverCache(filename: string): void {
+		const cached = this.coverCache.get(filename)
+		if (cached) this.coverCacheChars -= cached.length
+		this.coverCache.delete(filename)
 	}
 }
 

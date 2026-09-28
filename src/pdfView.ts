@@ -64,6 +64,7 @@ interface PageEntry {
 	renderScale: number | null
 	task: { cancel(): void } | null
 	textDone: boolean
+	searchText?: { text: string; items: string[]; offsets: number[] }
 	/** 同一页画布不允许并发 render：正在渲染时新请求排队，完成后补渲染 */
 	rendering: boolean
 	queued: boolean
@@ -408,7 +409,7 @@ export class PdfView extends ItemView {
 			channel.port1.start()
 			channel.port2.start()
 			const docParams: Record<string, unknown> = {
-				data: new Uint8Array(buf.slice(0)),
+				data: new Uint8Array(buf),
 				worker: this.pdfWorker,
 			}
 			const wasmUrl = this.plugin.pdfjsAssetUrl('wasm/')
@@ -494,6 +495,8 @@ export class PdfView extends ItemView {
 
 	async #teardown(): Promise<void> {
 		this.searchTaskId++ // 取消进行中的全文搜索
+		this.searchTextCache.clear()
+		this.searchTextCacheChars = 0
 		this.#hidePopup()
 		if (this.saveTimer != null) {
 			window.clearTimeout(this.saveTimer)
@@ -505,7 +508,10 @@ export class PdfView extends ItemView {
 		}
 		this.observer?.disconnect()
 		this.observer = null
-		for (const p of this.pages.values()) p.task?.cancel()
+		for (const p of this.pages.values()) {
+			p.task?.cancel()
+			this.#releasePageLayers(p)
+		}
 		this.renderQueue.clear()
 		this.renderedPages.clear()
 		this.renderingPages.clear()
@@ -721,6 +727,7 @@ export class PdfView extends ItemView {
 		p.hlDiv?.remove()
 		p.hlDiv = undefined
 		p.textDone = false
+		p.searchText = undefined
 	}
 
 	#cachePageSearchText(n: number, value: { text: string; items: string[]; offsets: number[] }): void {
@@ -781,6 +788,21 @@ export class PdfView extends ItemView {
 				TextLayer: new (o: { textContentSource: unknown; container: HTMLElement; viewport: PdfViewport }) => { render(): Promise<void> }
 			}).TextLayer({ textContentSource: page.streamTextContent(), container: textDiv, viewport: vp })
 			await tl.render()
+			if (this.pageMatches.has(n)) {
+				const cached = this.#getPageSearchText(n)
+				if (cached) p.searchText = cached
+				else {
+					const content = await page.getTextContent()
+					const items = (content.items ?? []).map(item => item.str ?? '')
+					const offsets: number[] = []
+					let text = ''
+					for (const item of items) {
+						offsets.push(text.length)
+						text += item
+					}
+					p.searchText = { text, items, offsets }
+				}
+			}
 			this.#applySearchHighlights(p)
 			return true
 		} catch (e) {
@@ -1193,6 +1215,7 @@ export class PdfView extends ItemView {
 	}
 
 	#findRanges(text: string, lowerQuery: string, limit = 500): SearchRange[] {
+		if (limit <= 0) return []
 		const hay = text.toLowerCase()
 		const out: SearchRange[] = []
 		let from = 0
@@ -1259,7 +1282,10 @@ export class PdfView extends ItemView {
 					this.pageMatches.set(n, ranges)
 					// 已渲染的页面立即补高亮
 					const p = this.pages.get(n)
-					if (p && p.renderScale !== null && !p.rendering) this.#applySearchHighlights(p)
+					if (p?.textDiv && p.renderScale !== null && !p.rendering) {
+						p.searchText = st
+						this.#applySearchHighlights(p)
+					}
 				}
 				done++
 				if (taskId === this.searchTaskId) this.searchCountEl.setText(`搜索中… ${done} / ${this.numPages} 页`)
@@ -1298,7 +1324,7 @@ export class PdfView extends ItemView {
 		const ranges = this.pageMatches.get(n)
 		this.#unwrapSearchHits(p)
 		if (!ranges?.length) return
-		const st = this.#getPageSearchText(n)
+		const st = p.searchText ?? this.#getPageSearchText(n)
 		if (!st || !p.textDiv) return
 		const spans = Array.from(p.textDiv.querySelectorAll('span'))
 		for (let k = 0; k < st.items.length && k < spans.length; k++) {
