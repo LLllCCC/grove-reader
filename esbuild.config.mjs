@@ -37,9 +37,21 @@ const context = await esbuild.context({
 	minify: prod,
 })
 
+const pdfWorkerBuild = {
+	entryPoints: ['node_modules/pdfjs-dist/build/pdf.worker.mjs'],
+	bundle: true,
+	format: 'esm',
+	platform: 'browser',
+	target: 'es2022',
+	logLevel: 'info',
+	outfile: '.tmp/pdf.worker.mjs',
+}
+
 if (prod) {
 	await context.rebuild()
 	await context.dispose()
+	await esbuild.build(pdfWorkerBuild)
 } else {
+	await esbuild.build(pdfWorkerBuild)
 	await context.watch()
 }

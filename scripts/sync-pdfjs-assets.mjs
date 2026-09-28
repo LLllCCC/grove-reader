@@ -28,3 +28,5 @@ for (const dir of ['wasm', 'standard_fonts', 'cmaps']) {
 	copyDir(path.join(src, dir), path.join(dest, dir))
 }
 console.log('pdfjs 资源已同步到 pdfjs/（wasm、standard_fonts、cmaps）')
+
+fs.copyFileSync(path.join(root, '.tmp', 'pdf.worker.mjs'), path.join(dest, 'pdf.worker.mjs'))
