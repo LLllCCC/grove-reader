@@ -90,6 +90,8 @@ export class PdfView extends ItemView {
 
 	private pdfDoc: PdfDocProxy | null = null
 	private pdfWorker: PDFWorker | null = null
+	private pdfLoadingTask: ReturnType<typeof pdfjsLib.getDocument> | null = null
+	private pdfWorkerChannel: MessageChannel | null = null
 	private data: BookData | null = null
 	private loadedPath: string | null = null
 	private pendingCfi: string | null = null
@@ -400,6 +402,7 @@ export class PdfView extends ItemView {
 			// worker：经 MessageChannel 直连 worker 侧处理器，作用域限于本文档，
 			// 不污染 globalThis（曾毒化 Obsidian 原生 PDF 视图，详见开发全记录）
 			const channel = new MessageChannel()
+			this.pdfWorkerChannel = channel
 			;(pdfjsWorkerModule.WorkerMessageHandler as unknown as { initializeFromPort(p: MessagePort): void })
 				.initializeFromPort(channel.port1)
 			// PDFWorker 的 port 构造参数未收录进官方类型定义，运行时支持
@@ -420,6 +423,7 @@ export class PdfView extends ItemView {
 				docParams.standardFontDataUrl = this.plugin.pdfjsAssetUrl('standard_fonts/')
 			}
 			const task = pdfjsLib.getDocument(docParams as Parameters<typeof pdfjsLib.getDocument>[0])
+			this.pdfLoadingTask = task
 			const doc = (await task.promise) as unknown as PdfDocProxy
 			this.pdfDoc = doc
 			this.numPages = doc.numPages
@@ -488,8 +492,8 @@ export class PdfView extends ItemView {
 			this.sidebarEl.classList.toggle('grove-hidden', !this.plugin.settings.openSidebarWithBook)
 		} catch (e) {
 			console.error('[Grove Reader] 打开 PDF 失败', e)
+			await this.#teardown()
 			this.#showEmpty(`打开失败：${e instanceof Error ? e.message : String(e)}`)
-			this.pdfDoc = null
 		}
 	}
 
@@ -506,6 +510,10 @@ export class PdfView extends ItemView {
 			window.clearTimeout(this.relayoutTimer)
 			this.relayoutTimer = null
 		}
+		if (this.idleTimer != null) {
+			window.clearTimeout(this.idleTimer)
+			this.idleTimer = null
+		}
 		this.observer?.disconnect()
 		this.observer = null
 		for (const p of this.pages.values()) {
@@ -518,11 +526,19 @@ export class PdfView extends ItemView {
 		this.pages.clear()
 		const worker = this.pdfWorker
 		this.pdfWorker = null
+		const loadingTask = this.pdfLoadingTask
+		this.pdfLoadingTask = null
 		const doc = this.pdfDoc
 		this.pdfDoc = null
 		if (doc) {
 			try {
 				await doc.destroy()
+			} catch {
+				// ignore
+			}
+		} else if (loadingTask) {
+			try {
+				await loadingTask.destroy()
 			} catch {
 				// ignore
 			}
@@ -533,6 +549,12 @@ export class PdfView extends ItemView {
 			} catch {
 				// ignore
 			}
+		}
+		const channel = this.pdfWorkerChannel
+		this.pdfWorkerChannel = null
+		if (channel) {
+			channel.port1.close()
+			channel.port2.close()
 		}
 	}
 
