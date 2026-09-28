@@ -89,6 +89,9 @@ const MAX_SEARCH_RESULTS = 5_000
 class LocalFilePdfRangeTransport extends pdfjsLib.PDFDataRangeTransport {
 	private readonly fileHandle: Promise<FileHandle>
 	private aborted = false
+	bytesRequested = 0
+	requestCount = 0
+	bytesDelivered = 0
 
 	constructor(filePath: string, length: number) {
 		super(length, null, false)
@@ -97,6 +100,8 @@ class LocalFilePdfRangeTransport extends pdfjsLib.PDFDataRangeTransport {
 
 	requestDataRange(begin: number, end: number): void {
 		if (this.aborted) return
+		this.requestCount++
+		this.bytesRequested += end - begin
 		void this.fileHandle.then(async handle => {
 			const chunk = new Uint8Array(end - begin)
 			let offset = 0
@@ -105,7 +110,10 @@ class LocalFilePdfRangeTransport extends pdfjsLib.PDFDataRangeTransport {
 				if (bytesRead <= 0) throw new Error(`PDF 文件读取提前结束（${begin + offset}/${end}）`)
 				offset += bytesRead
 			}
-			if (!this.aborted) this.onDataRange(begin, chunk)
+			if (!this.aborted) {
+				this.bytesDelivered += chunk.byteLength
+				this.onDataRange(begin, chunk)
+			}
 		}).catch(error => {
 			if (this.aborted) return
 			console.error('[Grove Reader] PDF 分段读取失败', error)
