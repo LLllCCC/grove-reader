@@ -1,12 +1,14 @@
 import './pdfjsPolyfill'
 import { ItemView, Notice, TFile, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
+import pathModule from 'node:path'
+import { open as openFile, stat as statFile, type FileHandle } from 'node:fs/promises'
 import * as pdfjsLib from 'pdfjs-dist'
 import * as pdfjsWorkerModule from 'pdfjs-dist/build/pdf.worker.mjs'
 import type { PDFDocumentProxy, PDFWorker } from 'pdfjs-dist'
 import type GroveReaderPlugin from './main'
 import { Annotation, BookData, HIGHLIGHT_COLORS, colorCss } from './types'
 import { CommentModal, ConfirmModal } from './modals'
-import { basenameOf, normalizeSelectionText, randomId, truncate } from './util'
+import { basenameOf, isAbsolutePath, normalizeSelectionText, randomId, truncate } from './util'
 
 export const VIEW_TYPE_GROVE_PDF = 'grove-pdf-view'
 
@@ -84,6 +86,40 @@ const MAX_CANVAS_PIXELS = 2 ** 23
 const MAX_SEARCH_CACHE_CHARS = 1_000_000
 const MAX_SEARCH_RESULTS = 5_000
 
+class LocalFilePdfRangeTransport extends pdfjsLib.PDFDataRangeTransport {
+	private readonly fileHandle: Promise<FileHandle>
+	private aborted = false
+
+	constructor(filePath: string, length: number) {
+		super(length, null, false)
+		this.fileHandle = openFile(filePath, 'r')
+	}
+
+	requestDataRange(begin: number, end: number): void {
+		if (this.aborted) return
+		void this.fileHandle.then(async handle => {
+			const chunk = new Uint8Array(end - begin)
+			let offset = 0
+			while (offset < chunk.length && !this.aborted) {
+				const { bytesRead } = await handle.read(chunk, offset, chunk.length - offset, begin + offset)
+				if (bytesRead <= 0) throw new Error(`PDF 文件读取提前结束（${begin + offset}/${end}）`)
+				offset += bytesRead
+			}
+			if (!this.aborted) this.onDataRange(begin, chunk)
+		}).catch(error => {
+			if (this.aborted) return
+			console.error('[Grove Reader] PDF 分段读取失败', error)
+			this.onDataRange(begin, new Uint8Array(0))
+		})
+	}
+
+	abort(): void {
+		if (this.aborted) return
+		this.aborted = true
+		void this.fileHandle.then(handle => handle.close()).catch(() => { })
+	}
+}
+
 export class PdfView extends ItemView {
 	bookPath = ''
 	bookTitle = ''
@@ -92,6 +128,7 @@ export class PdfView extends ItemView {
 	private pdfWorker: PDFWorker | null = null
 	private pdfLoadingTask: ReturnType<typeof pdfjsLib.getDocument> | null = null
 	private pdfWorkerChannel: MessageChannel | null = null
+	private pdfRangeTransport: LocalFilePdfRangeTransport | null = null
 	private data: BookData | null = null
 	private loadedPath: string | null = null
 	private pendingCfi: string | null = null
@@ -396,7 +433,6 @@ export class PdfView extends ItemView {
 			data.kind = 'pdf'
 			this.data = data
 
-			const buf = await this.plugin.readBookBytes(target)
 			// 扫描版 PDF 的整页图片是 JBIG2/JPX 编码，pdf.js 依赖随插件分发的
 			// wasm 解码资源（以及 cmaps / standard_fonts）；缺资源时页面会渲染成空白
 			// worker：经 MessageChannel 直连 worker 侧处理器，作用域限于本文档，
@@ -411,9 +447,33 @@ export class PdfView extends ItemView {
 			// 否则消息永远不到达（表现为「正在打开…」卡住）
 			channel.port1.start()
 			channel.port2.start()
-			const docParams: Record<string, unknown> = {
-				data: new Uint8Array(buf),
-				worker: this.pdfWorker,
+			const docParams: Record<string, unknown> = { worker: this.pdfWorker }
+			docParams.canvasMaxAreaInBytes = MAX_CANVAS_PIXELS * 4
+			const localPath = isAbsolutePath(target)
+				? target
+				: this.plugin.vaultBase
+					? pathModule.join(this.plugin.vaultBase, target)
+					: null
+			let useRangeTransport = false
+			if (localPath) {
+				try {
+					const fileInfo = await statFile(localPath)
+					if (fileInfo.isFile()) {
+						const rangeTransport = new LocalFilePdfRangeTransport(localPath, fileInfo.size)
+						this.pdfRangeTransport = rangeTransport
+						docParams.range = rangeTransport
+						docParams.rangeChunkSize = 512 * 1024
+						docParams.disableStream = true
+						docParams.disableAutoFetch = true
+						useRangeTransport = true
+					}
+				} catch {
+					// 非本地文件或无法读取文件信息时，退回 Obsidian vault 的二进制读取接口
+				}
+			}
+			if (!useRangeTransport) {
+				const buf = await this.plugin.readBookBytes(target)
+				docParams.data = new Uint8Array(buf)
 			}
 			const wasmUrl = this.plugin.pdfjsAssetUrl('wasm/')
 			if (wasmUrl) {
@@ -528,6 +588,8 @@ export class PdfView extends ItemView {
 		this.pdfWorker = null
 		const loadingTask = this.pdfLoadingTask
 		this.pdfLoadingTask = null
+		const rangeTransport = this.pdfRangeTransport
+		this.pdfRangeTransport = null
 		const doc = this.pdfDoc
 		this.pdfDoc = null
 		if (doc) {
@@ -543,6 +605,7 @@ export class PdfView extends ItemView {
 				// ignore
 			}
 		}
+		rangeTransport?.abort()
 		if (worker) {
 			try {
 				worker.destroy()
