@@ -43,12 +43,25 @@ interface FoliateView extends HTMLElement {
 	deleteAnnotation(annotation: { value: string } & Record<string, unknown>): Promise<unknown>
 	resolveNavigation(target: string): { index?: number } | undefined
 	getCFI(index: number, range: Range): string
+	search(options: { query: string }): AsyncGenerator<FoliateSearchYield, void, unknown>
+	clearSearch(): void
 	deselect(): void
 	goLeft(): void
 	goRight(): void
 	renderer?: FoliateRenderer
 	book?: FoliateBook
 }
+
+interface FoliateSearchMatch {
+	cfi: string
+	excerpt: { pre: string; match: string; post: string }
+}
+
+type FoliateSearchYield =
+	| { progress: number }
+	| { label?: string; subitems: FoliateSearchMatch[] }
+	| { cfi: string; excerpt: FoliateSearchMatch['excerpt'] }
+	| 'done'
 
 interface RelocateDetail {
 	cfi?: string
@@ -109,6 +122,11 @@ export class ReaderView extends ItemView {
 	private sidebarColor: string | null = null
 	private annCollapsed: Set<string> | null = null
 	private searchInput!: HTMLInputElement
+	private fullTextSearchEl!: HTMLDetailsElement
+	private fullTextSearchInput!: HTMLInputElement
+	private fullTextSearchStatus!: HTMLElement
+	private fullTextSearchResults!: HTMLElement
+	private fullTextSearchTaskId = 0
 	private clearBtnEl!: HTMLButtonElement
 	private filterDotEls = new Map<string, HTMLElement>()
 	private annItemEls = new Map<string, HTMLElement>()
@@ -275,6 +293,33 @@ export class ReaderView extends ItemView {
 		this.annCountEl = sideHead.createSpan('grove-ann-count')
 		this.annCountEl.setText('0 个批注')
 
+		const fullTextSearch = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })
+		this.fullTextSearchEl = fullTextSearch
+		fullTextSearch.createEl('summary', { text: '全文搜索' })
+		const fullTextSearchControls = fullTextSearch.createDiv('grove-fulltext-search-controls')
+		this.fullTextSearchInput = fullTextSearchControls.createEl('input', {
+			cls: 'grove-ann-search',
+			attr: { type: 'search', placeholder: '输入关键词，按 Enter 搜索本书…' },
+		})
+		this.fullTextSearchInput.addEventListener('keydown', e => {
+			if (e.key === 'Enter') {
+				e.preventDefault()
+				void this.#runFullTextSearch()
+			} else if (e.key === 'Escape') {
+				this.#clearFullTextSearch()
+			}
+		})
+		const fullTextSearchMeta = fullTextSearch.createDiv('grove-fulltext-search-meta')
+		this.fullTextSearchStatus = fullTextSearchMeta.createSpan('grove-fulltext-search-status')
+		this.fullTextSearchStatus.setText('输入关键词后按 Enter 搜索全文')
+		const clearFullTextSearch = fullTextSearchMeta.createEl('button', {
+			cls: 'grove-manage-btn',
+			text: '清除',
+			attr: { 'aria-label': '清除全文搜索' },
+		})
+		clearFullTextSearch.addEventListener('click', () => this.#clearFullTextSearch())
+		this.fullTextSearchResults = fullTextSearch.createDiv('grove-fulltext-search-results')
+
 		const controls = this.sidebarEl.createDiv('grove-sidebar-controls')
 		this.searchInput = controls.createEl('input', {
 			cls: 'grove-ann-search',
@@ -345,6 +390,8 @@ export class ReaderView extends ItemView {
 	// ------------------------------------------------------------------
 
 	async #openBook(cfi?: string): Promise<void> {
+		this.#clearFullTextSearch()
+		this.fullTextSearchEl.open = false
 		const target = this.bookPath
 		this.pendingCfi = cfi ?? null
 		if (!target) return
@@ -400,6 +447,7 @@ export class ReaderView extends ItemView {
 	}
 
 	#teardownBook(): void {
+		this.#clearFullTextSearch()
 		this.#hidePopup()
 		if (this.saveTimer != null) {
 			window.clearTimeout(this.saveTimer)
@@ -409,11 +457,67 @@ export class ReaderView extends ItemView {
 		this.foliate = null
 		if (foliate) {
 			try {
+				foliate.clearSearch()
+			} catch {
+				// ignore
+			}
+			try {
 				foliate.close()
 			} catch {
 				// ignore
 			}
 			foliate.remove()
+		}
+	}
+
+	#clearFullTextSearch(): void {
+		this.fullTextSearchTaskId++
+		this.foliate?.clearSearch()
+		if (this.fullTextSearchInput) this.fullTextSearchInput.value = ''
+		this.fullTextSearchResults?.empty()
+		this.fullTextSearchStatus?.setText('输入关键词后按 Enter 搜索全文')
+	}
+
+	async #runFullTextSearch(): Promise<void> {
+		const query = this.fullTextSearchInput.value.trim()
+		const foliate = this.foliate
+		const taskId = ++this.fullTextSearchTaskId
+		this.fullTextSearchResults.empty()
+		foliate?.clearSearch()
+		if (!query || !foliate) {
+			this.fullTextSearchStatus.setText(query ? '书籍尚未准备好' : '输入关键词后按 Enter 搜索全文')
+			return
+		}
+
+		this.fullTextSearchStatus.setText('正在搜索…')
+		let count = 0
+		try {
+			for await (const result of foliate.search({ query })) {
+				if (taskId !== this.fullTextSearchTaskId) break
+				if (result === 'done') continue
+				if ('progress' in result) {
+					this.fullTextSearchStatus.setText(`正在搜索 ${Math.round(result.progress * 100)}%`)
+					continue
+				}
+				const matches = 'subitems' in result ? result.subitems : [result]
+				for (const match of matches) {
+					const row = this.fullTextSearchResults.createEl('button', { cls: 'grove-fulltext-search-result' })
+					row.createSpan('grove-fulltext-search-context').setText(match.excerpt.pre)
+					row.createSpan('grove-fulltext-search-hit').setText(match.excerpt.match)
+					row.createSpan('grove-fulltext-search-context').setText(match.excerpt.post)
+					row.addEventListener('click', () => void this.#jumpToCfi(match.cfi))
+					count++
+				}
+				this.fullTextSearchStatus.setText(`${count} 处命中${'label' in result && result.label ? ` · ${result.label}` : ''}`)
+			}
+			if (taskId === this.fullTextSearchTaskId && count === 0) {
+				this.fullTextSearchStatus.setText('没有找到匹配内容')
+			}
+		} catch (e) {
+			if (taskId === this.fullTextSearchTaskId) {
+				console.error('[Grove Reader] 全文搜索失败', e)
+				this.fullTextSearchStatus.setText('搜索失败，请重试')
+			}
 		}
 	}
 
@@ -475,6 +579,10 @@ export class ReaderView extends ItemView {
 			`body { color: ${fg}; background-color: ${bg}; font-family: ${font}; font-size: ${a.fontSize}% !important; }`,
 			`p, li, blockquote, dd { line-height: ${a.lineHeight} !important; }`,
 		]
+		if (dark) {
+			// EPUB 常把标题颜色写在任意 class 或行内样式中，深色背景下统一覆盖文字色。
+			rules.push(`html body * { color: ${fg} !important; }`)
+		}
 		if (a.paragraphSpacing > 0) {
 			rules.push(`p { margin-top: ${a.paragraphSpacing}em !important; margin-bottom: ${a.paragraphSpacing}em !important; }`)
 		}

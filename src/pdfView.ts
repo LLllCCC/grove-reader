@@ -124,13 +124,9 @@ export class PdfView extends ItemView {
 	private sortMode: 'position' | 'recent' = 'position'
 
 	// 全文搜索
-	private sidebarTab: 'annotations' | 'search' = 'annotations'
 	private searchTaskId = 0
 	private pageMatches = new Map<number, SearchRange[]>()
-	private annTabBtn!: HTMLButtonElement
-	private searchTabBtn!: HTMLButtonElement
-	private annWrapEl!: HTMLElement
-	private searchWrapEl!: HTMLElement
+	private fullTextSearchEl!: HTMLDetailsElement
 	private contentSearchInput!: HTMLInputElement
 	private searchCountEl!: HTMLElement
 	private searchResultsEl!: HTMLElement
@@ -314,16 +310,31 @@ export class PdfView extends ItemView {
 		this.annCountEl = sideHead.createSpan('grove-ann-count')
 		this.annCountEl.setText('0 个批注')
 
-		// 页签：批注 / 全文搜索
-		const tabs = this.sidebarEl.createDiv('grove-sidebar-tabs')
-		this.annTabBtn = tabs.createEl('button', { text: '批注', cls: 'grove-sidebar-tab is-active' })
-		this.searchTabBtn = tabs.createEl('button', { text: '全文搜索', cls: 'grove-sidebar-tab' })
-		this.annTabBtn.addEventListener('click', () => this.#switchSidebarTab('annotations'))
-		this.searchTabBtn.addEventListener('click', () => this.#switchSidebarTab('search'))
+		// 全文搜索折叠区，与 EPUB 阅读器使用相同的侧栏结构。
+		this.fullTextSearchEl = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })
+		this.fullTextSearchEl.createEl('summary', { text: '全文搜索' })
+		const sControls = this.fullTextSearchEl.createDiv('grove-fulltext-search-controls')
+		this.contentSearchInput = sControls.createEl('input', {
+			cls: 'grove-ann-search',
+			attr: { type: 'search', placeholder: '输入关键词，按 Enter 搜索全文…' },
+		})
+		this.contentSearchInput.addEventListener('keydown', e => {
+			if (e.key === 'Enter') {
+				e.preventDefault()
+				this.#runContentSearch()
+			} else if (e.key === 'Escape') {
+				this.#clearContentSearch()
+			}
+		})
+		const sMeta = this.fullTextSearchEl.createDiv('grove-fulltext-search-meta')
+		this.searchCountEl = sMeta.createSpan('grove-fulltext-search-status')
+		this.searchCountEl.setText('输入关键词后按回车')
+		const clearSearchBtn = sMeta.createEl('button', { cls: 'grove-manage-btn', text: '清除', attr: { 'aria-label': '清除全文搜索' } })
+		clearSearchBtn.addEventListener('click', () => this.#clearContentSearch())
+		this.searchResultsEl = this.fullTextSearchEl.createDiv('grove-ann-list grove-fulltext-search-results')
 
-		// —— 批注页签 ——
-		this.annWrapEl = this.sidebarEl.createDiv('grove-tab-body')
-		const controls = this.annWrapEl.createDiv('grove-sidebar-controls')
+		// 批注列表与 EPUB 阅读器保持相同的排列方式。
+		const controls = this.sidebarEl.createDiv('grove-sidebar-controls')
 		this.searchInput = controls.createEl('input', {
 			cls: 'grove-ann-search',
 			attr: { type: 'search', placeholder: '搜索批注…' },
@@ -344,7 +355,7 @@ export class PdfView extends ItemView {
 		const multiBtn = manageRow.createEl('button', { cls: 'grove-manage-btn', text: '多选' })
 		multiBtn.addEventListener('click', () => this.#setSelectMode(!this.selectMode))
 
-		this.selectBarEl = this.annWrapEl.createDiv('grove-select-bar grove-hidden')
+		this.selectBarEl = this.sidebarEl.createDiv('grove-select-bar grove-hidden')
 		this.selectCountEl = this.selectBarEl.createSpan('grove-select-count')
 		this.selectCountEl.setText('已选 0 条')
 		const delBtn = this.selectBarEl.createEl('button', { text: '删除所选', cls: 'grove-select-delete' })
@@ -352,29 +363,7 @@ export class PdfView extends ItemView {
 		const cancelBtn = this.selectBarEl.createEl('button', { text: '取消', cls: 'grove-select-cancel' })
 		cancelBtn.addEventListener('click', () => this.#setSelectMode(false))
 
-		this.annListEl = this.annWrapEl.createDiv('grove-ann-list')
-
-		// —— 全文搜索页签 ——
-		this.searchWrapEl = this.sidebarEl.createDiv('grove-tab-body grove-hidden')
-		const sControls = this.searchWrapEl.createDiv('grove-sidebar-controls')
-		this.contentSearchInput = sControls.createEl('input', {
-			cls: 'grove-ann-search',
-			attr: { type: 'search', placeholder: '输入关键词，回车搜索全文…' },
-		})
-		this.contentSearchInput.addEventListener('keydown', e => {
-			if (e.key === 'Enter') {
-				e.preventDefault()
-				this.#runContentSearch()
-			} else if (e.key === 'Escape') {
-				this.#clearContentSearch()
-			}
-		})
-		const sMeta = sControls.createDiv('grove-ann-filters')
-		this.searchCountEl = sMeta.createSpan('grove-filter-clear')
-		this.searchCountEl.setText('输入关键词后回车')
-		const clearSearchBtn = sMeta.createEl('button', { cls: 'grove-filter-clear', text: '清除' })
-		clearSearchBtn.addEventListener('click', () => this.#clearContentSearch())
-		this.searchResultsEl = this.searchWrapEl.createDiv('grove-ann-list')
+		this.annListEl = this.sidebarEl.createDiv('grove-ann-list')
 	}
 
 	#showEmpty(message: string): void {
@@ -1049,15 +1038,6 @@ export class PdfView extends ItemView {
 	// ------------------------------------------------------------------
 	// 侧栏页签 / 全文搜索
 	// ------------------------------------------------------------------
-
-	#switchSidebarTab(tab: 'annotations' | 'search'): void {
-		this.sidebarTab = tab
-		this.annTabBtn.toggleClass('is-active', tab === 'annotations')
-		this.searchTabBtn.toggleClass('is-active', tab === 'search')
-		this.annWrapEl.toggleClass('grove-hidden', tab !== 'annotations')
-		this.searchWrapEl.toggleClass('grove-hidden', tab !== 'search')
-		if (tab === 'search') this.contentSearchInput.focus()
-	}
 
 	#clearContentSearch(): void {
 		this.searchTaskId++ // 取消进行中的搜索

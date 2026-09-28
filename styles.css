@@ -194,6 +194,89 @@
 	color: var(--text-normal);
 }
 
+.grove-fulltext-search {
+	flex: none;
+	margin: 0 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background: var(--background-secondary);
+}
+
+.grove-fulltext-search summary {
+	padding: 7px 9px;
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	color: var(--text-muted);
+}
+
+.grove-fulltext-search[open] summary {
+	border-bottom: 1px solid var(--background-modifier-border);
+	color: var(--text-normal);
+}
+
+.grove-fulltext-search-controls,
+.grove-fulltext-search-meta {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 7px 8px 0;
+}
+
+.grove-fulltext-search-controls input {
+	min-width: 0;
+	width: 100%;
+}
+
+.grove-fulltext-search-meta {
+	padding-top: 4px;
+	padding-bottom: 5px;
+}
+
+.grove-fulltext-search-status {
+	flex: 1;
+	min-width: 0;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.grove-fulltext-search-results {
+	flex: none;
+	max-height: 180px;
+	overflow-y: auto;
+	padding: 0 6px 6px;
+}
+
+.grove-fulltext-search .grove-ann-list {
+	flex: none;
+	max-height: 180px;
+}
+
+.grove-fulltext-search-result {
+	display: block;
+	width: 100%;
+	margin-top: 3px;
+	padding: 5px 6px;
+	text-align: left;
+	white-space: normal;
+	font-size: var(--font-ui-smaller);
+	line-height: 1.45;
+}
+
+.grove-fulltext-search-result:hover {
+	background: var(--background-modifier-hover);
+}
+
+.grove-fulltext-search-context {
+	color: var(--text-muted);
+}
+
+.grove-fulltext-search-hit {
+	background: rgba(255, 224, 102, 0.55);
+	color: var(--text-normal);
+	border-radius: 2px;
+}
+
 .grove-ann-group-head {
 	display: flex;
 	align-items: center;
@@ -1103,4 +1186,59 @@
 .grove-stats-col.is-today .grove-stats-col-date {
 	color: var(--interactive-accent);
 	font-weight: 700;
+}
+
+/* ---------- 閱讀區空間優化 ---------- */
+.workspace-leaf-content:has(.grove-content) .view-header,
+.workspace-leaf-content:has(.grove-pdf-content) .view-header {
+	display: none;
+}
+
+.workspace-leaf-content:has(.grove-content) .view-content,
+.workspace-leaf-content:has(.grove-pdf-content) .view-content {
+	padding: 0;
+	overflow: hidden;
+}
+
+.grove-content {
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.grove-content {
+	--grove-toolbar-height: 36px;
+}
+
+.grove-pdf-content {
+	--grove-toolbar-height: 36px;
+}
+
+.grove-toolbar {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	z-index: 50;
+	min-height: var(--grove-toolbar-height);
+	background: color-mix(in srgb, var(--background-primary) 94%, transparent);
+	box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
+	transform: translateY(calc(-100% + 7px));
+	transition: transform 0.18s ease;
+}
+
+.grove-toolbar:hover,
+.grove-toolbar:focus-within {
+	transform: translateY(0);
+}
+
+.grove-body {
+	min-width: 0;
+}
+
+.grove-reader,
+.grove-reader-inner,
+.grove-reader foliate-view {
+	width: 100%;
+	height: 100%;
 }
