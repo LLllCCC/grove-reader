@@ -81,7 +81,7 @@ interface SearchRange {
 
 const DPR = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2)
 /** 单页画布像素预算：超大扫描页按比例降低渲染分辨率，防止内存爆炸 */
-const MAX_CANVAS_PIXELS = 2 ** 24
+const MAX_CANVAS_PIXELS = 2 ** 23
 
 export class PdfView extends ItemView {
 	bookPath = ''
@@ -97,6 +97,11 @@ export class PdfView extends ItemView {
 	private zoom = 1
 	private currentPage = 1
 	private pages = new Map<number, PageEntry>()
+	private renderedPages = new Set<number>()
+	private renderingPages = new Set<number>()
+	private renderQueue = new Set<number>()
+	private activeRenderCount = 0
+	private readonly maxConcurrentRenders = 2
 	private observer: IntersectionObserver | null = null
 	private resizeObserver: ResizeObserver | null = null
 	private lastWidth = 0
@@ -438,7 +443,7 @@ export class PdfView extends ItemView {
 					const n = Number((entry.target as HTMLElement).dataset.page)
 					void this.#renderPage(n)
 				}
-			}, { root: this.pagesEl, rootMargin: '600px 0px' })
+			}, { root: this.pagesEl, rootMargin: '300px 0px' })
 
 			// 只取第 1 页的尺寸做占位（绝不能预读全部页面：主线程 worker 下
 			// 逐页 getPage 是几百次重往返，是「打开 40 秒 + 全程卡顿」的根因）。
@@ -502,6 +507,9 @@ export class PdfView extends ItemView {
 		this.observer?.disconnect()
 		this.observer = null
 		for (const p of this.pages.values()) p.task?.cancel()
+		this.renderQueue.clear()
+		this.renderedPages.clear()
+		this.renderingPages.clear()
 		this.pages.clear()
 		const worker = this.pdfWorker
 		this.pdfWorker = null
@@ -541,17 +549,24 @@ export class PdfView extends ItemView {
 		if (width <= 0) return
 		this.lastWidth = width
 		this.scale = Math.max(0.2, ((width - 32) / (this.pages.get(1)?.vp1w || 600)) * this.zoom)
-		for (const p of this.pages.values()) {
+		for (const [n, p] of this.pages) {
 			p.wrap.style.width = `${Math.round(p.vp1w * this.scale)}px`
 			p.wrap.style.height = `${Math.round(p.vp1h * this.scale)}px`
 			p.wrap.style.setProperty('--total-scale-factor', String(this.scale))
 			// 正在渲染的页不能碰画布（并发 render 会抛错）：排队等它完成后按新缩放重画
 			if (p.rendering) {
-				p.queued = true
+				if (p.renderScale !== this.scale) {
+					p.queued = true
+					this.renderQueue.add(n)
+				}
 				continue
 			}
 			p.renderScale = null
+			p.queued = false
+			this.renderQueue.delete(n)
+			this.renderedPages.delete(n)
 			p.canvas.width = 0
+			p.canvas.height = 0
 			p.textDiv.empty()
 			p.textDone = false
 			this.#drawHighlightsOf(p.wrap)
@@ -566,30 +581,72 @@ export class PdfView extends ItemView {
 	}
 
 	#renderVisible(): void {
-		const from = Math.max(1, this.currentPage - 2)
-		const to = Math.min(this.numPages, this.currentPage + 2)
+		const from = Math.max(1, this.currentPage - 1)
+		const to = Math.min(this.numPages, this.currentPage + 1)
 		for (let n = from; n <= to; n++) void this.#renderPage(n)
 	}
 
-	async #renderPage(n: number): Promise<void> {
+	#renderPage(n: number): void {
 		if (!this.pdfDoc) return
-		// 打开瞬间占位页尚无尺寸，380 页会被同时判定「进入视口」；不限距离就会
-		// 几百页同时向 worker 要图——白屏与鼠标卡顿的根源。只渲染当前页附近。
-		if (Math.abs(n - this.currentPage) > 4) return
+		// 拖动滚动条跳页时只保留当前页和相邻页的请求，远处页面不排队渲染。
+		if (Math.abs(n - this.currentPage) > 1) return
 		const p = this.pages.get(n)
 		if (!p) return
-		if (p.rendering) {
-			p.queued = true
-			return
+		if (p.renderScale === this.scale && !p.queued) return
+		if (p.rendering && p.renderScale === this.scale) return
+		p.queued = true
+		this.renderQueue.add(n)
+		this.#drainRenderQueue()
+	}
+
+	#drainRenderQueue(): void {
+		while (this.activeRenderCount < this.maxConcurrentRenders) {
+			let next: number | null = null
+			let nearest = Number.POSITIVE_INFINITY
+			for (const n of this.renderQueue) {
+				if (Math.abs(n - this.currentPage) > 1) {
+					this.renderQueue.delete(n)
+					const stale = this.pages.get(n)
+					if (stale) stale.queued = false
+					continue
+				}
+				const page = this.pages.get(n)
+				if (!page || page.rendering) continue
+				const distance = Math.abs(n - this.currentPage)
+				if (distance < nearest) {
+					next = n
+					nearest = distance
+				}
+			}
+			if (next === null) return
+			this.renderQueue.delete(next)
+			const page = this.pages.get(next)
+			if (!page) continue
+			page.queued = false
+			if (page.renderScale === this.scale) continue
+			this.activeRenderCount++
+			void this.#renderPageNow(next, page).finally(() => {
+				this.activeRenderCount--
+				this.#drainRenderQueue()
+			})
 		}
-		if (p.renderScale === this.scale) return
+	}
+
+	async #renderPageNow(n: number, p: PageEntry): Promise<void> {
+		const doc = this.pdfDoc
+		if (!doc || Math.abs(n - this.currentPage) > 1) return
+		const scale = this.scale
 		p.rendering = true
+		this.renderingPages.add(n)
 		p.queued = false
 		p.task?.cancel()
-		p.renderScale = this.scale
+		p.renderScale = scale
 		try {
-			const page = await this.pdfDoc.getPage(n)
-			if (p.renderScale !== this.scale || !this.pdfDoc) return
+			const page = await doc.getPage(n)
+			if (p.renderScale !== scale || this.scale !== scale || this.pdfDoc !== doc) {
+				if (this.pdfDoc === doc) p.renderScale = null
+				return
+			}
 			// 实际尺寸与占位不符（占位用的是第 1 页尺寸）时修正页面大小
 			const vp1 = page.getViewport({ scale: 1 })
 			if (p.vp1w !== vp1.width || p.vp1h !== vp1.height) {
@@ -600,11 +657,11 @@ export class PdfView extends ItemView {
 			}
 			// 渲染分辨率 = 缩放 × DPR，超过像素预算时按比例降低 DPR
 			let dpr = DPR
-			const cssPixels = p.vp1w * this.scale * p.vp1h * this.scale
+			const cssPixels = p.vp1w * scale * p.vp1h * scale
 			if (cssPixels * DPR * DPR > MAX_CANVAS_PIXELS) {
 				dpr = Math.max(1, Math.sqrt(MAX_CANVAS_PIXELS / cssPixels))
 			}
-			const vp = page.getViewport({ scale: this.scale * dpr })
+			const vp = page.getViewport({ scale: scale * dpr })
 			p.canvas.width = Math.floor(vp.width)
 			p.canvas.height = Math.floor(vp.height)
 			const ctx = p.canvas.getContext('2d')
@@ -616,11 +673,16 @@ export class PdfView extends ItemView {
 			const task = page.render({ canvasContext: ctx, viewport: vp })
 			p.task = task
 			await task.promise
-			if (!this.#drawTextLayer(page, p, n)) {
+			if (p.renderScale !== scale || this.scale !== scale || this.pdfDoc !== doc) {
+				if (this.pdfDoc === doc) p.renderScale = null
+				return
+			}
+			if (!(await this.#drawTextLayer(page, p, n))) {
 				// 文字层失败不阻塞阅读，仅影响划选（降级）
 				p.textDone = true
 			}
 			this.#drawHighlightsOf(p.wrap)
+			this.renderedPages.add(n)
 			this.#bumpIdleCleanup()
 		} catch (e) {
 			// 渲染取消（renderScale 变化）属正常路径
@@ -629,12 +691,32 @@ export class PdfView extends ItemView {
 				this.#reportRenderError(n, e)
 			}
 		} finally {
+			p.task = null
 			p.rendering = false
-			if (p.queued) {
-				p.queued = false
-				void this.#renderPage(n)
+			this.renderingPages.delete(n)
+			if (p.renderScale === null) {
+				p.canvas.width = 0
+				p.canvas.height = 0
+				p.textDiv.empty()
+				p.textDone = false
+				this.renderedPages.delete(n)
+				void this.#cleanupPage(n)
 			}
 		}
+	}
+
+	#releaseRenderedPage(n: number): void {
+		const page = this.pages.get(n)
+		if (!page || page.rendering) return
+		page.renderScale = null
+		page.queued = false
+		this.renderQueue.delete(n)
+		page.canvas.width = 0
+		page.canvas.height = 0
+		page.textDiv.empty()
+		page.textDone = false
+		this.renderedPages.delete(n)
+		void this.#cleanupPage(n)
 	}
 
 	#renderErrorReported = false
@@ -646,16 +728,15 @@ export class PdfView extends ItemView {
 		new Notice(`Grove Reader：PDF 页面渲染失败：${e instanceof Error ? e.message : String(e)}（详见控制台）`)
 	}
 
-	#drawTextLayer(page: PdfPageProxy, p: PageEntry, n: number): boolean {
+	async #drawTextLayer(page: PdfPageProxy, p: PageEntry, n: number): Promise<boolean> {
 		try {
 			p.textDiv.empty()
 			const vp = page.getViewport({ scale: this.scale })
 			const tl = new (pdfjsLib as unknown as {
 				TextLayer: new (o: { textContentSource: unknown; container: HTMLElement; viewport: PdfViewport }) => { render(): Promise<void> }
 			}).TextLayer({ textContentSource: page.streamTextContent(), container: p.textDiv, viewport: vp })
-			tl.render()
-				.then(() => this.#applySearchHighlights(p))
-				.catch(e => console.error(`[Grove Reader] 第 ${n} 页文字层失败`, e))
+			await tl.render()
+			this.#applySearchHighlights(p)
 			return true
 		} catch (e) {
 			console.error(`[Grove Reader] 第 ${n} 页文字层创建失败`, e)
@@ -688,12 +769,20 @@ export class PdfView extends ItemView {
 	}
 
 	#onScroll(): void {
-		// 当前页 = 视口上沿所在页
+		// 二分定位当前页，避免每次滚动都逐页遍历超长 PDF 的整张页面表。
 		const top = this.pagesEl.scrollTop + this.pagesEl.clientHeight * 0.25
 		let current = 1
-		for (const [n, p] of this.pages) {
-			if (p.wrap.offsetTop <= top) current = n
-			else break
+		let low = 1
+		let high = this.numPages
+		while (low <= high) {
+			const mid = Math.floor((low + high) / 2)
+			const page = this.pages.get(mid)
+			if (page && page.wrap.offsetTop <= top) {
+				current = mid
+				low = mid + 1
+			} else {
+				high = mid - 1
+			}
 		}
 		if (current !== this.currentPage && current >= 1 && current <= this.numPages) {
 			this.currentPage = current
@@ -709,20 +798,30 @@ export class PdfView extends ItemView {
 				}
 				this.#scheduleSave()
 			}
-			this.#renderVisible()
 			this.#bumpIdleCleanup()
 			// 释放远端页面内存：清空画布并调用 page.cleanup() 释放解码后的整页位图
 			//（扫描版每页一张大图，不解清理会累积到 GB 级）
-			for (const [n, p] of this.pages) {
-				if (Math.abs(n - current) > 3 && p.renderScale !== null && !p.rendering) {
-					p.task?.cancel()
-					p.renderScale = null
-					p.canvas.width = 0
-					p.textDiv.empty()
-					p.textDone = false
-					void this.#cleanupPage(n)
+			for (const n of this.renderQueue) {
+				if (Math.abs(n - current) > 1) {
+					this.renderQueue.delete(n)
+					const page = this.pages.get(n)
+					if (page) page.queued = false
 				}
 			}
+			for (const n of this.renderedPages) {
+				if (Math.abs(n - current) > 1) this.#releaseRenderedPage(n)
+			}
+			for (const n of this.renderingPages) {
+				const p = this.pages.get(n)
+				if (p && Math.abs(n - current) > 1) {
+					p.queued = false
+					this.renderQueue.delete(n)
+					p.renderScale = null
+					p.task?.cancel()
+				}
+			}
+			this.#drainRenderQueue()
+			this.#renderVisible()
 		}
 		if (this.relayoutTimer != null) window.clearTimeout(this.relayoutTimer)
 		this.relayoutTimer = window.setTimeout(() => {
