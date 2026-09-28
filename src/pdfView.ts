@@ -3,7 +3,6 @@ import { ItemView, Notice, TFile, ViewStateResult, WorkspaceLeaf, setIcon } from
 import pathModule from 'node:path'
 import { open as openFile, stat as statFile, type FileHandle } from 'node:fs/promises'
 import * as pdfjsLib from 'pdfjs-dist'
-import * as pdfjsWorkerModule from 'pdfjs-dist/build/pdf.worker.mjs'
 import type { PDFDocumentProxy, PDFWorker } from 'pdfjs-dist'
 import type GroveReaderPlugin from './main'
 import { Annotation, BookData, HIGHLIGHT_COLORS, colorCss } from './types'
@@ -135,7 +134,6 @@ export class PdfView extends ItemView {
 	private pdfDoc: PdfDocProxy | null = null
 	private pdfWorker: PDFWorker | null = null
 	private pdfLoadingTask: ReturnType<typeof pdfjsLib.getDocument> | null = null
-	private pdfWorkerChannel: MessageChannel | null = null
 	private pdfRangeTransport: LocalFilePdfRangeTransport | null = null
 	private data: BookData | null = null
 	private loadedPath: string | null = null
@@ -445,16 +443,12 @@ export class PdfView extends ItemView {
 			// wasm 解码资源（以及 cmaps / standard_fonts）；缺资源时页面会渲染成空白
 			// worker：经 MessageChannel 直连 worker 侧处理器，作用域限于本文档，
 			// 不污染 globalThis（曾毒化 Obsidian 原生 PDF 视图，详见开发全记录）
-			const channel = new MessageChannel()
-			this.pdfWorkerChannel = channel
-			;(pdfjsWorkerModule.WorkerMessageHandler as unknown as { initializeFromPort(p: MessagePort): void })
-				.initializeFromPort(channel.port1)
-			// PDFWorker 的 port 构造参数未收录进官方类型定义，运行时支持
-			this.pdfWorker = new (pdfjsLib.PDFWorker as unknown as new (params: { port: MessagePort }) => PDFWorker)({ port: channel.port2 })
-			// MessageChannel 端口用 addEventListener 接收时必须显式 start()，
-			// 否则消息永远不到达（表现为「正在打开…」卡住）
-			channel.port1.start()
-			channel.port2.start()
+			const workerSrc = this.plugin.pdfjsAssetUrl('pdf.worker.mjs')
+			if (!workerSrc) throw new Error('PDF.js worker resource is unavailable')
+			;(pdfjsLib.GlobalWorkerOptions as unknown as { workerSrc: string }).workerSrc = workerSrc
+			this.pdfWorker = new pdfjsLib.PDFWorker()
+			await this.pdfWorker.promise
+			delete (globalThis as unknown as { pdfjsWorker?: unknown }).pdfjsWorker
 			const docParams: Record<string, unknown> = { worker: this.pdfWorker }
 			docParams.canvasMaxAreaInBytes = MAX_CANVAS_PIXELS * 4
 			const localPath = isAbsolutePath(target)
@@ -621,12 +615,7 @@ export class PdfView extends ItemView {
 				// ignore
 			}
 		}
-		const channel = this.pdfWorkerChannel
-		this.pdfWorkerChannel = null
-		if (channel) {
-			channel.port1.close()
-			channel.port2.close()
-		}
+
 	}
 
 	#updateHeaderTitle(): void {

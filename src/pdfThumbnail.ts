@@ -3,7 +3,6 @@
 // 但自包含且单次调用即建即毁，不持有任何长期资源。
 import './pdfjsPolyfill'
 import * as pdfjsLib from 'pdfjs-dist'
-import * as pdfjsWorkerModule from 'pdfjs-dist/build/pdf.worker.mjs'
 
 // pdf.worker 模块被 import 时会自注册 globalThis.pdfjsWorker，
 // 毒化 Obsidian 原生 PDF 视图（版本冲突），必须立即清除
@@ -48,16 +47,13 @@ export async function readPdfShelfInfo(
 	let worker: InstanceType<typeof pdfjsLib.PDFWorker> | null = null
 	let doc: ThumbDoc | null = null
 	try {
-		const channel = new MessageChannel()
-		;(pdfjsWorkerModule.WorkerMessageHandler as unknown as { initializeFromPort(p: MessagePort): void })
-			.initializeFromPort(channel.port1)
-		// PDFWorker 的 port 构造参数未收录进官方类型定义，运行时支持
-		worker = new (pdfjsLib.PDFWorker as unknown as new (params: { port: MessagePort }) => InstanceType<typeof pdfjsLib.PDFWorker>)({ port: channel.port2 })
-		// MessageChannel 端口用 addEventListener 接收时必须显式 start()
-		channel.port1.start()
-		channel.port2.start()
+		const workerSrc = assetUrlGetter?.('pdf.worker.mjs')
+		if (workerSrc) { (pdfjsLib.GlobalWorkerOptions as unknown as { workerSrc: string }).workerSrc = workerSrc }
+		worker = new pdfjsLib.PDFWorker()
+		await worker.promise
+		delete (globalThis as unknown as { pdfjsWorker?: unknown }).pdfjsWorker
 
-		const params: Record<string, unknown> = { data: new Uint8Array(bytes.slice(0)), worker }
+		const params: Record<string, unknown> = { data: new Uint8Array(bytes), worker }
 		const wasmUrl = assetUrlGetter?.('wasm/')
 		if (wasmUrl) {
 			// 扫描版整页图片（JBIG2/JPX）解码必需
