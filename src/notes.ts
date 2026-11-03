@@ -4,7 +4,7 @@ import { compareCfi, encodeParam, truncate } from './util'
 export const NOTE_BEGIN = '<!-- GROVE:BEGIN 由 Grove Reader 生成，重新生成时会覆盖此区间内的内容 -->'
 export const NOTE_END = '<!-- GROVE:END -->'
 
-export const DEFAULT_TEMPLATE_PATH = '林间书屋/阅读笔记/Grove 笔记模板.md'
+export const DEFAULT_TEMPLATE_PATH = 'Grove Reader/阅读笔记/Grove 笔记模板.md'
 
 /** 从笔记回跳原文的协议链接，由 main.ts 中注册的 obsidian://grove 处理 */
 export function jumpLink(bookId: string, cfi: string): string {

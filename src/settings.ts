@@ -90,6 +90,21 @@ export class GroveSettingTab extends PluginSettingTab {
 				}))
 		}
 
+		const hiddenCount = this.plugin.settings.hiddenBooks?.length ?? 0
+		new Setting(containerEl)
+			.setName('从书架移除的书籍')
+			.setDesc(hiddenCount
+				? `当前隐藏 ${hiddenCount} 本，原文件和批注数据都还在；恢复后会重新出现在书架`
+				: '在书架右键「删除书籍…」且不勾选删除原文件时，书会暂时收在这里')
+			.addButton(button =>
+				button
+					.setButtonText('全部恢复')
+					.setDisabled(hiddenCount === 0)
+					.onClick(async () => {
+						await this.plugin.restoreHiddenBooks()
+						this.display()
+					}))
+
 		// —— 书架显示 ——
 		containerEl.createEl('h3', { text: '书架显示' })
 		containerEl.createEl('p', {
@@ -158,7 +173,7 @@ export class GroveSettingTab extends PluginSettingTab {
 			.setDesc('模板文件路径（库内）。文件不存在时使用内置默认模板；语法见使用指南')
 			.addText(text =>
 				text.setValue(this.plugin.settings.noteTemplatePath).onChange(async value => {
-					this.plugin.settings.noteTemplatePath = value.trim() || '林间书屋/阅读笔记/Grove 笔记模板.md'
+					this.plugin.settings.noteTemplatePath = value.trim() || 'Grove Reader/阅读笔记/Grove 笔记模板.md'
 					await this.plugin.saveSettings()
 				}))
 			.addButton(button =>
@@ -178,7 +193,7 @@ export class GroveSettingTab extends PluginSettingTab {
 			.setDesc('批注 JSON、封面、书单、阅读统计的存放位置（库内相对路径）。留空 = 插件目录下的 data/。修改后需把原 data/ 内容复制到新位置并重启 Obsidian')
 			.addText(text =>
 				text
-					.setPlaceholder('例如：林间书屋')
+					.setPlaceholder('例如：Grove Reader')
 					.setValue(this.plugin.settings.dataFolder ?? '')
 					.onChange(async value => {
 						this.plugin.settings.dataFolder = value.trim().replace(/[\\/]+$/, '')
@@ -241,7 +256,7 @@ export class GroveSettingTab extends PluginSettingTab {
 
 		containerEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: `批注数据每本书一个 JSON 文件，默认在插件目录的 data/ 下；填写「数据文件夹」后会改存到库内对应目录（如「林间书屋」→ 林间书屋/data/）。即使停用或删除插件，已生成的 Markdown 笔记也不受影响。阅读中的字体、背景等外观设置请在阅读界面的「Aa」面板中调整。`,
+			text: `批注数据每本书一个 JSON 文件，默认在插件目录的 data/ 下；填写「数据文件夹」后会改存到库内对应目录（如「Grove Reader」→ Grove Reader/data/）。即使停用或删除插件，已生成的 Markdown 笔记也不受影响。阅读中的字体、背景等外观设置请在阅读界面的「Aa」面板中调整。`,
 		})
 	}
 }

@@ -123,7 +123,7 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	/**
-	 * 书库被整体迁到 <库>/林间书屋/ 后，若设置里仍是旧路径（例如迁移时旧实例
+	 * 书库被整体迁到 <库>/Grove Reader/ 后，若设置里仍是旧路径（例如迁移时旧实例
 	 * 又把 data.json 写回去了），按磁盘实际情况自动接管，避免书架空白。
 	 */
 	private adoptMigratedFolders(): void {
@@ -143,8 +143,16 @@ export default class GroveReaderPlugin extends Plugin {
 
 		let changed = false
 		const configuredData = this.settings.dataFolder?.trim() ?? ''
-		const configuredDataOk = !!configuredData
-			&& fs.existsSync(pathModule.join(this.vaultBase, configuredData, 'data', 'shelf.json'))
+		// 配置的数据目录必须真的指向存在的书，否则视为迁移后的旧路径
+		const configuredDataOk = ((): boolean => {
+			if (!configuredData) return false
+			try {
+				const shelf = JSON.parse(fs.readFileSync(pathModule.join(this.vaultBase, configuredData, 'data', 'shelf.json'), 'utf-8')) as { entries?: Record<string, unknown> }
+				return Object.keys(shelf.entries ?? {}).some(k => fs.existsSync(pathModule.join(this.vaultBase, k)))
+			} catch {
+				return false
+			}
+		})()
 		if (dataOk && !configuredDataOk) {
 			this.settings.dataFolder = LIBRARY_ROOT
 			changed = true
@@ -249,16 +257,24 @@ export default class GroveReaderPlugin extends Plugin {
 		})()
 	}
 
-	/** 删除书籍前关掉仍打开着它的阅读视图，避免继续写回数据 */
-	closeBookViews(bookPath: string): void {
+	/** 删除书籍前关掉仍打开着它的阅读视图，避免继续写回数据；返回关闭的视图数 */
+	closeBookViews(bookPath: string): number {
+		let closed = 0
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_READER)) {
 			const view = leaf.view
-			if (view instanceof ReaderView && view.bookPath === bookPath) leaf.detach()
+			if (view instanceof ReaderView && view.bookPath === bookPath) {
+				leaf.detach()
+				closed++
+			}
 		}
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_PDF)) {
 			const view = leaf.view
-			if (view instanceof PdfView && view.bookPath === bookPath) leaf.detach()
+			if (view instanceof PdfView && view.bookPath === bookPath) {
+				leaf.detach()
+				closed++
+			}
 		}
+		return closed
 	}
 
 	/** 恢复所有「从书架移除但保留文件」的书 */
@@ -289,11 +305,18 @@ export default class GroveReaderPlugin extends Plugin {
 			`将删除《${title}》的 ${count} 条批注与评论；阅读位置会保留。`,
 			'清空',
 			() => {
-				data.annotations = []
-				this.store.save(data)
-				this.refreshNoteForBook(bookPath)
-				this.refreshShelfViews()
-				new Notice(`已清空 ${count} 条批注`)
+				const closed = this.closeBookViews(bookPath)
+				const finish = (): void => {
+					// 关视图可能触发一次 onClose 写盘，等它落完再清，避免批注被写回来
+					const fresh = this.store.load(bookPath)
+					fresh.annotations = []
+					this.store.save(fresh)
+					this.refreshNoteForBook(bookPath)
+					this.refreshShelfViews()
+					new Notice(`已清空 ${count} 条批注`)
+				}
+				if (closed) window.setTimeout(finish, 300)
+				else finish()
 			},
 		).open()
 	}

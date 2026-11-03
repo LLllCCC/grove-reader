@@ -247,7 +247,7 @@ export class DeleteBookModal extends Modal {
 		const row = this.contentEl.createDiv('grove-delete-check')
 		const checkbox = row.createEl('input', { type: 'checkbox' })
 		checkbox.id = 'grove-delete-file'
-		const label = row.createEl('label', { text: '同时删除库里的原文件（移到回收站）' })
+		const label = row.createEl('label', { text: '同时删除库里的原文件（按 Obsidian 的删除设置处理）' })
 		label.setAttr('for', 'grove-delete-file')
 		const hint = this.contentEl.createEl('p', {
 			cls: 'setting-item-description',

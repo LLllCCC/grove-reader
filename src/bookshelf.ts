@@ -822,7 +822,9 @@ export class BookshelfView extends ItemView {
 				if (file instanceof TFile) await this.app.fileManager.trashFile(file)
 				else await shell.trashItem(this.#absPath(path))
 			}
-			this.plugin.closeBookViews(path)
+			const closed = this.plugin.closeBookViews(path)
+			// 关闭阅读视图时可能触发一次 onClose 写盘，等它落完再删数据
+			if (closed) await new Promise(resolve => window.setTimeout(resolve, 300))
 			if (deleteFile) {
 				this.plugin.store.delete(path)
 				this.plugin.stats.remove(path)
