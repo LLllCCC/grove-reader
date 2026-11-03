@@ -22,7 +22,7 @@ import {
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
 import { PdfView, VIEW_TYPE_GROVE_PDF } from './pdfView'
-import { BookPickerModal, ReadingStatsModal } from './modals'
+import { BookPickerModal, DangerConfirmModal, ReadingStatsModal } from './modals'
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
 import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
@@ -142,7 +142,10 @@ export default class GroveReaderPlugin extends Plugin {
 		if (!dataOk && !hasBooks(booksDir) && !fs.existsSync(notesDir)) return
 
 		let changed = false
-		if (dataOk && !this.settings.dataFolder?.trim()) {
+		const configuredData = this.settings.dataFolder?.trim() ?? ''
+		const configuredDataOk = !!configuredData
+			&& fs.existsSync(pathModule.join(this.vaultBase, configuredData, 'data', 'shelf.json'))
+		if (dataOk && !configuredDataOk) {
 			this.settings.dataFolder = LIBRARY_ROOT
 			changed = true
 		}
@@ -226,6 +229,73 @@ export default class GroveReaderPlugin extends Plugin {
 			const view = leaf.view
 			if (view instanceof BookshelfView) void view.refresh()
 		}
+	}
+
+	/** 把某本书已生成的阅读笔记按当前批注重写（清空批注后用） */
+	refreshNoteForBook(bookPath: string): void {
+		const data = this.store.load(bookPath)
+		const notePath = data.notePath
+		if (!notePath) return
+		const file = this.app.vault.getAbstractFileByPath(notePath)
+		if (!(file instanceof TFile)) return
+		void (async () => {
+			try {
+				const existing = await this.app.vault.read(file)
+				const markdown = await this.#composeNoteMarkdown(data, existing, false)
+				if (markdown !== existing) await this.app.vault.modify(file, markdown)
+			} catch (e) {
+				console.error('[Grove Reader] 刷新阅读笔记失败', e)
+			}
+		})()
+	}
+
+	/** 删除书籍前关掉仍打开着它的阅读视图，避免继续写回数据 */
+	closeBookViews(bookPath: string): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_READER)) {
+			const view = leaf.view
+			if (view instanceof ReaderView && view.bookPath === bookPath) leaf.detach()
+		}
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_PDF)) {
+			const view = leaf.view
+			if (view instanceof PdfView && view.bookPath === bookPath) leaf.detach()
+		}
+	}
+
+	/** 恢复所有「从书架移除但保留文件」的书 */
+	async restoreHiddenBooks(): Promise<void> {
+		const count = this.settings.hiddenBooks?.length ?? 0
+		if (!count) {
+			new Notice(`${APP_NAME}：没有隐藏的书`)
+			return
+		}
+		this.settings.hiddenBooks = []
+		await this.saveSettings()
+		this.refreshShelfViews()
+		new Notice(`${APP_NAME}：已恢复 ${count} 本`)
+	}
+
+	/** 清空一本书的全部批注/评论（保留阅读位置），需要输入确认词 */
+	clearAnnotationsFor(bookPath: string): void {
+		const data = this.store.load(bookPath)
+		const count = data.annotations?.length ?? 0
+		if (!count) {
+			new Notice(`${APP_NAME}：这本书还没有批注`)
+			return
+		}
+		const title = data.title || bookPath.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || '这本书'
+		new DangerConfirmModal(
+			this.app,
+			'清空本书批注',
+			`将删除《${title}》的 ${count} 条批注与评论；阅读位置会保留。`,
+			'清空',
+			() => {
+				data.annotations = []
+				this.store.save(data)
+				this.refreshNoteForBook(bookPath)
+				this.refreshShelfViews()
+				new Notice(`已清空 ${count} 条批注`)
+			},
+		).open()
 	}
 
 	openPicker(): void {
@@ -470,6 +540,11 @@ export default class GroveReaderPlugin extends Plugin {
 			checkCallback: checking => this.withAnyReader(checking, v => v.comment()),
 		})
 		this.addCommand({
+			id: 'clear-book-annotations',
+			name: '清空当前书籍的全部批注',
+			checkCallback: checking => this.withAnyReader(checking, v => this.clearAnnotationsFor(v.bookPath)),
+		})
+		this.addCommand({
 			id: 'generate-note',
 			name: '生成 / 更新阅读笔记',
 			checkCallback: checking => this.withAnyReader(checking, v => this.generateNoteFor(v)),
@@ -488,6 +563,11 @@ export default class GroveReaderPlugin extends Plugin {
 					if (view instanceof BookshelfView) void view.refresh({ rescan: true })
 				}
 			},
+		})
+		this.addCommand({
+			id: 'restore-hidden-books',
+			name: '恢复从书架移除的书籍',
+			callback: () => void this.restoreHiddenBooks(),
 		})
 		this.addCommand({
 			id: 'regenerate-usage-doc',

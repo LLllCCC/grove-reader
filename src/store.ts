@@ -103,6 +103,21 @@ export class BookStore {
 		}
 	}
 
+	/** 删除某本书的全部批注数据与自动备份（书籍文件由调用方处理） */
+	delete(vaultPath: string): void {
+		const id = this.bookId(vaultPath)
+		try {
+			fs.rmSync(this.fileFor(id), { force: true })
+		} catch (e) {
+			console.error('[Grove Reader] 删除批注数据失败', e)
+		}
+		try {
+			fs.rmSync(this.backupsDir(id), { recursive: true, force: true })
+		} catch {
+			// 没有备份目录是常态
+		}
+	}
+
 	#saveInner(data: BookData): void {
 		this.#normalize(data)
 		const id = this.bookId(data.bookPath)

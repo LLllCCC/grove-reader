@@ -4,7 +4,7 @@ export const DATA_VERSION = 1
 export const APP_NAME = 'Grove Reader'
 
 /** 本库把书籍/笔记/数据统一放在这个根目录下（库内相对路径） */
-export const LIBRARY_ROOT = '林间书屋'
+export const LIBRARY_ROOT = 'Grove Reader'
 
 /** 库内备份文件夹名（「备份批注数据到库内」命令生成） */
 export const BACKUP_FOLDER_NAME = 'Grove Reader 数据备份'
@@ -210,6 +210,8 @@ export interface GroveSettings {
 	maxBackups: number
 	/** 书架扫描文件夹（库内相对路径或本机绝对路径） */
 	scanFolders: string[]
+	/** 从书架移除但保留原文件的书籍路径（可随时恢复） */
+	hiddenBooks: string[]
 	/**
 	 * 数据目录（库内相对路径）：批注 JSON、封面、书单、统计的存放位置。
 	 * 留空 = 沿用旧行为（插件目录下的 data/）。
@@ -234,9 +236,10 @@ export interface GroveSettings {
 
 export const DEFAULT_SETTINGS: GroveSettings = {
 	notesFolder: '阅读笔记',
-	noteTemplatePath: '林间书屋/阅读笔记/Grove 笔记模板.md',
+	noteTemplatePath: 'Grove Reader/阅读笔记/Grove 笔记模板.md',
 	maxBackups: 10,
 	scanFolders: [],
+	hiddenBooks: [],
 	dataFolder: '',
 	shelfSort: 'default',
 	logoStyle: 'original',

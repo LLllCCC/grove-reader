@@ -59,6 +59,14 @@ export class StatsStore {
 		return b
 	}
 
+	/** 删除某本书的阅读统计（删书时调用） */
+	remove(bookPath: string): void {
+		if (this.data.books[bookPath]) {
+			delete this.data.books[bookPath]
+			this.saveSoon()
+		}
+	}
+
 	/** 只读查询：书没有统计数据时返回 undefined，不会像 book() 那样凭空建档 */
 	peek(bookPath: string): StatsBook | undefined {
 		return this.data.books[bookPath]

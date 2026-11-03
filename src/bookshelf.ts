@@ -9,7 +9,7 @@ import type GroveReaderPlugin from './main'
 import { FORMAT_LABELS, ShelfBookInfo, isReaderExt, isShelfExt } from './types'
 import { basenameOf, cleanPdfDisplayTitle, duplicateKeyOf, formatAuthor, formatBytes, formatDuration, formatLanguageMap, isAbsolutePath, relativeTime, stripNumericTitlePrefix, truncate } from './util'
 import { readPdfShelfInfo } from './pdfThumbnail'
-import { BookInfoModal, ConfirmModal, CoverUrlModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
+import { BookInfoModal, ConfirmModal, CoverUrlModal, DangerConfirmModal, DeleteBookModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
 import type { BookInfoValues } from './modals'
 import type { BookList } from './lists'
 
@@ -422,20 +422,29 @@ export class BookshelfView extends ItemView {
 
 		const allPaths = this.#scan(folders)
 		this.#migrateStaleEntries(allPaths)
-		this.#renderListBar(allPaths)
+		// 从书架移除但保留文件的书籍：仍在磁盘上，只是不显示
+		const hidden = new Set(plugin.settings.hiddenBooks ?? [])
+		const present = new Set(allPaths)
+		const stillHidden = [...hidden].filter(p => present.has(p))
+		if (stillHidden.length !== hidden.size) {
+			plugin.settings.hiddenBooks = stillHidden
+			void plugin.saveSettings()
+		}
+		const visiblePaths = allPaths.filter(p => !hidden.has(p))
+		this.#renderListBar(visiblePaths)
 		if (this.listFilter !== 'all' && this.listFilter !== 'none'
 			&& !plugin.lists.lists().some(l => l.id === this.listFilter)) {
 			this.listFilter = 'all'
 		}
 		const stats = plugin.collectBookStats()
-		const dupes = this.#duplicateGroups(allPaths)
-		const inList = this.#filterByList(allPaths)
+		const dupes = this.#duplicateGroups(visiblePaths)
+		const inList = this.#filterByList(visiblePaths)
 		this.continueEl.addClass('grove-hidden')
-		this.#renderContinue(stats, allPaths)
+		this.#renderContinue(stats, visiblePaths)
 
 		if (!inList.length) {
 			this.countEl.setText('共 0 本')
-			this.#showEmpty(allPaths.length && this.listFilter !== 'all'
+			this.#showEmpty(visiblePaths.length && this.listFilter !== 'all'
 				? '这个书单里还没有书。在书籍卡片上右键 →「移入书单…」，或直接把书拖到书单标签上。'
 				: '扫描文件夹里没有找到书籍文件（支持 epub / mobi / azw3 / fb2 / cbz，PDF 会一并收纳）。')
 			return
@@ -802,6 +811,61 @@ export class BookshelfView extends ItemView {
 		input.click()
 	}
 
+	/** 清空一本书的全部批注/评论（保留阅读位置），需要输入确认词 */
+	#clearAnnotations(path: string): void {
+		const data = this.plugin.store.load(path)
+		const count = data.annotations?.length ?? 0
+		if (!count) {
+			new Notice('这本书还没有批注')
+			return
+		}
+		new DangerConfirmModal(
+			this.app,
+			'清空本书批注',
+			`将删除《${this.#displayTitle(path)}》的 ${count} 条批注与评论；阅读位置会保留。`,
+			'清空',
+			() => {
+				data.annotations = []
+				this.plugin.store.save(data)
+				this.plugin.refreshNoteForBook(path)
+				void this.refresh()
+				new Notice(`已清空 ${count} 条批注`)
+			},
+		).open()
+	}
+
+	/** 删除书籍：可选择是否连原文件一起移到回收站 */
+	async #deleteBook(path: string): Promise<void> {
+		const title = this.#displayTitle(path)
+		const data = this.plugin.store.load(path)
+		const count = data.annotations?.length ?? 0
+		new DeleteBookModal(this.app, title, count, async deleteFile => {
+			if (deleteFile) {
+				const file = this.app.vault.getAbstractFileByPath(path)
+				if (file instanceof TFile) await this.app.fileManager.trashFile(file)
+				else await shell.trashItem(this.#absPath(path))
+			}
+			this.plugin.closeBookViews(path)
+			if (deleteFile) {
+				this.plugin.store.delete(path)
+				this.plugin.stats.remove(path)
+				this.plugin.lists.setMember(path, null)
+				this.plugin.shelfCache.remove(path)
+				const hidden = this.plugin.settings.hiddenBooks ?? []
+				this.plugin.settings.hiddenBooks = hidden.filter(p => p !== path)
+				await this.plugin.saveSettings()
+				new Notice(`已删除《${title}》及其阅读数据`)
+			} else {
+				const hidden = this.plugin.settings.hiddenBooks ?? []
+				if (!hidden.includes(path)) hidden.push(path)
+				this.plugin.settings.hiddenBooks = hidden
+				await this.plugin.saveSettings()
+				new Notice('已从书架移除，原文件与批注数据都保留')
+			}
+			await this.refresh({ rescan: true })
+		}).open()
+	}
+
 	#renderCard(path: string, info?: ShelfBookInfo, dupes?: string[]): HTMLElement {
 		const { plugin } = this
 		const display = plugin.settings.shelfDisplay
@@ -945,6 +1009,9 @@ export class BookshelfView extends ItemView {
 				void navigator.clipboard.writeText(basenameOf(path))
 				new Notice('已复制文件名')
 			}))
+			menu.addSeparator()
+			menu.addItem(item => item.setTitle('清空本书批注…').setIcon('eraser').onClick(() => this.plugin.clearAnnotationsFor(path)))
+			menu.addItem(item => item.setTitle('删除书籍…').setIcon('trash-2').onClick(() => void this.#deleteBook(path)))
 			menu.showAtPosition({ x: e.clientX, y: e.clientY })
 		})
 		return card

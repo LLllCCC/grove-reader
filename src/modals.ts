@@ -226,6 +226,108 @@ export class CoverUrlModal extends Modal {
 	}
 }
 
+export class DeleteBookModal extends Modal {
+	constructor(
+		app: App,
+		private bookTitle: string,
+		private annotationCount: number,
+		private onConfirm: (deleteFile: boolean) => Promise<void> | void,
+	) {
+		super(app)
+	}
+
+	onOpen(): void {
+		this.contentEl.empty()
+		this.contentEl.createEl('h3', { text: '删除书籍' })
+		this.contentEl.createEl('p', { text: `《${this.bookTitle}》` })
+		this.contentEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: `将删除这本书的阅读数据：${this.annotationCount} 条批注、阅读位置、书单归属。生成的 Markdown 笔记不会被删除。`,
+		})
+		const row = this.contentEl.createDiv('grove-delete-check')
+		const checkbox = row.createEl('input', { type: 'checkbox' })
+		checkbox.id = 'grove-delete-file'
+		const label = row.createEl('label', { text: '同时删除库里的原文件（移到回收站）' })
+		label.setAttr('for', 'grove-delete-file')
+		const hint = this.contentEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: '不勾选时只从书架移除：原文件和批注数据都会保留，之后可以在设置里恢复。',
+		})
+		hint.addClass('grove-delete-hint')
+
+		const buttons = this.contentEl.createDiv('modal-button-container')
+		const cancel = buttons.createEl('button', { text: '取消' })
+		cancel.addEventListener('click', () => this.close())
+		const ok = buttons.createEl('button', { text: '删除', cls: 'mod-warning' })
+		ok.addEventListener('click', () => {
+			void (async () => {
+				ok.disabled = true
+				ok.setText('删除中…')
+				try {
+					await this.onConfirm(checkbox.checked)
+					this.close()
+				} catch (e) {
+					ok.disabled = false
+					ok.setText('删除')
+					new Notice(e instanceof Error ? e.message : String(e))
+				}
+			})()
+		})
+	}
+
+	onClose(): void {
+		this.contentEl.empty()
+	}
+}
+
+export class DangerConfirmModal extends Modal {
+	constructor(
+		app: App,
+		private titleText: string,
+		private message: string,
+		private word: string,
+		private onConfirm: () => void,
+	) {
+		super(app)
+	}
+
+	onOpen(): void {
+		this.contentEl.empty()
+		this.contentEl.createEl('h3', { text: this.titleText })
+		this.contentEl.createEl('p', { text: this.message })
+		this.contentEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: `此操作不可在插件内撤销。请输入「${this.word}」以确认。`,
+		})
+		const input = this.contentEl.createEl('input', { type: 'text', cls: 'grove-folder-input' })
+		input.placeholder = this.word
+		const buttons = this.contentEl.createDiv('modal-button-container')
+		const cancel = buttons.createEl('button', { text: '取消' })
+		cancel.addEventListener('click', () => this.close())
+		const ok = buttons.createEl('button', { text: '确认清空', cls: 'mod-warning' })
+		ok.disabled = true
+		input.addEventListener('input', () => {
+			ok.disabled = input.value.trim() !== this.word
+		})
+		input.addEventListener('keydown', e => {
+			if (e.key === 'Enter' && !ok.disabled) {
+				e.preventDefault()
+				this.onConfirm()
+				this.close()
+			}
+		})
+		ok.addEventListener('click', () => {
+			this.onConfirm()
+			this.close()
+		})
+		window.setTimeout(() => input.focus(), 50)
+	}
+
+	onClose(): void {
+		this.contentEl.empty()
+	}
+}
+
 export class TextPromptModal extends Modal {
 	constructor(
 		app: App,
