@@ -1,11 +1,13 @@
 import { ItemView, Menu, Notice, WorkspaceLeaf, setIcon } from 'obsidian'
+import type { TAbstractFile } from 'obsidian'
+import { TFile } from 'obsidian'
 import fs from 'node:fs'
 import pathModule from 'node:path'
 import { shell } from 'electron'
 import { makeBook } from '../lib/foliate-js/view.js'
 import type GroveReaderPlugin from './main'
-import { SUPPORTED_BOOK_EXTS, isReaderExt, isShelfExt } from './types'
-import { basenameOf, cleanPdfDisplayTitle, duplicateKeyOf, formatAuthor, formatBytes, formatLanguageMap, isAbsolutePath, stripNumericTitlePrefix, truncate } from './util'
+import { FORMAT_LABELS, ShelfBookInfo, isReaderExt, isShelfExt } from './types'
+import { basenameOf, cleanPdfDisplayTitle, duplicateKeyOf, formatAuthor, formatBytes, formatDuration, formatLanguageMap, isAbsolutePath, relativeTime, stripNumericTitlePrefix, truncate } from './util'
 import { readPdfShelfInfo } from './pdfThumbnail'
 import { BookInfoModal, ConfirmModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
 import type { BookInfoValues } from './modals'
@@ -13,8 +15,8 @@ import type { BookList } from './lists'
 
 export const VIEW_TYPE_GROVE_BOOKSHELF = 'grove-bookshelf-view'
 
-const MAX_CACHED_COVERS = 32
-const MAX_CACHED_COVER_CHARS = 8_000_000
+const MAX_CACHED_COVERS = 96
+const MAX_CACHED_COVER_CHARS = 24_000_000
 
 // ------------------------------------------------------------------
 // 书架缓存：metadata + 封面，存于插件数据目录，避免每次进书架重复解析
@@ -240,17 +242,19 @@ export function scanBookFolders(folders: string[], vaultBase: string): string[] 
 // 书架视图
 // ------------------------------------------------------------------
 
-interface BookStat {
-	annotations: number
-	fraction?: number
-}
-
 const SORT_OPTIONS: Array<[string, string]> = [
 	['default', '默认（按文件名）'],
 	['added', '最近添加'],
 	['title', '按书名'],
 	['progress', '阅读进度'],
 ]
+
+/** 书单色条：由 id 稳定映射到色相，避免额外存颜色字段 */
+function listHue(id: string): number {
+	let h = 0
+	for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360
+	return h
+}
 
 export class BookshelfView extends ItemView {
 	private gridEl!: HTMLElement
@@ -260,10 +264,17 @@ export class BookshelfView extends ItemView {
 	/** 'all' = 全部，'none' = 未分类，其余为书单 id */
 	private listFilter = 'all'
 	private toolsEl!: HTMLElement
+	private emptyEl!: HTMLElement
+	private continueEl!: HTMLElement
+	private continueHasItems = false
 	private searchInput!: HTMLInputElement
 	private sortSelect!: HTMLSelectElement
 	private cardEls = new Map<string, HTMLElement>()
 	private searchTimer: number | null = null
+	private refreshTimer: number | null = null
+	/** 目录扫描缓存：手动刷新 / 文件夹变更 / 库内增删改名时递增 */
+	private scanToken = 0
+	private scanCache: { key: string; token: number; paths: string[] } | null = null
 
 	constructor(leaf: WorkspaceLeaf, private plugin: GroveReaderPlugin) {
 		super(leaf)
@@ -287,30 +298,45 @@ export class BookshelfView extends ItemView {
 		root.empty()
 		root.addClass('grove-shelf-content')
 
-		const head = root.createDiv('grove-shelf-head')
-		head.createSpan('grove-shelf-title').setText('书架')
-		this.countEl = head.createSpan('grove-shelf-count')
-		head.createDiv('grove-flex-spacer')
-		const addBtn = head.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '添加扫描文件夹' } })
-		setIcon(addBtn, 'folder-plus')
-		addBtn.addEventListener('click', () => this.#addFolder())
-		const refreshBtn = head.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '重新扫描' } })
-		setIcon(refreshBtn, 'refresh-cw')
-		refreshBtn.addEventListener('click', () => void this.refresh())
-		const statsBtn = head.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '阅读统计' } })
-		setIcon(statsBtn, 'timer')
-		statsBtn.addEventListener('click', () => new ReadingStatsModal(this.app, this.plugin).open())
+		// 标题已由标签页 / 视图头承担，内容区不再重复一行；
+		// 原来的三个按钮迁到 Obsidian 原生视图头（悬停标签页可见）
+		this.addAction('folder-plus', '添加扫描文件夹', () => void this.#addFolder())
+		this.addAction('refresh-cw', '重新扫描', () => void this.refresh({ rescan: true }))
+		this.addAction('bar-chart-2', '阅读统计', () => new ReadingStatsModal(this.app, this.plugin).open())
 
 		this.hintEl = root.createDiv('grove-shelf-folders')
 		this.listsEl = root.createDiv('grove-shelf-lists')
-		this.#renderTools()
+		this.#renderTools(root)
+		this.continueEl = root.createDiv('grove-shelf-continue grove-hidden')
 		this.gridEl = root.createDiv('grove-shelf-grid')
+		this.emptyEl = this.gridEl.createDiv('grove-shelf-empty grove-hidden')
 
+		this.#registerVaultEvents()
 		await this.refresh()
 	}
 
-	#renderTools(): void {
-		this.toolsEl = this.contentEl.createDiv('grove-shelf-tools')
+	/** 库内新增/删除/改名书籍时自动重扫，不必手动点刷新 */
+	#registerVaultEvents(): void {
+		const onChange = (file: TAbstractFile): void => {
+			if (!(file instanceof TFile)) return
+			if (!isShelfExt(file.extension)) return
+			this.#scheduleRescan()
+		}
+		this.registerEvent(this.app.vault.on('create', onChange))
+		this.registerEvent(this.app.vault.on('delete', onChange))
+		this.registerEvent(this.app.vault.on('rename', onChange))
+	}
+
+	#scheduleRescan(): void {
+		if (this.refreshTimer != null) window.clearTimeout(this.refreshTimer)
+		this.refreshTimer = window.setTimeout(() => {
+			this.refreshTimer = null
+			void this.refresh({ rescan: true })
+		}, 500)
+	}
+
+	#renderTools(root: HTMLElement): void {
+		this.toolsEl = root.createDiv('grove-shelf-tools')
 		const searchWrap = this.toolsEl.createDiv('grove-shelf-search')
 		const searchIcon = searchWrap.createSpan('grove-shelf-search-icon')
 		setIcon(searchIcon, 'search')
@@ -318,12 +344,12 @@ export class BookshelfView extends ItemView {
 		this.searchInput.value = this.plugin.shelfSearch
 		this.searchInput.addEventListener('input', () => {
 			this.plugin.shelfSearch = this.searchInput.value.trim().toLowerCase()
-			// 搜索词变化不重建扫描缓存，只防抖刷新视图：每键全量重扫在书多时卡顿
+			// 搜索只切换已有卡片的显示状态，不再重扫目录 / 重建 DOM
 			if (this.searchTimer != null) window.clearTimeout(this.searchTimer)
 			this.searchTimer = window.setTimeout(() => {
 				this.searchTimer = null
-				void this.refresh()
-			}, 200)
+				this.#applySearch()
+			}, 120)
 		})
 		this.sortSelect = this.toolsEl.createEl('select', { cls: 'dropdown' })
 		for (const [key, label] of SORT_OPTIONS) this.sortSelect.createEl('option', { value: key, text: label })
@@ -333,34 +359,42 @@ export class BookshelfView extends ItemView {
 			void this.plugin.saveSettings()
 			void this.refresh()
 		})
+		this.countEl = this.toolsEl.createSpan('grove-shelf-count')
 	}
 
 	async onClose(): Promise<void> {
-		if (this.searchTimer != null) {
-			window.clearTimeout(this.searchTimer)
-			this.searchTimer = null
-		}
+		if (this.searchTimer != null) window.clearTimeout(this.searchTimer)
+		if (this.refreshTimer != null) window.clearTimeout(this.refreshTimer)
+		this.searchTimer = null
+		this.refreshTimer = null
 		this.plugin.shelfCache.saveNow()
 		this.plugin.lists.saveNow()
 	}
 
-	async refresh(): Promise<void> {
+	async refresh(opts: { rescan?: boolean } = {}): Promise<void> {
 		const { plugin } = this
+		if (!this.gridEl) return
+		if (opts.rescan) this.scanToken++
 		this.cardEls.clear()
 		this.gridEl.empty()
+		this.emptyEl = this.gridEl.createDiv('grove-shelf-empty grove-hidden')
 		this.hintEl.empty()
+		this.continueEl.empty()
+		this.continueHasItems = false
 
 		const folders = plugin.settings.scanFolders
 		this.#renderFolderChips(folders)
 
 		if (!folders.length) {
 			this.countEl.setText('')
-			const empty = this.gridEl.createDiv('grove-shelf-empty')
-			empty.setText('还没有扫描文件夹。点击右上角的「添加文件夹」，选择库里放书的文件夹（或本机任意文件夹）。')
+			this.emptyEl.setText('还没有扫描文件夹。选择一个放书的文件夹（库内或本机任意路径），书架会递归扫描其中的电子书与 PDF。')
+			const addBtn = this.emptyEl.createEl('button', { text: '添加文件夹', cls: 'mod-cta' })
+			addBtn.addEventListener('click', () => void this.#addFolder())
+			this.emptyEl.removeClass('grove-hidden')
 			return
 		}
 
-		const allPaths = scanBookFolders(folders, plugin.vaultBase)
+		const allPaths = this.#scan(folders)
 		this.#migrateStaleEntries(allPaths)
 		this.#renderListBar(allPaths)
 		if (this.listFilter !== 'all' && this.listFilter !== 'none'
@@ -369,26 +403,68 @@ export class BookshelfView extends ItemView {
 		}
 		const stats = plugin.collectBookStats()
 		const dupes = this.#duplicateGroups(allPaths)
-		const q = plugin.shelfSearch
 		const inList = this.#filterByList(allPaths)
-		const paths = this.#sortPaths(this.#filterBySearch(inList, q), stats)
-		this.countEl.setText(q ? `找到 ${paths.length} / ${inList.length} 本` : `共 ${paths.length} 本`)
-		if (!paths.length) {
-			this.gridEl.createDiv('grove-shelf-empty').setText(
-				q && inList.length
-					? '没有匹配的书。试试只输书名或作者里的关键词。'
-					: allPaths.length && this.listFilter !== 'all'
-						? '这个书单里还没有书。在书籍卡片上右键 →「移入书单…」，或直接把书拖到书单标签上。'
-						: '扫描文件夹里没有找到书籍文件（支持 epub / mobi / azw3 / fb2 / cbz，PDF 会一并收纳）。')
+		this.continueEl.addClass('grove-hidden')
+		this.#renderContinue(stats, allPaths)
+
+		if (!inList.length) {
+			this.countEl.setText('共 0 本')
+			this.#showEmpty(allPaths.length && this.listFilter !== 'all'
+				? '这个书单里还没有书。在书籍卡片上右键 →「移入书单…」，或直接把书拖到书单标签上。'
+				: '扫描文件夹里没有找到书籍文件（支持 epub / mobi / azw3 / fb2 / cbz，PDF 会一并收纳）。')
 			return
 		}
 
 		const tasks: Array<() => Promise<void>> = []
-		for (const p of paths) {
+		for (const p of this.#sortPaths(inList, stats)) {
 			const card = this.#renderCard(p, stats.get(p), dupes.get(p))
 			tasks.push(() => this.#ensureEntry(p, card))
 		}
-		void this.#runQueue(tasks, 2)
+		this.#applySearch()
+		void this.#runQueue(tasks, 2).then(() => this.#applySearch())
+	}
+
+	/** 扫描结果按「文件夹列表 + token」缓存：搜索/排序刷新不再走磁盘 */
+	#scan(folders: string[]): string[] {
+		const key = folders.join('\u0000')
+		if (!this.scanCache || this.scanCache.key !== key || this.scanCache.token !== this.scanToken) {
+			this.scanCache = { key, token: this.scanToken, paths: scanBookFolders(folders, this.plugin.vaultBase) }
+		}
+		return this.scanCache.paths
+	}
+
+	#showEmpty(message: string): void {
+		this.emptyEl.setText(message)
+		this.emptyEl.removeClass('grove-hidden')
+	}
+
+	#matches(path: string, q: string): boolean {
+		if (!q) return true
+		const entry = this.plugin.shelfCache.get(path)
+		const hit = (s?: string): boolean => !!s && s.toLowerCase().includes(q)
+		return hit(entry?.title) || hit(entry?.author) || hit(entry?.publisher) || hit(basenameOf(path))
+	}
+
+	/**
+	 * 搜索：只切换卡片可见性 + 更新计数，不动 DOM 结构。
+	 * 卡片在 refresh() 时按书单维度全量建好，清空搜索可即时恢复。
+	 */
+	#applySearch(): void {
+		const q = this.plugin.shelfSearch
+		let shown = 0
+		for (const [path, card] of this.cardEls) {
+			const match = this.#matches(path, q)
+			card.toggleClass('is-hidden', !match)
+			if (match) shown++
+		}
+		const total = this.cardEls.size
+		this.countEl.setText(q ? `找到 ${shown} / ${total} 本` : `共 ${total} 本`)
+		if (shown === 0 && total > 0) {
+			this.#showEmpty('没有匹配的书。试试只输书名或作者里的关键词。')
+		} else {
+			this.emptyEl.addClass('grove-hidden')
+		}
+		this.continueEl.toggleClass('grove-hidden', !!q || !this.continueHasItems)
 	}
 
 	#renderFolderChips(folders: string[]): void {
@@ -404,6 +480,49 @@ export class BookshelfView extends ItemView {
 				e.stopPropagation()
 				void this.#removeFolder(folder)
 			})
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// 继续阅读
+	// ------------------------------------------------------------------
+
+	#renderContinue(stats: Map<string, ShelfBookInfo>, allPaths: string[]): void {
+		const display = this.plugin.settings.shelfDisplay
+		if (!display.showContinueReading) return
+		const present = new Set(allPaths)
+		const items = [...stats.entries()]
+			.filter(([p, i]) => present.has(p)
+				&& (i.lastRead ?? 0) > 0
+				&& (i.fraction ?? 0) > 0.0005
+				&& (i.fraction ?? 0) < 0.995)
+			.sort((a, b) => (b[1].lastRead ?? 0) - (a[1].lastRead ?? 0))
+			.slice(0, 6)
+		if (!items.length) return
+
+		this.continueHasItems = true
+		this.continueEl.removeClass('grove-hidden')
+		this.continueEl.createDiv('grove-continue-head').setText('继续阅读')
+		const row = this.continueEl.createDiv('grove-continue-row')
+		for (const [path, info] of items) {
+			const item = row.createEl('button', { cls: 'grove-continue-item', attr: { type: 'button' } })
+			item.title = basenameOf(path)
+			const cover = item.createDiv('grove-continue-cover')
+			const url = this.plugin.shelfCache.coverDataUrl(this.plugin.shelfCache.get(path)?.cover)
+			if (url) {
+				const img = cover.createEl('img', { attr: { src: url, alt: '' } })
+				img.draggable = false
+			}
+			const body = item.createDiv('grove-continue-body')
+			body.createDiv('grove-continue-title').setText(truncate(this.#displayTitle(path), 28))
+			const pct = Math.round((info.fraction ?? 0) * 100)
+			const meta = [info.lastRead ? relativeTime(info.lastRead) : '', info.annotations ? `${info.annotations} 条批注` : '']
+				.filter(Boolean).join(' · ')
+			body.createDiv('grove-continue-meta').setText(meta || `${pct}%`)
+			const bar = body.createDiv('grove-continue-bar')
+			bar.createDiv('grove-continue-fill').style.width = `${pct}%`
+			body.createDiv('grove-continue-pct').setText(`读至 ${pct}%`)
+			item.addEventListener('click', () => void this.plugin.openBookByPath(path))
 		}
 	}
 
@@ -485,16 +604,7 @@ export class BookshelfView extends ItemView {
 		return this.plugin.shelfCache.get(path)?.title || basenameOf(path).replace(/\.[^.]+$/, '')
 	}
 
-	#filterBySearch(paths: string[], q: string): string[] {
-		if (!q) return paths
-		const match = (s?: string): boolean => !!s && s.toLowerCase().includes(q)
-		return paths.filter(p => {
-			const e = this.plugin.shelfCache.get(p)
-			return match(e?.title) || match(e?.author) || match(e?.publisher) || match(basenameOf(p))
-		})
-	}
-
-	#sortPaths(paths: string[], stats: Map<string, BookStat>): string[] {
+	#sortPaths(paths: string[], stats: Map<string, ShelfBookInfo>): string[] {
 		const sortKey = this.plugin.settings.shelfSort
 		if (sortKey === 'default') return paths
 		const arr = [...paths]
@@ -637,39 +747,103 @@ export class BookshelfView extends ItemView {
 		input.click()
 	}
 
-	#renderCard(path: string, stat?: BookStat, dupes?: string[]): HTMLElement {
+	#renderCard(path: string, info?: ShelfBookInfo, dupes?: string[]): HTMLElement {
 		const { plugin } = this
+		const display = plugin.settings.shelfDisplay
 		const entry = plugin.shelfCache.get(path)
 		const card = this.gridEl.createDiv('grove-shelf-card')
 		this.cardEls.set(path, card)
 
-		const coverWrap = card.createDiv('grove-shelf-cover')
-		const coverUrl = plugin.shelfCache.coverDataUrl(entry?.cover)
 		const fallbackTitle = basenameOf(path).replace(/\.[^.]+$/, '')
-		if (coverUrl) {
-			const img = coverWrap.createEl('img', { attr: { src: coverUrl, alt: '' } })
-			img.draggable = false
-		} else {
-			coverWrap.createDiv('grove-shelf-cover-empty').setText(truncate(entry?.title || fallbackTitle, 24))
+		const title = entry?.title || fallbackTitle
+		const author = entry?.author ?? ''
+		const publisher = entry?.publisher ?? ''
+		card.dataset.title = title
+		card.dataset.author = author
+		card.dataset.publisher = publisher
+		// 键盘可达：卡片本身是按钮语义
+		card.tabIndex = 0
+		card.setAttr('role', 'button')
+		card.setAttr('aria-label', [title, author].filter(Boolean).join('，'))
+		if (display.showListColor) {
+			const lid = plugin.lists.listIdOf(path)
+			if (lid) {
+				card.addClass('has-list')
+				card.style.setProperty('--grove-list-hue', String(listHue(lid)))
+			}
 		}
-		// 悬浮显示完整文件名与大小
+
+		const size = this.#fileSize(path)
+		const coverWrap = card.createDiv('grove-shelf-cover')
+		const media = coverWrap.createDiv('grove-shelf-cover-media')
+		this.#fillCover(media, plugin.shelfCache.coverDataUrl(entry?.cover), title)
+
+		// 封面底部进度条：扫视时比读百分比快
+		const fraction = info?.fraction
+		if (display.showProgress && typeof fraction === 'number' && fraction > 0.001) {
+			const track = coverWrap.createDiv('grove-cover-progress')
+			const pct = Math.min(100, Math.max(1, Math.round(fraction * 100)))
+			track.createDiv('grove-cover-progress-fill').style.width = `${pct}%`
+			track.title = fraction >= 0.995 ? '已读完' : `读至 ${pct}%`
+		}
+
+		// 悬浮显示完整文件名、大小与阅读时长
 		let tooltip = basenameOf(path)
-		try {
-			tooltip += `\n${formatBytes(fs.statSync(this.#absPath(path)).size)}`
-		} catch {
-			// 文件可能刚被移走
-		}
+		if (size != null) tooltip += `\n${formatBytes(size)}`
+		if (info?.seconds) tooltip += `\n累计阅读 ${formatDuration(info.seconds)}`
+		if (info?.lastRead) tooltip += `\n最近阅读 ${new Date(info.lastRead).toLocaleString('zh-CN', { hour12: false })}`
 		card.title = tooltip
-		card.createDiv('grove-shelf-booktitle').setText(truncate(entry?.title || fallbackTitle, 24))
-		card.createDiv('grove-shelf-author').setText(entry?.author || ' ')
-		card.createDiv('grove-shelf-publisher').setText(entry?.publisher || ' ')
+
+		card.createDiv('grove-shelf-booktitle').setText(truncate(title, 24))
+		if (display.mergeAuthorPublisher) {
+			card.createDiv('grove-shelf-author').setText([author, publisher].filter(Boolean).join(' · ') || ' ')
+		} else {
+			card.createDiv('grove-shelf-author').setText(author || ' ')
+			card.createDiv('grove-shelf-publisher').setText(publisher || ' ')
+		}
 
 		const meta = card.createDiv('grove-shelf-meta')
 		const ext = (path.split('.').pop() ?? '').toLowerCase()
-		if (!isReaderExt(ext)) meta.createSpan('grove-shelf-badge').setText(ext.toUpperCase())
-		if (stat && stat.annotations > 0) meta.createSpan('grove-shelf-badge').setText(`批注 ${stat.annotations}`)
-		if (typeof stat?.fraction === 'number' && stat.fraction > 0.001) {
-			meta.createSpan('grove-shelf-progress').setText(`读至 ${Math.round(stat.fraction * 100)}%`)
+		const format = FORMAT_LABELS[ext]
+		if (display.showFormatBadge && format) {
+			const badge = meta.createSpan(`grove-shelf-badge grove-fmt-${ext}`)
+			badge.setText(format)
+			badge.title = `${format} · ${ext === 'pdf' ? '用 Obsidian 查看器打开' : '在插件内阅读'}`
+		}
+		if (display.showProgress && typeof fraction === 'number' && fraction > 0.001) {
+			const done = fraction >= 0.995
+			const progress = meta.createSpan('grove-shelf-progress')
+			progress.setText(done ? '已读' : `${Math.round(fraction * 100)}%`)
+			progress.title = done ? '已读完' : `读至 ${Math.round(fraction * 100)}%`
+		}
+		if (display.showAnnotationCount && info && info.annotations > 0) {
+			meta.createSpan('grove-shelf-badge').setText(`批注 ${info.annotations}`)
+		}
+		if (display.showLastRead && info?.lastRead) {
+			const time = meta.createSpan('grove-shelf-time')
+			time.setText(relativeTime(info.lastRead))
+			time.title = new Date(info.lastRead).toLocaleString('zh-CN', { hour12: false })
+		}
+		if (display.showFileSize && size != null) {
+			meta.createSpan('grove-shelf-size').setText(formatBytes(size))
+		}
+		if (display.showNoteBadge && info?.notePath) {
+			const note = meta.createSpan('grove-note-badge')
+			setIcon(note, 'file-text')
+			note.title = '已生成阅读笔记，点击打开'
+			note.setAttr('role', 'button')
+			note.tabIndex = 0
+			note.addEventListener('click', e => {
+				e.stopPropagation()
+				void plugin.openBookNote(path)
+			})
+			note.addEventListener('keydown', e => {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault()
+					e.stopPropagation()
+					void plugin.openBookNote(path)
+				}
+			})
 		}
 		if (dupes && dupes.length) {
 			const badge = meta.createSpan('grove-shelf-badge grove-shelf-dup')
@@ -685,11 +859,17 @@ export class BookshelfView extends ItemView {
 				e.dataTransfer.effectAllowed = 'move'
 			}
 		})
-		card.addEventListener('click', () => void this.plugin.openBookByPath(path))
+		card.addEventListener('click', () => void plugin.openBookByPath(path))
+		card.addEventListener('keydown', e => {
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault()
+				void plugin.openBookByPath(path)
+			}
+		})
 		card.addEventListener('contextmenu', e => {
 			e.preventDefault()
 			const menu = new Menu()
-			menu.addItem(item => item.setTitle('打开书籍').setIcon('book-open').onClick(() => void this.plugin.openBookByPath(path)))
+			menu.addItem(item => item.setTitle('打开书籍').setIcon('book-open').onClick(() => void plugin.openBookByPath(path)))
 			menu.addItem(item => item.setTitle('更换封面').setIcon('image').onClick(() => void this.#changeCover(path, card)))
 			menu.addItem(item => item.setTitle('编辑书籍信息').setIcon('pencil').onClick(() => this.#editInfo(path)))
 			menu.addItem(item => {
@@ -711,6 +891,24 @@ export class BookshelfView extends ItemView {
 			menu.showAtPosition({ x: e.clientX, y: e.clientY })
 		})
 		return card
+	}
+
+	#fillCover(container: HTMLElement, url: string | null, title: string): void {
+		container.empty()
+		if (url) {
+			const img = container.createEl('img', { attr: { src: url, alt: '' } })
+			img.draggable = false
+		} else {
+			container.createDiv('grove-shelf-cover-empty').setText(truncate(title, 24))
+		}
+	}
+
+	#fileSize(path: string): number | undefined {
+		try {
+			return fs.statSync(this.#absPath(path)).size
+		} catch {
+			return undefined
+		}
 	}
 
 	async #ensureEntry(path: string, card: HTMLElement, force = false): Promise<void> {
@@ -771,14 +969,6 @@ export class BookshelfView extends ItemView {
 			this.#updateCard(card, { title, author, coverName })
 			return
 		}
-		// 其他非插件自渲染格式：仅记录标题
-		if (!isReaderExt(ext)) {
-			const fallback = basenameOf(path).replace(/\.[^.]+$/, '')
-			const title = existing?.manualMeta ? existing.title ?? fallback : fallback
-			if (!existing || force || existing.mtime !== mtime) cache.set(path, { ...existing, title, mtime, size, addedAt })
-			this.#updateCard(card, { title })
-			return
-		}
 
 		try {
 			const bytes = await plugin.readBookBytes(path)
@@ -814,22 +1004,29 @@ export class BookshelfView extends ItemView {
 	}
 
 	#updateCard(card: HTMLElement, info: ShelfTitleParts & { coverName?: string }): void {
-		const coverWrap = card.querySelector('.grove-shelf-cover') as HTMLElement | null
-		if (!coverWrap) return
-		coverWrap.empty()
-		const url = this.plugin.shelfCache.coverDataUrl(info.coverName)
-		if (url) {
-			const img = coverWrap.createEl('img', { attr: { src: url, alt: '' } })
-			img.draggable = false
-		} else {
-			coverWrap.createDiv('grove-shelf-cover-empty').setText(truncate(info.title || '', 24))
+		const display = this.plugin.settings.shelfDisplay
+		const media = card.querySelector('.grove-shelf-cover-media') as HTMLElement | null
+		// coverName 为 undefined 表示本次没解析出封面：保留现有显示，不要清空
+		if (media && info.coverName !== undefined) {
+			this.#fillCover(media, this.plugin.shelfCache.coverDataUrl(info.coverName), info.title || card.dataset.title || '')
 		}
+		if (info.title !== undefined) card.dataset.title = info.title
+		if (info.author !== undefined) card.dataset.author = info.author
+		if (info.publisher !== undefined) card.dataset.publisher = info.publisher
+		const title = card.dataset.title ?? ''
+		const author = card.dataset.author ?? ''
+		const publisher = card.dataset.publisher ?? ''
+
 		const titleEl = card.querySelector('.grove-shelf-booktitle')
-		if (titleEl && info.title) titleEl.textContent = truncate(info.title, 24)
+		if (titleEl && info.title) titleEl.textContent = truncate(title, 24)
 		const authorEl = card.querySelector('.grove-shelf-author')
-		if (authorEl && info.author) authorEl.textContent = info.author
+		if (authorEl) {
+			authorEl.textContent = display.mergeAuthorPublisher
+				? ([author, publisher].filter(Boolean).join(' · ') || ' ')
+				: (author || ' ')
+		}
 		const pubEl = card.querySelector('.grove-shelf-publisher')
-		if (pubEl && info.publisher) pubEl.textContent = info.publisher
+		if (pubEl) pubEl.textContent = publisher || ' '
 	}
 
 	#absPath(path: string): string {
@@ -859,7 +1056,7 @@ export class BookshelfView extends ItemView {
 			}
 			this.plugin.settings.scanFolders.push(value)
 			await this.plugin.saveSettings()
-			await this.refresh()
+			await this.refresh({ rescan: true })
 		}).open()
 	}
 
@@ -867,6 +1064,6 @@ export class BookshelfView extends ItemView {
 		const i = this.plugin.settings.scanFolders.indexOf(folder)
 		if (i >= 0) this.plugin.settings.scanFolders.splice(i, 1)
 		await this.plugin.saveSettings()
-		await this.refresh()
+		await this.refresh({ rescan: true })
 	}
 }

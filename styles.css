@@ -570,21 +570,9 @@
 	display: flex;
 	flex-direction: column;
 	height: 100%;
-	padding: 12px 16px;
+	padding: 8px 16px 12px;
 	gap: 10px;
 	overflow-y: auto;
-}
-
-.grove-shelf-head {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	flex: none;
-}
-
-.grove-shelf-title {
-	font-size: 22px;
-	font-weight: 700;
 }
 
 .grove-shelf-count {
@@ -630,7 +618,7 @@
 
 .grove-shelf-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+	grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
 	gap: 16px;
 	align-content: start;
 	flex: 1;
@@ -643,13 +631,29 @@
 	cursor: pointer;
 	border-radius: 8px;
 	padding: 6px;
+	outline: none;
 }
 
 .grove-shelf-card:hover {
 	background: var(--background-secondary);
 }
 
+.grove-shelf-card:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 1px;
+}
+
+.grove-shelf-card.is-hidden {
+	display: none;
+}
+
+/* 书单色条：色相由书单 id 稳定映射，不额外存颜色字段 */
+.grove-shelf-card.has-list {
+	box-shadow: inset 3px 0 0 hsl(var(--grove-list-hue, 220) 60% 55%);
+}
+
 .grove-shelf-cover {
+	position: relative;
 	width: 100%;
 	aspect-ratio: 2 / 3;
 	border-radius: 6px;
@@ -662,15 +666,40 @@
 	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
+.grove-shelf-cover-media {
+	width: 100%;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	overflow: hidden;
+}
+
 .grove-shelf-card:hover .grove-shelf-cover {
 	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
 }
 
-.grove-shelf-cover img {
+.grove-shelf-cover-media img {
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
 	display: block;
+}
+
+/* 封面底部进度条 */
+.grove-cover-progress {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 3px;
+	background: rgba(0, 0, 0, 0.35);
+	pointer-events: none;
+}
+
+.grove-cover-progress-fill {
+	height: 100%;
+	background: var(--interactive-accent);
 }
 
 .grove-shelf-cover-empty {
@@ -758,6 +787,11 @@
 	flex: none;
 }
 
+.grove-shelf-tools .grove-shelf-count {
+	margin-left: auto;
+	white-space: nowrap;
+}
+
 .grove-info-label {
 	font-size: var(--font-ui-small);
 	font-weight: 600;
@@ -806,21 +840,75 @@
 
 .grove-shelf-meta {
 	display: flex;
-	gap: 6px;
+	align-items: center;
+	gap: 5px;
 	flex-wrap: wrap;
 	min-height: 18px;
 }
 
+/* 信息项全部关闭时不保留空行 */
+.grove-shelf-meta:empty {
+	display: none;
+}
+
 .grove-shelf-badge {
 	font-size: var(--font-ui-smaller);
+	line-height: 18px;
 	background: var(--background-modifier-hover);
 	border-radius: 4px;
 	padding: 0 6px;
+	white-space: nowrap;
+}
+
+/* 格式徽章：颜色只是加速扫读，语义由文字承担 */
+.grove-fmt-epub,
+.grove-fmt-fb2,
+.grove-fmt-fbz {
+	color: var(--color-green);
+}
+
+.grove-fmt-mobi,
+.grove-fmt-azw3 {
+	color: var(--color-orange);
+}
+
+.grove-fmt-pdf {
+	color: var(--color-red);
+}
+
+.grove-fmt-cbz {
+	color: var(--color-cyan);
 }
 
 .grove-shelf-progress {
 	font-size: var(--font-ui-smaller);
 	color: var(--text-accent);
+	white-space: nowrap;
+}
+
+.grove-shelf-time,
+.grove-shelf-size {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	white-space: nowrap;
+}
+
+.grove-note-badge {
+	display: inline-flex;
+	align-items: center;
+	color: var(--text-muted);
+	cursor: pointer;
+	padding: 0 1px;
+	border-radius: 3px;
+}
+
+.grove-note-badge:hover {
+	color: var(--text-accent);
+}
+
+.grove-note-badge svg {
+	width: 13px;
+	height: 13px;
 }
 
 .grove-shelf-empty {
@@ -828,6 +916,109 @@
 	color: var(--text-muted);
 	padding: 32px 8px;
 	text-align: center;
+}
+
+/* ---------- 继续阅读 ---------- */
+
+.grove-shelf-continue {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	flex: none;
+}
+
+.grove-shelf-continue.grove-hidden {
+	display: none;
+}
+
+.grove-continue-head {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.grove-continue-row {
+	display: flex;
+	gap: 8px;
+	overflow-x: auto;
+	padding-bottom: 4px;
+}
+
+.grove-continue-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: none;
+	width: 180px;
+	padding: 6px;
+	border-radius: 8px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	cursor: pointer;
+	text-align: left;
+	box-shadow: none;
+}
+
+.grove-continue-item:hover {
+	background: var(--background-modifier-hover);
+}
+
+.grove-continue-cover {
+	width: 34px;
+	height: 48px;
+	flex: none;
+	border-radius: 4px;
+	overflow: hidden;
+	background: var(--background-primary);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.grove-continue-cover img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.grove-continue-body {
+	min-width: 0;
+	flex: 1;
+}
+
+.grove-continue-title {
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.grove-continue-meta {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	margin-top: 2px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.grove-continue-bar {
+	height: 3px;
+	border-radius: 2px;
+	background: var(--background-modifier-border);
+	margin-top: 5px;
+	overflow: hidden;
+}
+
+.grove-continue-fill {
+	height: 100%;
+	background: var(--interactive-accent);
+}
+
+.grove-continue-pct {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	margin-top: 3px;
 }
 
 /* ---------- PDF 阅读视图 ---------- */

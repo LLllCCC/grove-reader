@@ -9,10 +9,12 @@ import { StatsStore } from './stats'
 import {
 	DEFAULT_APPEARANCE,
 	DEFAULT_SETTINGS,
+	DEFAULT_SHELF_DISPLAY,
 	BookData,
 	GroveSettings,
 	HIGHLIGHT_COLORS,
 	SUPPORTED_BOOK_EXTS,
+	ShelfBookInfo,
 	BACKUP_FOLDER_NAME,
 } from './types'
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
@@ -22,7 +24,7 @@ import { BookPickerModal, ReadingStatsModal } from './modals'
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
 import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
-import { isReaderExt } from './types'
+import { isReaderExt, isShelfExt } from './types'
 import { usageDocMarkdown, USAGE_DOC_NAME } from './usageDoc'
 
 export default class GroveReaderPlugin extends Plugin {
@@ -143,12 +145,20 @@ export default class GroveReaderPlugin extends Plugin {
 		this.app.workspace.revealLeaf(leaf)
 	}
 
+	/** 设置里改了书架显示项后，让已打开的书架立即重绘 */
+	refreshShelfViews(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_BOOKSHELF)) {
+			const view = leaf.view
+			if (view instanceof BookshelfView) void view.refresh()
+		}
+	}
+
 	openPicker(): void {
 		const books = this.app.vault
 			.getFiles()
-			.filter(f => SUPPORTED_BOOK_EXTS.includes(f.extension.toLowerCase()))
+			.filter(f => isShelfExt(f.extension))
 		if (!books.length) {
-			new Notice('Grove Reader：库中没有找到电子书文件（支持 epub / mobi / azw3 / fb2 / cbz）')
+			new Notice('Grove Reader：库中没有找到电子书文件（支持 epub / mobi / azw3 / fb2 / cbz，PDF 也可选）')
 			return
 		}
 		new BookPickerModal(this.app, file => void this.openBook(file)).open()
@@ -264,33 +274,87 @@ export default class GroveReaderPlugin extends Plugin {
 		return base
 	}
 
-	/** 汇总所有书的批注数与进度，供书架卡片展示 */
-	collectBookStats(): Map<string, { annotations: number; fraction?: number }> {
-		const map = new Map<string, { annotations: number; fraction?: number }>()
+	/** 书架统计缓存：key 为批注 JSON 绝对路径，按文件 mtime 失效 */
+	private shelfStatsCache = new Map<string, { mtime: number; bookPath: string; info: ShelfBookInfo }>()
+
+	/**
+	 * 汇总所有书的批注数 / 进度 / 最近阅读，供书架卡片展示。
+	 * 解析结果按文件 mtime 缓存：刷新书架不再重复 JSON.parse 全部批注文件。
+	 */
+	collectBookStats(): Map<string, ShelfBookInfo> {
+		const map = new Map<string, ShelfBookInfo>()
 		const dir = pathModule.join(this.dataRoot, 'data', 'books')
+		let names: string[] = []
 		try {
-			for (const name of fs.readdirSync(dir)) {
-				if (!name.endsWith('.json')) continue
+			names = fs.readdirSync(dir)
+		} catch {
+			this.shelfStatsCache.clear()
+			return map
+		}
+		const seen = new Set<string>()
+		for (const name of names) {
+			if (!name.endsWith('.json')) continue
+			const full = pathModule.join(dir, name)
+			seen.add(full)
+			let mtime = 0
+			try {
+				mtime = fs.statSync(full).mtimeMs
+			} catch {
+				continue
+			}
+			let cached = this.shelfStatsCache.get(full)
+			if (!cached || cached.mtime !== mtime) {
 				try {
-					const data = JSON.parse(fs.readFileSync(pathModule.join(dir, name), 'utf-8')) as {
+					const data = JSON.parse(fs.readFileSync(full, 'utf-8')) as {
 						bookPath?: string
 						annotations?: unknown[]
 						lastLocation?: { fraction?: number }
+						notePath?: string
 					}
-					if (typeof data?.bookPath === 'string') {
-						map.set(data.bookPath, {
+					if (typeof data?.bookPath !== 'string') {
+						this.shelfStatsCache.delete(full)
+						continue
+					}
+					const notePath = typeof data.notePath === 'string' ? data.notePath : undefined
+					cached = {
+						mtime,
+						bookPath: data.bookPath,
+						info: {
 							annotations: Array.isArray(data.annotations) ? data.annotations.length : 0,
 							fraction: data.lastLocation?.fraction,
-						})
+							// 笔记被删/改名后不再显示标记
+							notePath: notePath && this.app.vault.getAbstractFileByPath(notePath) instanceof TFile ? notePath : undefined,
+						},
 					}
+					this.shelfStatsCache.set(full, cached)
 				} catch {
-					// 跳过损坏文件
+					this.shelfStatsCache.delete(full)
+					continue
 				}
 			}
-		} catch {
-			// 目录不存在
+			const stats = this.stats.peek(cached.bookPath)
+			map.set(cached.bookPath, {
+				...cached.info,
+				lastRead: stats?.lastRead || undefined,
+				seconds: stats?.seconds || undefined,
+			})
+		}
+		for (const key of this.shelfStatsCache.keys()) {
+			if (!seen.has(key)) this.shelfStatsCache.delete(key)
 		}
 		return map
+	}
+
+	/** 打开某本书已生成的阅读笔记（卡片上的笔记标记） */
+	async openBookNote(bookPath: string): Promise<void> {
+		const data = this.store.load(bookPath)
+		const notePath = data.notePath
+		const file = notePath ? this.app.vault.getAbstractFileByPath(notePath) : null
+		if (!(file instanceof TFile)) {
+			new Notice('Grove Reader：这本书还没有生成阅读笔记')
+			return
+		}
+		await this.app.workspace.getLeaf('tab').openFile(file)
 	}
 
 	// ------------------------------------------------------------------
@@ -598,6 +662,32 @@ export default class GroveReaderPlugin extends Plugin {
 		const rel = this.backupFolderRel()
 		const root = pathModule.join(this.vaultBase, rel)
 		try {
+			// 目标目录若不是我们建的（没有标记文件，且已存在同名数据文件），
+			// 直接中止——避免用户把备份路径指到已有笔记文件夹时被 prune 误删
+			const marker = pathModule.join(root, '.grove-backup')
+			const hasMarker = await fsp.access(marker).then(() => true).catch(() => false)
+			if (!hasMarker) {
+				let entries: string[] = []
+				try {
+					entries = await fsp.readdir(root)
+				} catch {
+					entries = []
+				}
+				let legacy = false
+				try {
+					legacy = (await fsp.readFile(pathModule.join(root, '说明.md'), 'utf-8')).includes('由 Grove Reader')
+				} catch {
+					legacy = false
+				}
+				const clash = entries.some(n => ['books', 'covers', 'shelf.json', 'lists.json', 'data.json'].includes(n))
+				if (clash && !legacy) {
+					new Notice(`Grove Reader：目标文件夹「${rel}」里已有同名文件，为避免误删已中止。请换一个空文件夹，或清空后重试`)
+					return
+				}
+				await fsp.mkdir(root, { recursive: true })
+				await fsp.writeFile(marker, 'Grove Reader 备份目录标记：存在此文件时才会覆盖写入。\n', 'utf-8')
+			}
+
 			// 只清我们自己的文件，不动用户可能放进该文件夹的其他内容
 			const prune = async (dir: string, filter: (name: string) => boolean): Promise<void> => {
 				let names: string[] = []
@@ -735,6 +825,7 @@ export default class GroveReaderPlugin extends Plugin {
 		const data = ((await this.loadData()) ?? {}) as Partial<GroveSettings>
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, data)
 		this.settings.appearance = Object.assign({}, DEFAULT_APPEARANCE, data.appearance ?? {})
+		this.settings.shelfDisplay = Object.assign({}, DEFAULT_SHELF_DISPLAY, data.shelfDisplay ?? {})
 		if (!Array.isArray(this.settings.scanFolders)) {
 			// 首次使用：默认扫描库内的「书籍」文件夹
 			this.settings.scanFolders = ['书籍']

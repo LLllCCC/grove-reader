@@ -1,7 +1,7 @@
 import { App, Notice, PluginSettingTab, Setting } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import { FolderPromptModal, FolderSuggest } from './modals'
-import { BACKUP_FOLDER_NAME } from './types'
+import { BACKUP_FOLDER_NAME, DEFAULT_SHELF_DISPLAY } from './types'
 import { isAbsolutePath } from './util'
 
 export class GroveSettingTab extends PluginSettingTab {
@@ -28,6 +28,7 @@ export class GroveSettingTab extends PluginSettingTab {
 							if (!this.plugin.settings.scanFolders.includes(value)) {
 								this.plugin.settings.scanFolders.push(value)
 								await this.plugin.saveSettings()
+								this.plugin.refreshShelfViews()
 								this.display()
 							}
 						}).open()
@@ -40,9 +41,39 @@ export class GroveSettingTab extends PluginSettingTab {
 					const i = this.plugin.settings.scanFolders.indexOf(folder)
 					if (i >= 0) this.plugin.settings.scanFolders.splice(i, 1)
 					await this.plugin.saveSettings()
+					this.plugin.refreshShelfViews()
 					this.display()
 				}))
 		}
+
+		// —— 书架显示 ——
+		containerEl.createEl('h3', { text: '书架显示' })
+		containerEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: '卡片上显示哪些信息。默认只留最常用的几项，信息多时卡片会换行变高。',
+		})
+		const shelfToggle = (name: string, desc: string, key: keyof typeof DEFAULT_SHELF_DISPLAY): void => {
+			new Setting(containerEl)
+				.setName(name)
+				.setDesc(desc)
+				.addToggle(toggle =>
+					toggle
+						.setValue(this.plugin.settings.shelfDisplay[key])
+						.onChange(async value => {
+							this.plugin.settings.shelfDisplay[key] = value
+							await this.plugin.saveSettings()
+							this.plugin.refreshShelfViews()
+						}))
+		}
+		shelfToggle('格式徽章', '在卡片信息行显示 EPUB / PDF / MOBI 等格式标签', 'showFormatBadge')
+		shelfToggle('阅读进度', '封面底部进度条 + 卡片上的百分比；读完后显示「已读」', 'showProgress')
+		shelfToggle('批注条数', '显示这本书有多少条批注', 'showAnnotationCount')
+		shelfToggle('最近阅读', '显示「3 天前」这类相对时间', 'showLastRead')
+		shelfToggle('笔记标记', '已生成阅读笔记的书显示文档图标，点击直接打开笔记', 'showNoteBadge')
+		shelfToggle('文件大小', '在卡片上显示文件体积（关闭时仍可在悬浮提示里看到）', 'showFileSize')
+		shelfToggle('继续阅读', '书架顶部显示最近在读、尚未读完的书（最多 6 本）', 'showContinueReading')
+		shelfToggle('作者与出版社合并一行', '关闭后作者、出版社各占一行，卡片会更高', 'mergeAuthorPublisher')
+		shelfToggle('书单色条', '卡片左侧显示所属书单的色条（颜色由书单自动生成）', 'showListColor')
 
 		// —— 阅读 ——
 		containerEl.createEl('h3', { text: '阅读' })

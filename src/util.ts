@@ -56,6 +56,57 @@ export function formatBytes(n: number): string {
 	return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
+/** 阅读时长友好显示 */
+export function formatDuration(seconds: number): string {
+	if (!Number.isFinite(seconds) || seconds <= 0) return ''
+	if (seconds < 60) return `${Math.round(seconds)} 秒`
+	if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟`
+	if (seconds < 3600 * 24) return `${(seconds / 3600).toFixed(1)} 小时`
+	return `${(seconds / 3600 / 24).toFixed(1)} 天`
+}
+
+/** 相对时间：刚刚 / 23 分钟前 / 3 小时前 / 昨天 / 5 天前 / 2 个月前 */
+export function relativeTime(timestamp: number, now = Date.now()): string {
+	if (!timestamp || !Number.isFinite(timestamp)) return ''
+	const diff = Math.max(0, now - timestamp)
+	const MIN = 60_000
+	const HOUR = 60 * MIN
+	const DAY = 24 * HOUR
+	if (diff < MIN) return '刚刚'
+	if (diff < HOUR) return `${Math.floor(diff / MIN)} 分钟前`
+	if (diff < DAY) return `${Math.floor(diff / HOUR)} 小时前`
+	if (diff < 2 * DAY) return '昨天'
+	if (diff < 30 * DAY) return `${Math.floor(diff / DAY)} 天前`
+	if (diff < 365 * DAY) return `${Math.floor(diff / (30 * DAY))} 个月前`
+	return `${Math.floor(diff / (365 * DAY))} 年前`
+}
+
+/**
+ * 比较两个 CFI 的先后。CFI 是「/6/14!/4/2/1:0」这种斜杠路径，
+ * 直接按字符串比较会得到 /10 < /9 的错误顺序，这里按数字段逐段比较。
+ */
+export function compareCfi(a: string, b: string): number {
+	const split = (cfi: string): string[] => cfi.match(/\d+|[^\d]+/g) ?? []
+	const sa = split(a)
+	const sb = split(b)
+	const len = Math.max(sa.length, sb.length)
+	for (let i = 0; i < len; i++) {
+		const x = sa[i]
+		const y = sb[i]
+		if (x === undefined) return -1
+		if (y === undefined) return 1
+		const nx = /^\d+$/.test(x)
+		const ny = /^\d+$/.test(y)
+		if (nx && ny) {
+			const d = Number(x) - Number(y)
+			if (d !== 0) return d < 0 ? -1 : 1
+		} else if (x !== y) {
+			return x < y ? -1 : 1
+		}
+	}
+	return 0
+}
+
 const CJK_CHAR = /[\u2e80-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af\uff00-\uffef]/
 
 /**

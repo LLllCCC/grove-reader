@@ -5,6 +5,17 @@ export const BACKUP_FOLDER_NAME = 'Grove Reader 数据备份'
 
 export const SUPPORTED_BOOK_EXTS = ['epub', 'mobi', 'azw3', 'fb2', 'fbz', 'cbz']
 
+/** 书架卡片上的格式标签文案（含 PDF；PDF 不在插件内渲染，但同为「书的格式」） */
+export const FORMAT_LABELS: Record<string, string> = {
+	epub: 'EPUB',
+	mobi: 'MOBI',
+	azw3: 'AZW3',
+	fb2: 'FB2',
+	fbz: 'FB2',
+	cbz: 'CBZ',
+	pdf: 'PDF',
+}
+
 /**
  * 书架额外收纳、但不在插件内阅读的扩展名（目前是 PDF）。
  * 这些文件由 Obsidian 原生视图或系统程序打开；
@@ -132,6 +143,57 @@ export const DEFAULT_APPEARANCE: ReaderAppearance = {
 }
 
 // ------------------------------------------------------------------
+// 书架卡片展示
+// ------------------------------------------------------------------
+
+/** 书籍在书架卡片上展示的统计信息（由批注 JSON + 阅读统计汇总而来） */
+export interface ShelfBookInfo {
+	/** 批注条数 */
+	annotations: number
+	/** 阅读位置占比 0–1 */
+	fraction?: number
+	/** 最近一次阅读时间戳 */
+	lastRead?: number
+	/** 累计阅读秒数 */
+	seconds?: number
+	/** 已生成的阅读笔记路径（文件存在时才给） */
+	notePath?: string
+}
+
+export interface ShelfDisplaySettings {
+	/** 格式徽章（EPUB / PDF / MOBI…） */
+	showFormatBadge: boolean
+	/** 阅读进度：封面底部进度条 + 卡片百分比 */
+	showProgress: boolean
+	/** 批注条数 */
+	showAnnotationCount: boolean
+	/** 最近阅读时间（3 天前） */
+	showLastRead: boolean
+	/** 已生成笔记的标记（点击打开笔记） */
+	showNoteBadge: boolean
+	/** 文件大小（默认关闭，tooltip 里始终有） */
+	showFileSize: boolean
+	/** 顶部「继续阅读」条 */
+	showContinueReading: boolean
+	/** 作者与出版社合并成一行 */
+	mergeAuthorPublisher: boolean
+	/** 书单归属色条 */
+	showListColor: boolean
+}
+
+export const DEFAULT_SHELF_DISPLAY: ShelfDisplaySettings = {
+	showFormatBadge: true,
+	showProgress: true,
+	showAnnotationCount: true,
+	showLastRead: true,
+	showNoteBadge: true,
+	showFileSize: false,
+	showContinueReading: true,
+	mergeAuthorPublisher: true,
+	showListColor: false,
+}
+
+// ------------------------------------------------------------------
 
 export interface GroveSettings {
 	notesFolder: string
@@ -142,6 +204,8 @@ export interface GroveSettings {
 	scanFolders: string[]
 	/** 书架排序：default / added / title / progress */
 	shelfSort: string
+	/** 书架卡片显示哪些信息 */
+	shelfDisplay: ShelfDisplaySettings
 	/** 打开书本时是否自动展开右侧批注列表 */
 	openSidebarWithBook: boolean
 	/** 新增/修改批注时，自动刷新已生成的阅读笔记（标记区外手写内容保留） */
@@ -159,6 +223,7 @@ export const DEFAULT_SETTINGS: GroveSettings = {
 	maxBackups: 10,
 	scanFolders: [],
 	shelfSort: 'default',
+	shelfDisplay: { ...DEFAULT_SHELF_DISPLAY },
 	openSidebarWithBook: true,
 	autoUpdateNote: true,
 	backupFolder: BACKUP_FOLDER_NAME,

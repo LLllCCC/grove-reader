@@ -1,5 +1,5 @@
-import { Annotation, BookData } from './types'
-import { encodeParam, truncate } from './util'
+import { Annotation, BookData, colorName } from './types'
+import { compareCfi, encodeParam, truncate } from './util'
 
 export const NOTE_BEGIN = '<!-- GROVE:BEGIN 由 Grove Reader 生成，重新生成时会覆盖此区间内的内容 -->'
 export const NOTE_END = '<!-- GROVE:END -->'
@@ -70,7 +70,7 @@ function sortAnnotations(list: Annotation[]): Annotation[] {
 		const ix = x.sectionIndex ?? Number.MAX_SAFE_INTEGER
 		const iy = y.sectionIndex ?? Number.MAX_SAFE_INTEGER
 		if (ix !== iy) return ix - iy
-		return x.cfi < y.cfi ? -1 : x.cfi > y.cfi ? 1 : 0
+		return compareCfi(x.cfi, y.cfi)
 	})
 }
 
@@ -96,7 +96,7 @@ export function buildTemplateContext(data: BookData, bookId: string): TemplateCo
 			note: (a.note ?? '').trim(),
 			chapter: group.chapter,
 			color: a.color,
-			colorName: a.color,
+			colorName: colorName(a.color),
 			jumpLink: jumpLink(bookId, a.cfi),
 			excerptHeading: cleanHeading(a.text || '（空摘录）', 30),
 			blockId: `grove-${a.id}`,
@@ -242,7 +242,8 @@ export const DEFAULT_NOTE_TEMPLATE = `# {{title}}
 // ------------------------------------------------------------------
 
 function yamlSafe(value: string): string {
-	return `"${value.replace(/"/g, '\\"')}"`
+	// JSON 字符串本身是合法的 YAML 双引号标量：反斜杠、引号、换行都会被正确转义
+	return JSON.stringify(value)
 }
 
 function frontmatter(data: BookData, bookId: string): string {

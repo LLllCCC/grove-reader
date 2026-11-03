@@ -59,6 +59,11 @@ export class StatsStore {
 		return b
 	}
 
+	/** 只读查询：书没有统计数据时返回 undefined，不会像 book() 那样凭空建档 */
+	peek(bookPath: string): StatsBook | undefined {
+		return this.data.books[bookPath]
+	}
+
 	/** 记一次采样：阅读了 seconds 秒、翻了 pages 页 */
 	record(bookPath: string, seconds: number, pages: number, now = Date.now()): void {
 		const day = todayKey(new Date(now))

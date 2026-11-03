@@ -1,5 +1,5 @@
 import { App, AbstractInputSuggest, FuzzySuggestModal, Modal, Notice, TFile, TFolder } from 'obsidian'
-import { SUPPORTED_BOOK_EXTS } from './types'
+import { isShelfExt } from './types'
 import type { BookList } from './lists'
 import { todayKey } from './stats'
 import type GroveReaderPlugin from './main'
@@ -8,13 +8,13 @@ import { basenameOf } from './util'
 export class BookPickerModal extends FuzzySuggestModal<TFile> {
 	constructor(app: App, private onPick: (file: TFile) => void) {
 		super(app)
-		this.setPlaceholder('选择要阅读的电子书…')
+		this.setPlaceholder('选择要阅读的电子书或 PDF…')
 	}
 
 	getItems(): TFile[] {
 		return this.app.vault
 			.getFiles()
-			.filter(f => SUPPORTED_BOOK_EXTS.includes(f.extension.toLowerCase()))
+			.filter(f => isShelfExt(f.extension))
 	}
 
 	getItemText(file: TFile): string {
