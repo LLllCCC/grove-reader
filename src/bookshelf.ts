@@ -267,6 +267,8 @@ export class BookshelfView extends ItemView {
 	private emptyEl!: HTMLElement
 	private continueEl!: HTMLElement
 	private continueHasItems = false
+	/** 继续阅读条目里的标题节点：书籍信息解析完成后同步更新 */
+	private continueTitleEls = new Map<string, HTMLElement>()
 	private searchInput!: HTMLInputElement
 	private sortSelect!: HTMLSelectElement
 	private cardEls = new Map<string, HTMLElement>()
@@ -381,6 +383,7 @@ export class BookshelfView extends ItemView {
 		this.hintEl.empty()
 		this.continueEl.empty()
 		this.continueHasItems = false
+		this.continueTitleEls.clear()
 
 		const folders = plugin.settings.scanFolders
 		this.#renderFolderChips(folders)
@@ -450,6 +453,7 @@ export class BookshelfView extends ItemView {
 	 * 卡片在 refresh() 时按书单维度全量建好，清空搜索可即时恢复。
 	 */
 	#applySearch(): void {
+		if (!this.emptyEl) return
 		const q = this.plugin.shelfSearch
 		let shown = 0
 		for (const [path, card] of this.cardEls) {
@@ -514,7 +518,9 @@ export class BookshelfView extends ItemView {
 				img.draggable = false
 			}
 			const body = item.createDiv('grove-continue-body')
-			body.createDiv('grove-continue-title').setText(truncate(this.#displayTitle(path), 28))
+			const titleEl = body.createDiv('grove-continue-title')
+			titleEl.setText(truncate(this.#displayTitle(path), 28))
+			this.continueTitleEls.set(path, titleEl)
 			const pct = Math.round((info.fraction ?? 0) * 100)
 			const meta = [info.lastRead ? relativeTime(info.lastRead) : '', info.annotations ? `${info.annotations} 条批注` : '']
 				.filter(Boolean).join(' · ')
@@ -761,6 +767,7 @@ export class BookshelfView extends ItemView {
 		card.dataset.title = title
 		card.dataset.author = author
 		card.dataset.publisher = publisher
+		card.dataset.path = path
 		// 键盘可达：卡片本身是按钮语义
 		card.tabIndex = 0
 		card.setAttr('role', 'button')
@@ -951,6 +958,8 @@ export class BookshelfView extends ItemView {
 				} catch (e) {
 					console.error('[Grove Reader] 生成 PDF 封面失败', path, e)
 				}
+				// 解析失败时保留旧封面，避免一次异常把已有封面抹掉
+				if (!coverName && !force) coverName = existing?.cover
 				// 封面缺失时标记 failed：避免每次刷新都重读整本大文件；
 				// 可右键卡片「重新解析封面与信息」手动重试
 				// 手动编辑过的信息不被自动解析覆盖（「重新解析」除外）
@@ -992,6 +1001,7 @@ export class BookshelfView extends ItemView {
 				} catch {
 					// 无封面是常态
 				}
+				if (!coverName && !force) coverName = existing?.cover
 			}
 			cache.set(path, { title, author, publisher, cover: coverName, customCover: existing?.customCover, manualMeta: existing?.manualMeta, mtime, size, addedAt })
 			this.#updateCard(card, { title, author, publisher, coverName })
@@ -1019,6 +1029,10 @@ export class BookshelfView extends ItemView {
 
 		const titleEl = card.querySelector('.grove-shelf-booktitle')
 		if (titleEl && info.title) titleEl.textContent = truncate(title, 24)
+		if (info.title) {
+			const continueTitle = this.continueTitleEls.get(card.dataset.path ?? '')
+			if (continueTitle) continueTitle.textContent = truncate(title, 28)
+		}
 		const authorEl = card.querySelector('.grove-shelf-author')
 		if (authorEl) {
 			authorEl.textContent = display.mergeAuthorPublisher

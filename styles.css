@@ -873,7 +873,7 @@
 }
 
 .grove-fmt-pdf {
-	color: var(--color-red);
+	color: var(--color-blue);
 }
 
 .grove-fmt-cbz {
@@ -956,6 +956,8 @@
 	cursor: pointer;
 	text-align: left;
 	box-shadow: none;
+	color: inherit;
+	font-family: inherit;
 }
 
 .grove-continue-item:hover {

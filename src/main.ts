@@ -400,6 +400,21 @@ export default class GroveReaderPlugin extends Plugin {
 			checkCallback: checking => this.withAnyReader(checking, v => this.generateNoteFor(v)),
 		})
 		this.addCommand({
+			id: 'rescan-bookshelf',
+			name: '重新扫描书架',
+			callback: () => {
+				const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_BOOKSHELF)
+				if (!leaves.length) {
+					void this.openBookshelf()
+					return
+				}
+				for (const leaf of leaves) {
+					const view = leaf.view
+					if (view instanceof BookshelfView) void view.refresh({ rescan: true })
+				}
+			},
+		})
+		this.addCommand({
 			id: 'backup-data',
 			name: '备份批注数据到库内',
 			callback: () => void this.exportDataBackup(),

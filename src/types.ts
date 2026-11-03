@@ -185,7 +185,9 @@ export const DEFAULT_SHELF_DISPLAY: ShelfDisplaySettings = {
 	showFormatBadge: true,
 	showProgress: true,
 	showAnnotationCount: true,
-	showLastRead: true,
+	// 最近阅读默认关闭：顶部的「继续阅读」已经承担了「最近在读」的信息，
+	// 卡片上再放一行相对时间会把信息行挤成两行
+	showLastRead: false,
 	showNoteBadge: true,
 	showFileSize: false,
 	showContinueReading: true,

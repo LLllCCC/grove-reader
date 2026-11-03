@@ -6,6 +6,7 @@ import { BookStore } from '../src/store'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, NOTE_BEGIN, NOTE_END, renderNoteTemplate } from '../src/notes'
 import { StatsStore, todayKey } from '../src/stats'
 import { BookData } from '../src/types'
+import { compareCfi, formatDuration, relativeTime } from '../src/util'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-data-'))
 const store = new BookStore(tmp, 2)
@@ -194,5 +195,36 @@ stats2.load()
 assert.equal(stats2.sortedBooks().length, 2)
 assert.equal(stats2.sortedBooks().find(([p]) => p === 'A/书一.epub')![1].seconds, 420, '统计应从磁盘完整恢复')
 assert.equal(todayKey(new Date('2026-09-25')).length, 10)
+
+// 14. 批注排序：CFI 按数字段比较（/10 必须排在 /9 之后），颜色名输出中文
+const cfiBook: BookData = {
+	version: 1,
+	bookPath: 'Books/CFI.epub',
+	title: 'CFI 测试',
+	author: '',
+	annotations: [
+		{ id: 'b', cfi: 'epubcfi(/6/10!/4/2)', text: '十', color: 'yellow', createdAt: 1, updatedAt: 1, sectionIndex: 0, chapter: '第一章' },
+		{ id: 'a', cfi: 'epubcfi(/6/9!/4/2)', text: '九', color: 'yellow', createdAt: 1, updatedAt: 1, sectionIndex: 0, chapter: '第一章' },
+	],
+}
+const cfiCtx = buildTemplateContext(cfiBook, 'id')
+assert.deepEqual(cfiCtx.chapters[0].annotations.map(a => a.text), ['九', '十'], 'CFI 应按数字段排序')
+assert.equal(cfiCtx.chapters[0].annotations[0].colorName, '黄', '模板里的 colorName 应是中文名')
+assert.ok(compareCfi('epubcfi(/6/9!/4/2)', 'epubcfi(/6/10!/4/2)') < 0)
+
+// 15. frontmatter 转义：反斜杠 / 引号 / 换行不能破坏 YAML
+const weirdNote = buildNote({
+	version: 1, bookPath: 'Books/怪书名.epub', title: 'a\\b"c\nd', author: '', annotations: [],
+}, 'id', null)
+const titleLine = weirdNote.split('\n').find(l => l.startsWith('title:'))!
+assert.equal(JSON.parse(titleLine.slice('title:'.length).trim()), 'a\\b"c\nd', 'frontmatter 应能还原原始书名')
+
+// 16. 相对时间 / 阅读时长文案
+const now = new Date('2026-09-25T12:00:00').getTime()
+assert.equal(relativeTime(now - 30_000, now), '刚刚')
+assert.equal(relativeTime(now - 3 * 3600_000, now), '3 小时前')
+assert.equal(relativeTime(now - 30 * 3600_000, now), '昨天')
+assert.equal(formatDuration(90), '2 分钟')
+assert.equal(formatDuration(7200), '2.0 小时')
 
 console.log('SMOKE OK')
