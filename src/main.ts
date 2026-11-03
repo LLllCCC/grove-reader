@@ -29,11 +29,12 @@ import { isReaderExt, isShelfExt } from './types'
 import { usageDocMarkdown, USAGE_DOC_NAME } from './usageDoc'
 
 /**
- * 自定义图标：一本打开的书，书脊上长出一片叶子（Grove = 小树林）。
+ * 自定义图标：一株双叶幼苗（林间 = 生长），刻意避开「书本」造型，
+ * 以便和微信读书等以书为图标的插件区分。
  * addIcon 的坐标系是 0 0 100 100，这里把 24 格的 Lucide 风格路径整体放大。
  */
 const GROVE_ICON_ID = 'grove-reader'
-const GROVE_ICON_SVG = `<g transform="scale(4.1667)" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.6C9.7 5 6.7 4.5 3.6 5.3v13c3.1-.8 6.1-.3 8.4 1.3 2.3-1.6 5.3-2.1 8.4-1.3v-13C17.3 4.5 14.3 5 12 6.6Z"/><path d="M12 6.6v13"/><path d="M12 6.2V3.2"/><path d="M12 3.4c1.9.1 3.2 1.3 3.4 3.1-1.9.1-3.2-1.1-3.4-3.1Z"/></g>`
+const GROVE_ICON_SVG = `<g transform="scale(4.1667)" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21.2v-7.4"/><path d="M12 13.8C7.8 13.8 4.8 11 4.8 6.8c4.2 0 7.2 2.8 7.2 7Z"/><path d="M12 11.6c0-3.8 3-6.8 6.8-6.8 0 3.8-3 6.8-6.8 6.8Z"/></g>`
 
 export default class GroveReaderPlugin extends Plugin {
 	settings: GroveSettings = { ...DEFAULT_SETTINGS, appearance: { ...DEFAULT_APPEARANCE } }

@@ -577,6 +577,11 @@
 
 /* ---------- 书架 ---------- */
 
+/* 标题已经在标签页上，整行视图头（含 ⋮）不再占用内容区高度 */
+.workspace-leaf-content[data-type="grove-bookshelf-view"] .view-header {
+	display: none;
+}
+
 .grove-shelf-content {
 	display: flex;
 	flex-direction: column;
