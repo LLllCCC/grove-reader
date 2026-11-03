@@ -1,4 +1,4 @@
-import { FileSystemAdapter, Notice, Plugin, TFile, addIcon, normalizePath } from 'obsidian'
+import { FileSystemAdapter, Notice, Plugin, TFile, addIcon, normalizePath, setIcon } from 'obsidian'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import pathModule from 'node:path'
@@ -11,6 +11,7 @@ import {
 	DEFAULT_APPEARANCE,
 	DEFAULT_SETTINGS,
 	DEFAULT_SHELF_DISPLAY,
+	LIBRARY_ROOT,
 	BookData,
 	GroveSettings,
 	HIGHLIGHT_COLORS,
@@ -27,14 +28,7 @@ import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLAT
 import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
 import { isReaderExt, isShelfExt } from './types'
 import { usageDocMarkdown, USAGE_DOC_NAME } from './usageDoc'
-
-/**
- * 自定义图标：一株双叶幼苗（林间 = 生长），刻意避开「书本」造型，
- * 以便和微信读书等以书为图标的插件区分。
- * addIcon 的坐标系是 0 0 100 100，这里把 24 格的 Lucide 风格路径整体放大。
- */
-const GROVE_ICON_ID = 'grove-reader'
-const GROVE_ICON_SVG = `<g transform="scale(4.1667)" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21.2v-7.4"/><path d="M12 13.8C7.8 13.8 4.8 11 4.8 6.8c4.2 0 7.2 2.8 7.2 7Z"/><path d="M12 11.6c0-3.8 3-6.8 6.8-6.8 0 3.8-3 6.8-6.8 6.8Z"/></g>`
+import { LOGO_OPTIONS, logoById } from './logos'
 
 export default class GroveReaderPlugin extends Plugin {
 	settings: GroveSettings = { ...DEFAULT_SETTINGS, appearance: { ...DEFAULT_APPEARANCE } }
@@ -50,10 +44,13 @@ export default class GroveReaderPlugin extends Plugin {
 
 	private dataRoot!: string
 	private persistTimer: number | null = null
+	private ribbonEl: HTMLElement | null = null
 
 	async onload(): Promise<void> {
 		await this.loadSettings()
-		addIcon(GROVE_ICON_ID, GROVE_ICON_SVG)
+		for (const option of LOGO_OPTIONS) {
+			if (option.icon) addIcon(`grove-logo-${option.id}`, option.icon)
+		}
 		const adapter = this.app.vault.adapter
 		if (adapter instanceof FileSystemAdapter) this.vaultBase = adapter.getBasePath()
 		const pluginDirRel = this.manifest.dir || pathModule.join('.obsidian', 'plugins', this.manifest.id)
@@ -90,7 +87,7 @@ export default class GroveReaderPlugin extends Plugin {
 		this.registerExtensions(SUPPORTED_BOOK_EXTS, VIEW_TYPE_GROVE_READER)
 		this.registerObsidianProtocolHandler('grove', params =>
 			void this.openByBookId(params['book'] ?? '', params['cfi'] ?? ''))
-		this.addRibbonIcon(GROVE_ICON_ID, `${APP_NAME}：书架`, () => void this.openBookshelf())
+		this.ribbonEl = this.addRibbonIcon(this.currentLogoIcon(), `${APP_NAME}：书架`, () => void this.openBookshelf())
 
 		this.registerCommands()
 		this.addSettingTab(new GroveSettingTab(this.app, this))
@@ -108,13 +105,30 @@ export default class GroveReaderPlugin extends Plugin {
 		this.stats?.saveNow()
 	}
 
+	/** 当前应使用的图标 id（original 或无效值时回退到 Obsidian 原生 library） */
+	currentLogoIcon(): string {
+		const option = logoById(this.settings.logoStyle)
+		return option?.icon ? `grove-logo-${option.id}` : 'library'
+	}
+
+	/** 当前标志的完整字标 SVG；original 时为空 */
+	logoWordmark(): string {
+		return logoById(this.settings.logoStyle)?.wordmark ?? ''
+	}
+
+	/** 设置里切换标志后：更新功能区图标 + 已打开的书架 */
+	applyLogo(): void {
+		if (this.ribbonEl) setIcon(this.ribbonEl, this.currentLogoIcon())
+		this.refreshShelfViews()
+	}
+
 	/**
 	 * 书库被整体迁到 <库>/林间书屋/ 后，若设置里仍是旧路径（例如迁移时旧实例
 	 * 又把 data.json 写回去了），按磁盘实际情况自动接管，避免书架空白。
 	 */
 	private adoptMigratedFolders(): void {
 		if (!this.vaultBase) return
-		const root = pathModule.join(this.vaultBase, APP_NAME)
+		const root = pathModule.join(this.vaultBase, LIBRARY_ROOT)
 		const dataOk = fs.existsSync(pathModule.join(root, 'data', 'shelf.json'))
 		const booksDir = pathModule.join(root, '书籍')
 		const notesDir = pathModule.join(root, '阅读笔记')
@@ -129,19 +143,19 @@ export default class GroveReaderPlugin extends Plugin {
 
 		let changed = false
 		if (dataOk && !this.settings.dataFolder?.trim()) {
-			this.settings.dataFolder = APP_NAME
+			this.settings.dataFolder = LIBRARY_ROOT
 			changed = true
 		}
 		const foldersOk = (this.settings.scanFolders ?? []).some(f => hasBooks(isAbsolutePath(f) ? f : pathModule.join(this.vaultBase, f)))
 		if (hasBooks(booksDir) && !foldersOk) {
-			this.settings.scanFolders = [`${APP_NAME}/书籍`]
+			this.settings.scanFolders = [`${LIBRARY_ROOT}/书籍`]
 			changed = true
 		}
 		const notesAbs = this.settings.notesFolder
 			? pathModule.join(this.vaultBase, this.settings.notesFolder)
 			: ''
 		if (fs.existsSync(notesDir) && (!notesAbs || !fs.existsSync(notesAbs))) {
-			this.settings.notesFolder = `${APP_NAME}/阅读笔记`
+			this.settings.notesFolder = `${LIBRARY_ROOT}/阅读笔记`
 			changed = true
 		}
 		if (changed) {

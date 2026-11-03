@@ -1,10 +1,13 @@
 export const DATA_VERSION = 1
 
 /** 插件对外显示名（manifest 里的 name 与此保持一致） */
-export const APP_NAME = '林间书屋'
+export const APP_NAME = 'Grove Reader'
+
+/** 本库把书籍/笔记/数据统一放在这个根目录下（库内相对路径） */
+export const LIBRARY_ROOT = '林间书屋'
 
 /** 库内备份文件夹名（「备份批注数据到库内」命令生成） */
-export const BACKUP_FOLDER_NAME = '林间书屋 数据备份'
+export const BACKUP_FOLDER_NAME = 'Grove Reader 数据备份'
 
 export const SUPPORTED_BOOK_EXTS = ['epub', 'mobi', 'azw3', 'fb2', 'fbz', 'cbz']
 
@@ -214,6 +217,8 @@ export interface GroveSettings {
 	dataFolder: string
 	/** 书架排序：default / added / title / progress */
 	shelfSort: string
+	/** 标志风格：original（Obsidian 原生 library 图标）或 logos.ts 里的 id */
+	logoStyle: string
 	/** 书架卡片显示哪些信息 */
 	shelfDisplay: ShelfDisplaySettings
 	/** 打开书本时是否自动展开右侧批注列表 */
@@ -234,6 +239,7 @@ export const DEFAULT_SETTINGS: GroveSettings = {
 	scanFolders: [],
 	dataFolder: '',
 	shelfSort: 'default',
+	logoStyle: 'original',
 	shelfDisplay: { ...DEFAULT_SHELF_DISPLAY },
 	openSidebarWithBook: true,
 	autoUpdateNote: true,

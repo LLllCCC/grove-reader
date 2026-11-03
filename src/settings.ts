@@ -1,8 +1,9 @@
-import { App, Notice, PluginSettingTab, Setting } from 'obsidian'
+import { App, Notice, PluginSettingTab, Setting, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import { FolderPromptModal, FolderSuggest } from './modals'
 import { APP_NAME, BACKUP_FOLDER_NAME, DEFAULT_SHELF_DISPLAY } from './types'
 import { isAbsolutePath } from './util'
+import { LOGO_OPTIONS } from './logos'
 
 export class GroveSettingTab extends PluginSettingTab {
 	constructor(app: App, private plugin: GroveReaderPlugin) {
@@ -12,7 +13,50 @@ export class GroveSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this
 		containerEl.empty()
+
+		const currentLogo = this.plugin.settings.logoStyle ?? 'original'
+		const selected = LOGO_OPTIONS.find(o => o.id === currentLogo)
+		const brand = containerEl.createDiv('grove-settings-brand')
+		if (selected?.wordmark) {
+			brand.innerHTML = selected.wordmark
+		} else {
+			const icon = brand.createSpan('grove-settings-brand-icon')
+			setIcon(icon, 'library')
+			brand.createSpan('grove-settings-brand-name').setText(APP_NAME)
+		}
+
 		containerEl.createEl('h2', { text: `${APP_NAME} 设置` })
+
+		// —— 标志 ——
+		containerEl.createEl('h3', { text: '标志' })
+		containerEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: '选一个显示在标签页、功能区和空书架上的标志。标签页图标会在重新打开书架后更新。',
+		})
+		const grid = containerEl.createDiv('grove-logo-grid')
+		const options: Array<{ id: string; name: string; desc?: string; wordmark?: string }> = [
+			{ id: 'original', name: '原始图标', desc: 'Obsidian 自带的 library 图标' },
+			...LOGO_OPTIONS,
+		]
+		for (const option of options) {
+			const card = grid.createDiv('grove-logo-card')
+			if (option.id === currentLogo) card.addClass('is-active')
+			const preview = card.createDiv('grove-logo-preview')
+			if (option.wordmark) {
+				preview.innerHTML = option.wordmark
+			} else {
+				const icon = preview.createSpan('grove-logo-original')
+				setIcon(icon, 'library')
+			}
+			card.createDiv('grove-logo-name').setText(option.name)
+			if (option.desc) card.createDiv('grove-logo-desc').setText(option.desc)
+			card.addEventListener('click', () => {
+				this.plugin.settings.logoStyle = option.id
+				void this.plugin.saveSettings()
+				this.plugin.applyLogo()
+				this.display()
+			})
+		}
 
 		// —— 书架扫描文件夹 ——
 		containerEl.createEl('h3', { text: '书架' })

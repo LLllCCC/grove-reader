@@ -1,6 +1,6 @@
-# 林间书屋（Grove Reader）
+# Grove Reader
 
-Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / cbz 与 PDF）。目标：在 Obsidian 内完成「阅读 → 划线批注 → 生成 Markdown 笔记 → 一键回跳原文」的闭环。插件显示名为 **林间书屋**，内部 id 仍是 `grove-reader`，旧数据与设置无需改名。
+Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / cbz 与 PDF）。目标：在 Obsidian 内完成「阅读 → 划线批注 → 生成 Markdown 笔记 → 一键回跳原文」的闭环。插件在设置里提供一组字标（彩叶 / 森林 / 灰绿 / 印章），可切换标签页与功能区图标。
 
 电子书渲染引擎为 [foliate-js](https://github.com/johnfactotum/foliate-js)（MIT，已内置于 `lib/foliate-js`）；PDF 阅读与批注基于 pdfjs-dist 独立实现（划选高亮按页存储）。
 

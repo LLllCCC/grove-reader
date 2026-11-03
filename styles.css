@@ -422,6 +422,112 @@
 	padding-left: 24px;
 }
 
+/* ---------- 设置页：品牌标志 ---------- */
+
+.grove-settings-brand {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 2px 0 14px;
+	margin-bottom: 14px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.grove-settings-brand svg {
+	width: 280px;
+	max-width: 100%;
+	height: auto;
+	display: block;
+}
+
+.grove-settings-brand-icon {
+	display: inline-flex;
+}
+
+.grove-settings-brand-icon svg {
+	width: 32px;
+	height: 32px;
+}
+
+.grove-settings-brand-name {
+	font-size: 20px;
+	font-weight: 700;
+}
+
+.grove-logo-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+	gap: 10px;
+	margin: 6px 0 20px;
+}
+
+.grove-logo-card {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 10px 12px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 10px;
+	background: var(--background-secondary);
+	cursor: pointer;
+}
+
+.grove-logo-card:hover {
+	border-color: var(--background-modifier-border-hover);
+}
+
+.grove-logo-card.is-active {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.grove-logo-preview {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 64px;
+}
+
+.grove-logo-preview svg {
+	width: 100%;
+	height: auto;
+	max-height: 64px;
+}
+
+.grove-logo-original svg {
+	width: 36px;
+	height: 36px;
+}
+
+.grove-logo-name {
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	text-align: center;
+}
+
+.grove-logo-desc {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	text-align: center;
+	line-height: 1.4;
+}
+
+.grove-empty-logo {
+	display: flex;
+	justify-content: center;
+	margin-bottom: 16px;
+}
+
+.grove-empty-logo svg {
+	width: 260px;
+	max-width: 80%;
+	height: auto;
+}
+
+.grove-empty-text {
+	display: block;
+}
+
 /* ---------- 右下角悬浮翻页按钮 ---------- */
 
 .grove-reader-inner {

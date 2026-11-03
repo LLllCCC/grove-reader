@@ -6,7 +6,7 @@ import pathModule from 'node:path'
 import { shell } from 'electron'
 import { makeBook } from '../lib/foliate-js/view.js'
 import type GroveReaderPlugin from './main'
-import { APP_NAME, FORMAT_LABELS, ShelfBookInfo, isReaderExt, isShelfExt } from './types'
+import { FORMAT_LABELS, ShelfBookInfo, isReaderExt, isShelfExt } from './types'
 import { basenameOf, cleanPdfDisplayTitle, duplicateKeyOf, formatAuthor, formatBytes, formatDuration, formatLanguageMap, isAbsolutePath, relativeTime, stripNumericTitlePrefix, truncate } from './util'
 import { readPdfShelfInfo } from './pdfThumbnail'
 import { BookInfoModal, ConfirmModal, CoverUrlModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
@@ -306,11 +306,11 @@ export class BookshelfView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return APP_NAME
+		return '书架'
 	}
 
 	getIcon(): string {
-		return 'grove-reader'
+		return this.plugin.currentLogoIcon()
 	}
 
 	async onOpen(): Promise<void> {
@@ -414,10 +414,9 @@ export class BookshelfView extends ItemView {
 
 		if (!folders.length) {
 			this.countEl.setText('')
-			this.emptyEl.setText('还没有扫描文件夹。选择一个放书的文件夹（库内或本机任意路径），书架会递归扫描其中的电子书与 PDF。')
+			this.#showEmpty('还没有扫描文件夹。选择一个放书的文件夹（库内或本机任意路径），书架会递归扫描其中的电子书与 PDF。')
 			const addBtn = this.emptyEl.createEl('button', { text: '添加文件夹', cls: 'mod-cta' })
 			addBtn.addEventListener('click', () => void this.#addFolder())
-			this.emptyEl.removeClass('grove-hidden')
 			return
 		}
 
@@ -461,7 +460,13 @@ export class BookshelfView extends ItemView {
 	}
 
 	#showEmpty(message: string): void {
-		this.emptyEl.setText(message)
+		this.emptyEl.empty()
+		const wordmark = this.plugin.logoWordmark()
+		if (wordmark) {
+			const logo = this.emptyEl.createDiv('grove-empty-logo')
+			logo.innerHTML = wordmark
+		}
+		this.emptyEl.createSpan('grove-empty-text').setText(message)
 		this.emptyEl.removeClass('grove-hidden')
 	}
 
