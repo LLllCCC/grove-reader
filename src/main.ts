@@ -57,6 +57,8 @@ export default class GroveReaderPlugin extends Plugin {
 		if (adapter instanceof FileSystemAdapter) this.vaultBase = adapter.getBasePath()
 		const pluginDirRel = this.manifest.dir || pathModule.join('.obsidian', 'plugins', this.manifest.id)
 		this.pluginDir = this.vaultBase ? pathModule.join(this.vaultBase, pluginDirRel) : pluginDirRel
+		// 旧实例可能把 data.json 写回迁移前的路径：启动时按实际目录自动纠正
+		this.adoptMigratedFolders()
 		// 数据目录可迁到库内普通文件夹（便于随库同步/备份）；留空则沿用插件目录
 		const dataFolder = this.settings.dataFolder?.trim()
 		this.dataRoot = dataFolder
@@ -103,6 +105,48 @@ export default class GroveReaderPlugin extends Plugin {
 	onunload(): void {
 		// 各视图的 onClose 会负责落盘与销毁渲染器
 		this.stats?.saveNow()
+	}
+
+	/**
+	 * 书库被整体迁到 <库>/林间书屋/ 后，若设置里仍是旧路径（例如迁移时旧实例
+	 * 又把 data.json 写回去了），按磁盘实际情况自动接管，避免书架空白。
+	 */
+	private adoptMigratedFolders(): void {
+		if (!this.vaultBase) return
+		const root = pathModule.join(this.vaultBase, APP_NAME)
+		const dataOk = fs.existsSync(pathModule.join(root, 'data', 'shelf.json'))
+		const booksDir = pathModule.join(root, '书籍')
+		const notesDir = pathModule.join(root, '阅读笔记')
+		const hasBooks = (dir: string): boolean => {
+			try {
+				return fs.readdirSync(dir).some(n => isShelfExt(pathModule.extname(n).slice(1)))
+			} catch {
+				return false
+			}
+		}
+		if (!dataOk && !hasBooks(booksDir) && !fs.existsSync(notesDir)) return
+
+		let changed = false
+		if (dataOk && !this.settings.dataFolder?.trim()) {
+			this.settings.dataFolder = APP_NAME
+			changed = true
+		}
+		const foldersOk = (this.settings.scanFolders ?? []).some(f => hasBooks(isAbsolutePath(f) ? f : pathModule.join(this.vaultBase, f)))
+		if (hasBooks(booksDir) && !foldersOk) {
+			this.settings.scanFolders = [`${APP_NAME}/书籍`]
+			changed = true
+		}
+		const notesAbs = this.settings.notesFolder
+			? pathModule.join(this.vaultBase, this.settings.notesFolder)
+			: ''
+		if (fs.existsSync(notesDir) && (!notesAbs || !fs.existsSync(notesAbs))) {
+			this.settings.notesFolder = `${APP_NAME}/阅读笔记`
+			changed = true
+		}
+		if (changed) {
+			void this.saveSettings()
+			console.log('[Grove Reader] 已自动接管迁移后的书库目录')
+		}
 	}
 
 	// ------------------------------------------------------------------
