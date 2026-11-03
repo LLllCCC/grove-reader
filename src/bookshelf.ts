@@ -9,7 +9,7 @@ import type GroveReaderPlugin from './main'
 import { FORMAT_LABELS, ShelfBookInfo, isReaderExt, isShelfExt } from './types'
 import { basenameOf, cleanPdfDisplayTitle, duplicateKeyOf, formatAuthor, formatBytes, formatDuration, formatLanguageMap, isAbsolutePath, relativeTime, stripNumericTitlePrefix, truncate } from './util'
 import { readPdfShelfInfo } from './pdfThumbnail'
-import { BookInfoModal, ConfirmModal, CoverUrlModal, DangerConfirmModal, DeleteBookModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
+import { BookInfoModal, ConfirmModal, CoverUrlModal, DeleteBookModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
 import type { BookInfoValues } from './modals'
 import type { BookList } from './lists'
 
@@ -809,29 +809,6 @@ export class BookshelfView extends ItemView {
 			})()
 		})
 		input.click()
-	}
-
-	/** 清空一本书的全部批注/评论（保留阅读位置），需要输入确认词 */
-	#clearAnnotations(path: string): void {
-		const data = this.plugin.store.load(path)
-		const count = data.annotations?.length ?? 0
-		if (!count) {
-			new Notice('这本书还没有批注')
-			return
-		}
-		new DangerConfirmModal(
-			this.app,
-			'清空本书批注',
-			`将删除《${this.#displayTitle(path)}》的 ${count} 条批注与评论；阅读位置会保留。`,
-			'清空',
-			() => {
-				data.annotations = []
-				this.plugin.store.save(data)
-				this.plugin.refreshNoteForBook(path)
-				void this.refresh()
-				new Notice(`已清空 ${count} 条批注`)
-			},
-		).open()
 	}
 
 	/** 删除书籍：可选择是否连原文件一起移到回收站 */
