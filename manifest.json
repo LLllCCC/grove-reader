@@ -1,9 +1,9 @@
 {
 	"id": "grove-reader",
-	"name": "Grove Reader",
-	"version": "0.3.0",
+	"name": "林间书屋",
+	"version": "0.4.0",
 	"minAppVersion": "1.5.0",
-	"description": "电子书阅读器：阅读 → 划线批注 → 生成 Markdown 笔记 → 一键回跳原文（个人自用）",
+	"description": "电子书阅读器：在 Obsidian 中阅读、划线批注、生成 Markdown 笔记并回跳原文（个人自用）",
 	"author": "grove",
 	"isDesktopOnly": true
 }

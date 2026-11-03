@@ -1,4 +1,4 @@
-import { FileSystemAdapter, Notice, Plugin, TFile, normalizePath } from 'obsidian'
+import { FileSystemAdapter, Notice, Plugin, TFile, addIcon, normalizePath } from 'obsidian'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import pathModule from 'node:path'
@@ -7,6 +7,7 @@ import { ShelfCache } from './bookshelf'
 import { ListsStore } from './lists'
 import { StatsStore } from './stats'
 import {
+	APP_NAME,
 	DEFAULT_APPEARANCE,
 	DEFAULT_SETTINGS,
 	DEFAULT_SHELF_DISPLAY,
@@ -27,6 +28,13 @@ import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } 
 import { isReaderExt, isShelfExt } from './types'
 import { usageDocMarkdown, USAGE_DOC_NAME } from './usageDoc'
 
+/**
+ * 自定义图标：一本打开的书，书脊上长出一片叶子（Grove = 小树林）。
+ * addIcon 的坐标系是 0 0 100 100，这里把 24 格的 Lucide 风格路径整体放大。
+ */
+const GROVE_ICON_ID = 'grove-reader'
+const GROVE_ICON_SVG = `<g transform="scale(4.1667)" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.6C9.7 5 6.7 4.5 3.6 5.3v13c3.1-.8 6.1-.3 8.4 1.3 2.3-1.6 5.3-2.1 8.4-1.3v-13C17.3 4.5 14.3 5 12 6.6Z"/><path d="M12 6.6v13"/><path d="M12 6.2V3.2"/><path d="M12 3.4c1.9.1 3.2 1.3 3.4 3.1-1.9.1-3.2-1.1-3.4-3.1Z"/></g>`
+
 export default class GroveReaderPlugin extends Plugin {
 	settings: GroveSettings = { ...DEFAULT_SETTINGS, appearance: { ...DEFAULT_APPEARANCE } }
 	store!: BookStore
@@ -34,6 +42,8 @@ export default class GroveReaderPlugin extends Plugin {
 	lists!: ListsStore
 	stats!: StatsStore
 	vaultBase = ''
+	/** 插件安装目录（data.json 在这里，不随数据目录迁移） */
+	pluginDir = ''
 	/** 书架搜索词：只活在本次会话，关掉书架页再打开还在，重启 Obsidian 清空 */
 	shelfSearch = ''
 
@@ -42,10 +52,16 @@ export default class GroveReaderPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		await this.loadSettings()
+		addIcon(GROVE_ICON_ID, GROVE_ICON_SVG)
 		const adapter = this.app.vault.adapter
 		if (adapter instanceof FileSystemAdapter) this.vaultBase = adapter.getBasePath()
-		const pluginDir = this.manifest.dir || pathModule.join('.obsidian', 'plugins', this.manifest.id)
-		this.dataRoot = this.vaultBase ? pathModule.join(this.vaultBase, pluginDir) : pluginDir
+		const pluginDirRel = this.manifest.dir || pathModule.join('.obsidian', 'plugins', this.manifest.id)
+		this.pluginDir = this.vaultBase ? pathModule.join(this.vaultBase, pluginDirRel) : pluginDirRel
+		// 数据目录可迁到库内普通文件夹（便于随库同步/备份）；留空则沿用插件目录
+		const dataFolder = this.settings.dataFolder?.trim()
+		this.dataRoot = dataFolder
+			? (this.vaultBase ? pathModule.join(this.vaultBase, normalizePath(dataFolder)) : normalizePath(dataFolder))
+			: this.pluginDir
 		this.store = new BookStore(this.dataRoot, this.settings.maxBackups)
 		let lastSaveErrorAt = 0
 		this.store.onError = e => {
@@ -71,7 +87,7 @@ export default class GroveReaderPlugin extends Plugin {
 		this.registerExtensions(SUPPORTED_BOOK_EXTS, VIEW_TYPE_GROVE_READER)
 		this.registerObsidianProtocolHandler('grove', params =>
 			void this.openByBookId(params['book'] ?? '', params['cfi'] ?? ''))
-		this.addRibbonIcon('library', 'Grove Reader：书架', () => void this.openBookshelf())
+		this.addRibbonIcon(GROVE_ICON_ID, `${APP_NAME}：书架`, () => void this.openBookshelf())
 
 		this.registerCommands()
 		this.addSettingTab(new GroveSettingTab(this.app, this))
@@ -415,6 +431,11 @@ export default class GroveReaderPlugin extends Plugin {
 			},
 		})
 		this.addCommand({
+			id: 'regenerate-usage-doc',
+			name: '重新生成使用指南',
+			callback: () => void this.regenerateUsageDoc(),
+		})
+		this.addCommand({
 			id: 'backup-data',
 			name: '备份批注数据到库内',
 			callback: () => void this.exportDataBackup(),
@@ -656,6 +677,18 @@ export default class GroveReaderPlugin extends Plugin {
 		if (f instanceof TFile) await this.app.workspace.getLeaf('tab').openFile(f)
 	}
 
+	/** 用当前版本的内容覆盖已生成的使用指南（用户可在设置里手动触发） */
+	async regenerateUsageDoc(): Promise<void> {
+		const folder = normalizePath(this.settings.notesFolder?.trim() || '阅读笔记')
+		if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder)
+		const path = normalizePath(`${folder}/${USAGE_DOC_NAME}`)
+		const markdown = usageDocMarkdown()
+		const file = this.app.vault.getAbstractFileByPath(path)
+		if (file instanceof TFile) await this.app.vault.modify(file, markdown)
+		else await this.app.vault.create(path, markdown)
+		new Notice(`${APP_NAME}：使用指南已更新`)
+	}
+
 	/** 库内备份文件夹（设置里可改；空/异常时回退默认名） */
 	backupFolderRel(): string {
 		return this.settings.backupFolder?.trim() || BACKUP_FOLDER_NAME
@@ -739,7 +772,7 @@ export default class GroveReaderPlugin extends Plugin {
 			for (const [src, dst] of [
 				[pathModule.join(this.dataRoot, 'data', 'shelf.json'), 'shelf.json'],
 				[pathModule.join(this.dataRoot, 'data', 'lists.json'), 'lists.json'],
-				[pathModule.join(this.dataRoot, 'data.json'), 'data.json'],
+				[pathModule.join(this.pluginDir, 'data.json'), 'data.json'],
 			] as const) {
 				await fsp.copyFile(src, pathModule.join(root, dst)).catch(() => { })
 			}

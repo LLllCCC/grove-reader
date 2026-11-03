@@ -1,4 +1,4 @@
-import { ItemView, Menu, Notice, WorkspaceLeaf, setIcon } from 'obsidian'
+import { ItemView, Menu, Notice, WorkspaceLeaf, requestUrl, setIcon } from 'obsidian'
 import type { TAbstractFile } from 'obsidian'
 import { TFile } from 'obsidian'
 import fs from 'node:fs'
@@ -6,10 +6,10 @@ import pathModule from 'node:path'
 import { shell } from 'electron'
 import { makeBook } from '../lib/foliate-js/view.js'
 import type GroveReaderPlugin from './main'
-import { FORMAT_LABELS, ShelfBookInfo, isReaderExt, isShelfExt } from './types'
+import { APP_NAME, FORMAT_LABELS, ShelfBookInfo, isReaderExt, isShelfExt } from './types'
 import { basenameOf, cleanPdfDisplayTitle, duplicateKeyOf, formatAuthor, formatBytes, formatDuration, formatLanguageMap, isAbsolutePath, relativeTime, stripNumericTitlePrefix, truncate } from './util'
 import { readPdfShelfInfo } from './pdfThumbnail'
-import { BookInfoModal, ConfirmModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
+import { BookInfoModal, ConfirmModal, CoverUrlModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
 import type { BookInfoValues } from './modals'
 import type { BookList } from './lists'
 
@@ -155,6 +155,24 @@ export class ShelfCache {
 		}
 	}
 
+	/** 从网络图片字节保存自定义封面 */
+	async saveCustomCoverFromBuffer(bookId: string, data: ArrayBuffer, mime: string): Promise<string | undefined> {
+		try {
+			fs.mkdirSync(this.coversDir, { recursive: true })
+			const ext = mime.includes('png') ? 'png'
+				: mime.includes('gif') ? 'gif'
+				: mime.includes('webp') ? 'webp'
+				: 'jpg'
+			const name = `${bookId}-custom.${ext}`
+			fs.writeFileSync(pathModule.join(this.coversDir, name), Buffer.from(data))
+			this.#deleteCoverCache(name)
+			return name
+		} catch (e) {
+			console.error('[Grove Reader] 网络封面保存失败', e)
+			return undefined
+		}
+	}
+
 	coverDataUrl(filename?: string): string | null {
 		if (!filename) return null
 		if (this.coverCache.has(filename)) {
@@ -288,11 +306,11 @@ export class BookshelfView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return '书架'
+		return APP_NAME
 	}
 
 	getIcon(): string {
-		return 'library'
+		return 'grove-reader'
 	}
 
 	async onOpen(): Promise<void> {
@@ -300,13 +318,19 @@ export class BookshelfView extends ItemView {
 		root.empty()
 		root.addClass('grove-shelf-content')
 
-		// 标题已由标签页 / 视图头承担，内容区不再重复一行；
-		// 原来的三个按钮迁到 Obsidian 原生视图头（悬停标签页可见）
-		this.addAction('folder-plus', '添加扫描文件夹', () => void this.#addFolder())
-		this.addAction('refresh-cw', '重新扫描', () => void this.refresh({ rescan: true }))
-		this.addAction('bar-chart-2', '阅读统计', () => new ReadingStatsModal(this.app, this.plugin).open())
+		// 顶部一行：左边是扫描文件夹标签，右边是操作按钮（同一水平线）
+		const topRow = root.createDiv('grove-shelf-toprow')
+		this.hintEl = topRow.createDiv('grove-shelf-folders')
+		const actions = topRow.createDiv('grove-shelf-actions')
+		const action = (icon: string, label: string, onClick: () => void): void => {
+			const btn = actions.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': label, title: label } })
+			setIcon(btn, icon)
+			btn.addEventListener('click', onClick)
+		}
+		action('folder-plus', '添加扫描文件夹', () => void this.#addFolder())
+		action('refresh-cw', '重新扫描', () => void this.refresh({ rescan: true }))
+		action('bar-chart-2', '阅读统计', () => new ReadingStatsModal(this.app, this.plugin).open())
 
-		this.hintEl = root.createDiv('grove-shelf-folders')
 		this.listsEl = root.createDiv('grove-shelf-lists')
 		this.#renderTools(root)
 		this.continueEl = root.createDiv('grove-shelf-continue grove-hidden')
@@ -733,6 +757,26 @@ export class BookshelfView extends ItemView {
 		}).open()
 	}
 
+	async #changeCoverByUrl(path: string, card: HTMLElement): Promise<void> {
+		new CoverUrlModal(this.app, async url => {
+			const res = await requestUrl({ url, method: 'GET' })
+			if (res.status < 200 || res.status >= 300) throw new Error(`下载失败：HTTP ${res.status}`)
+			const mime = (res.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase()
+			if (!mime.startsWith('image/')) throw new Error('这个链接返回的不是图片')
+			if (res.arrayBuffer.byteLength > 12 * 1024 * 1024) throw new Error('图片超过 12 MB，请换一张小一些的')
+			const name = await this.plugin.shelfCache.saveCustomCoverFromBuffer(
+				this.plugin.store.bookId(path),
+				res.arrayBuffer,
+				mime,
+			)
+			if (!name) throw new Error('封面保存失败，请检查磁盘权限')
+			const prev = this.plugin.shelfCache.get(path) ?? {}
+			this.plugin.shelfCache.set(path, { ...prev, cover: name, customCover: true, failed: false })
+			this.#updateCard(card, { ...prev, coverName: name })
+			new Notice('封面已更新')
+		}).open()
+	}
+
 	async #changeCover(path: string, card: HTMLElement): Promise<void> {
 		const input = createEl('input', { type: 'file', attr: { accept: 'image/*' } })
 		input.addEventListener('change', () => {
@@ -878,6 +922,7 @@ export class BookshelfView extends ItemView {
 			const menu = new Menu()
 			menu.addItem(item => item.setTitle('打开书籍').setIcon('book-open').onClick(() => void plugin.openBookByPath(path)))
 			menu.addItem(item => item.setTitle('更换封面').setIcon('image').onClick(() => void this.#changeCover(path, card)))
+			menu.addItem(item => item.setTitle('用图片链接更换封面…').setIcon('link').onClick(() => void this.#changeCoverByUrl(path, card)))
 			menu.addItem(item => item.setTitle('编辑书籍信息').setIcon('pencil').onClick(() => this.#editInfo(path)))
 			menu.addItem(item => {
 				const lid = plugin.lists.listIdOf(path)

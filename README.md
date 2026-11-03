@@ -1,6 +1,6 @@
-# Grove Reader
+# 林间书屋（Grove Reader）
 
-Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / cbz 与 PDF）。目标：在 Obsidian 内完成「阅读 → 划线批注 → 生成 Markdown 笔记 → 一键回跳原文」的闭环。
+Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / cbz 与 PDF）。目标：在 Obsidian 内完成「阅读 → 划线批注 → 生成 Markdown 笔记 → 一键回跳原文」的闭环。插件显示名为 **林间书屋**，内部 id 仍是 `grove-reader`，旧数据与设置无需改名。
 
 电子书渲染引擎为 [foliate-js](https://github.com/johnfactotum/foliate-js)（MIT，已内置于 `lib/foliate-js`）；PDF 阅读与批注基于 pdfjs-dist 独立实现（划选高亮按页存储）。
 
@@ -22,6 +22,7 @@ Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / c
 | 目录 | 工具栏下拉框 |
 | 生成笔记 | 工具栏笔记按钮或命令「生成 / 更新阅读笔记」，保存到设置中的笔记文件夹 |
 | 回跳原文 | 笔记中每条批注下方的「⤴ 回原文」链接（`obsidian://grove` 协议） |
+| 更换封面 | 右键书籍 →「更换封面」选本地图片，或「用图片链接更换封面…」填图片直链（经 requestUrl 下载，支持 jpg/png/webp/gif，≤12MB） |
 
 阅读位置自动记忆：重开书籍从上次位置继续（工作区重启后同样恢复）。
 
@@ -53,7 +54,7 @@ Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / c
 
 ## 数据安全（个人自用优先级最高项）
 
-- 每本书一个 JSON：`.obsidian/plugins/grove-reader/data/books/<bookId>.json`，Markdown 笔记只是导出视图，JSON 才是数据源头；
+- 每本书一个 JSON，默认在 `.obsidian/plugins/grove-reader/data/books/<bookId>.json`；设置 → 数据安全 → **数据文件夹** 可把整个 `data/` 改到库内普通文件夹（填 `林间书屋` 时实际写入 `林间书屋/data/`），便于随库同步与备份。修改后需手动把原 `data/` 内容复制到新位置并重启 Obsidian；Markdown 笔记只是导出视图，JSON 才是数据源头；
 - 写入为「临时文件 + 原子重命名」，不会出现写一半的半截文件；
 - 覆盖前滚动备份（每 10 分钟最多一份，默认保留 10 份，可设置）；
 - 主文件损坏时自动从最新备份恢复，损坏文件留档为 `*.corrupt-*`；
@@ -77,6 +78,15 @@ npm run obsidian:eval "<js>"  # 在运行中的 Obsidian 里执行 JS（需以 -
 - 仅桌面端（`isDesktopOnly`）；移动端不加载；
 - 批注 JSON → 笔记为单向同步，笔记里改内容不会回写批注；
 - PDF 批注按页码定位：PDF 文件本身被重新编辑（增删页）后，旧批注的页码可能错位。
+
+## 本库目录约定
+
+```
+林间书屋/
+  书籍/       电子书文件（设置里的扫描文件夹）
+  阅读笔记/   生成的批注笔记
+  data/       批注 JSON、封面、书单、阅读统计
+```
 
 ## 路线图（对应两轮规划收敛后的优先级）
 

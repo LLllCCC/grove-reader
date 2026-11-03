@@ -168,6 +168,64 @@ export class BookInfoModal extends Modal {
 	}
 }
 
+export class CoverUrlModal extends Modal {
+	constructor(
+		app: App,
+		private onSubmit: (url: string) => Promise<void>,
+	) {
+		super(app)
+	}
+
+	onOpen(): void {
+		this.contentEl.empty()
+		this.contentEl.createEl('h3', { text: '用图片链接更换封面' })
+		this.contentEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: '粘贴图片直链（http / https），支持 jpg、png、webp、gif，建议使用 2:3 的竖图。',
+		})
+		const input = this.contentEl.createEl('input', {
+			type: 'url',
+			cls: 'grove-cover-url-input',
+			attr: { placeholder: 'https://example.com/cover.jpg' },
+		})
+		const status = this.contentEl.createDiv('grove-cover-url-status')
+		const buttons = this.contentEl.createDiv('modal-button-container')
+		const cancel = buttons.createEl('button', { text: '取消' })
+		cancel.addEventListener('click', () => this.close())
+		const ok = buttons.createEl('button', { text: '下载并设为封面', cls: 'mod-cta' })
+		const submit = async (): Promise<void> => {
+			const url = input.value.trim()
+			if (!/^https?:\/\//i.test(url)) {
+				status.setText('请填写以 http:// 或 https:// 开头的图片链接')
+				return
+			}
+			ok.disabled = true
+			ok.setText('下载中…')
+			status.setText('')
+			try {
+				await this.onSubmit(url)
+				this.close()
+			} catch (e) {
+				status.setText(e instanceof Error ? e.message : String(e))
+				ok.disabled = false
+				ok.setText('下载并设为封面')
+			}
+		}
+		ok.addEventListener('click', () => void submit())
+		input.addEventListener('keydown', e => {
+			if (e.key === 'Enter') {
+				e.preventDefault()
+				void submit()
+			}
+		})
+		window.setTimeout(() => input.focus(), 50)
+	}
+
+	onClose(): void {
+		this.contentEl.empty()
+	}
+}
+
 export class TextPromptModal extends Modal {
 	constructor(
 		app: App,

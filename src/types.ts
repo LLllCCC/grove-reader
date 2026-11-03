@@ -1,7 +1,10 @@
 export const DATA_VERSION = 1
 
+/** 插件对外显示名（manifest 里的 name 与此保持一致） */
+export const APP_NAME = '林间书屋'
+
 /** 库内备份文件夹名（「备份批注数据到库内」命令生成） */
-export const BACKUP_FOLDER_NAME = 'Grove Reader 数据备份'
+export const BACKUP_FOLDER_NAME = '林间书屋 数据备份'
 
 export const SUPPORTED_BOOK_EXTS = ['epub', 'mobi', 'azw3', 'fb2', 'fbz', 'cbz']
 
@@ -204,6 +207,11 @@ export interface GroveSettings {
 	maxBackups: number
 	/** 书架扫描文件夹（库内相对路径或本机绝对路径） */
 	scanFolders: string[]
+	/**
+	 * 数据目录（库内相对路径）：批注 JSON、封面、书单、统计的存放位置。
+	 * 留空 = 沿用旧行为（插件目录下的 data/）。
+	 */
+	dataFolder: string
 	/** 书架排序：default / added / title / progress */
 	shelfSort: string
 	/** 书架卡片显示哪些信息 */
@@ -221,9 +229,10 @@ export interface GroveSettings {
 
 export const DEFAULT_SETTINGS: GroveSettings = {
 	notesFolder: '阅读笔记',
-	noteTemplatePath: '阅读笔记/Grove 笔记模板.md',
+	noteTemplatePath: '林间书屋/阅读笔记/Grove 笔记模板.md',
 	maxBackups: 10,
 	scanFolders: [],
+	dataFolder: '',
 	shelfSort: 'default',
 	shelfDisplay: { ...DEFAULT_SHELF_DISPLAY },
 	openSidebarWithBook: true,

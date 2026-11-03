@@ -1,7 +1,7 @@
 import { App, Notice, PluginSettingTab, Setting } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import { FolderPromptModal, FolderSuggest } from './modals'
-import { BACKUP_FOLDER_NAME, DEFAULT_SHELF_DISPLAY } from './types'
+import { APP_NAME, BACKUP_FOLDER_NAME, DEFAULT_SHELF_DISPLAY } from './types'
 import { isAbsolutePath } from './util'
 
 export class GroveSettingTab extends PluginSettingTab {
@@ -12,7 +12,7 @@ export class GroveSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this
 		containerEl.empty()
-		containerEl.createEl('h2', { text: 'Grove Reader 设置' })
+		containerEl.createEl('h2', { text: `${APP_NAME} 设置` })
 
 		// —— 书架扫描文件夹 ——
 		containerEl.createEl('h3', { text: '书架' })
@@ -114,19 +114,32 @@ export class GroveSettingTab extends PluginSettingTab {
 			.setDesc('模板文件路径（库内）。文件不存在时使用内置默认模板；语法见使用指南')
 			.addText(text =>
 				text.setValue(this.plugin.settings.noteTemplatePath).onChange(async value => {
-					this.plugin.settings.noteTemplatePath = value.trim() || '阅读笔记/Grove 笔记模板.md'
+					this.plugin.settings.noteTemplatePath = value.trim() || '林间书屋/阅读笔记/Grove 笔记模板.md'
 					await this.plugin.saveSettings()
 				}))
 			.addButton(button =>
 				button.setButtonText('创建 / 打开').setCta().onClick(() => void this.plugin.openNoteTemplate()))
 		new Setting(containerEl)
 			.setName('使用指南')
-			.setDesc('在笔记文件夹生成《Grove Reader 使用指南》（已存在则直接打开）')
+			.setDesc(`在笔记文件夹生成《${APP_NAME} 使用指南》；已存在时可直接打开，或用「重新生成」覆盖为当前版本`)
 			.addButton(button =>
 				button.setButtonText('生成 / 打开').onClick(() => void this.plugin.openUsageDoc()))
+			.addButton(button =>
+				button.setButtonText('重新生成').onClick(() => void this.plugin.regenerateUsageDoc()))
 
 		// —— 数据安全 ——
 		containerEl.createEl('h3', { text: '数据安全' })
+		new Setting(containerEl)
+			.setName('数据文件夹')
+			.setDesc('批注 JSON、封面、书单、阅读统计的存放位置（库内相对路径）。留空 = 插件目录下的 data/。修改后需把原 data/ 内容复制到新位置并重启 Obsidian')
+			.addText(text =>
+				text
+					.setPlaceholder('例如：林间书屋')
+					.setValue(this.plugin.settings.dataFolder ?? '')
+					.onChange(async value => {
+						this.plugin.settings.dataFolder = value.trim().replace(/[\\/]+$/, '')
+						await this.plugin.saveSettings()
+					}))
 		new Setting(containerEl)
 			.setName('库内备份文件夹')
 			.setDesc('「立即备份」写入的库内文件夹（相对路径，可含子目录，如「00-Obsidian插件/插件运行时产生的文件/Grove Reader/数据备份」）。修改后光标离开输入框时，旧文件夹里的备份自动转移到新路径')
@@ -184,7 +197,7 @@ export class GroveSettingTab extends PluginSettingTab {
 
 		containerEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: '批注数据保存在 .obsidian/plugins/grove-reader/data/ 下，每本书一个 JSON 文件；即使停用或删除插件，已生成的 Markdown 笔记也不受影响。阅读中的字体、背景等外观设置请在阅读界面的「Aa」面板中调整。',
+			text: `批注数据每本书一个 JSON 文件，默认在插件目录的 data/ 下；填写「数据文件夹」后会改存到库内对应目录（如「林间书屋」→ 林间书屋/data/）。即使停用或删除插件，已生成的 Markdown 笔记也不受影响。阅读中的字体、背景等外观设置请在阅读界面的「Aa」面板中调整。`,
 		})
 	}
 }
