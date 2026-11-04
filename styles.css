@@ -1880,41 +1880,9 @@
 /* ---------- 书架卡片悬浮提示（只保留一个） ---------- */
 
 .grove-card-tooltip {
-	position: fixed;
-	z-index: 1000;
 	max-width: min(360px, calc(100vw - 20px));
-	padding: 8px 10px;
-	background: #1b1b1b;
-	color: #f2f2f2;
-	border: 1px solid rgba(255, 255, 255, 0.08);
-	border-radius: 8px;
-	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
-	font-size: var(--font-ui-smaller);
-	line-height: 1.5;
-	white-space: pre-line;
-	overflow-wrap: anywhere;
-	pointer-events: none;
-	transform: translateX(-50%);
-}
-
-.grove-card-tooltip::after {
-	content: '';
-	position: absolute;
-	left: var(--grove-arrow-x, 50%);
-	margin-left: -6px;
-	width: 0;
-	height: 0;
-	border: 6px solid transparent;
-}
-
-.grove-card-tooltip.is-below::after {
-	top: -12px;
-	border-bottom-color: #1b1b1b;
-}
-
-.grove-card-tooltip.is-above::after {
-	bottom: -12px;
-	border-top-color: #1b1b1b;
+	text-align: left;
+	line-height: 1.45;
 }
 
 /* ---------- 阅读目标 / 热力图 ---------- */

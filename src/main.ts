@@ -24,7 +24,7 @@ import {
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
 import { PdfView, VIEW_TYPE_GROVE_PDF } from './pdfView'
-import { BookPickerModal, ConfirmModal, DangerConfirmModal, HealthReportModal, OpLogModal, ReadingStatsModal, SearchModal, TemplatePickerModal, TrashModal } from './modals'
+import { BookPickerModal, ConfirmModal, DangerConfirmModal, FolderPromptModal, HealthReportModal, OpLogModal, ReadingStatsModal, PromptModal, SearchModal, TemplatePickerModal, TrashModal } from './modals'
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
 import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
@@ -846,6 +846,22 @@ export default class GroveReaderPlugin extends Plugin {
 			checkCallback: checking => this.withAnyReader(checking, v => this.showTemplatePicker(v.bookPath)),
 		})
 		this.addCommand({
+			id: 'migrate-data-folder',
+			name: '迁移数据文件夹…',
+			callback: () => this.promptMigrateDataFolder(),
+		})
+		this.addCommand({
+			id: 'search-current-book-fulltext',
+			name: '搜索当前书全文',
+			checkCallback: checking => this.withAnyReader(checking, v => {
+				if (!(v instanceof ReaderView)) {
+					new Notice(`${APP_NAME}：PDF 请用阅读器内的全文搜索`)
+					return
+				}
+				new PromptModal(this.app, '搜索当前书全文', '输入关键词，在当前书正文里搜索', query => v.searchFullText(query)).open()
+			}),
+		})
+		this.addCommand({
 			id: 'open-trash',
 			name: '打开回收站',
 			callback: () => this.showTrash(),
@@ -1153,8 +1169,75 @@ export default class GroveReaderPlugin extends Plugin {
 		new Notice(`${APP_NAME}：笔记模板已切换为「${label}」`)
 	}
 
-	/** 生成（如缺失）并打开使用指南 */
-	async openUsageDoc(): Promise<void> {
+	promptMigrateDataFolder(): void {
+		new FolderPromptModal(
+			this.app,
+			'迁移数据文件夹',
+			this.settings.dataFolder?.trim() || 'Grove Reader',
+			async value => this.migrateDataFolder(value),
+		).open()
+	}
+
+	/** 复制 data/ 到新的库内目录；不删旧数据，重启后生效 */
+	async migrateDataFolder(targetFolder: string): Promise<void> {
+		const folder = targetFolder.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+		if (!folder) {
+			new Notice(`${APP_NAME}：请填写库内文件夹路径`)
+			return
+		}
+		if (isAbsolutePath(folder)) {
+			new Notice(`${APP_NAME}：数据文件夹请填库内相对路径（例如 Grove Reader）`)
+			return
+		}
+		const sourceRoot = this.dataRoot
+		const targetRoot = pathModule.join(this.vaultBase, normalizePath(folder))
+		const source = pathModule.join(sourceRoot, 'data')
+		const target = pathModule.join(targetRoot, 'data')
+		if (pathModule.resolve(sourceRoot) === pathModule.resolve(targetRoot)) {
+			new Notice(`${APP_NAME}：目标就是当前数据文件夹`)
+			return
+		}
+		if (!fs.existsSync(source)) {
+			new Notice(`${APP_NAME}：当前数据文件夹里没有 data/，无法迁移`)
+			return
+		}
+		const srcAbs = pathModule.resolve(source)
+		const dstAbs = pathModule.resolve(target)
+		if (dstAbs.startsWith(srcAbs + pathModule.sep) || srcAbs.startsWith(dstAbs + pathModule.sep)) {
+			new Notice(`${APP_NAME}：不能迁移到自身或子目录`)
+			return
+		}
+		if (fs.existsSync(target) && fs.readdirSync(target).length > 0) {
+			new Notice(`${APP_NAME}：目标已有数据，请换一个空文件夹`)
+			return
+		}
+		new ConfirmModal(
+			this.app,
+			`把当前数据复制到「${folder}/data」？\n\n源：${source}\n目标：${target}\n\n复制期间请不要继续阅读/批注；复制完成后立即重启 Obsidian。旧数据不会删除，回收站（.trash）不迁移。`,
+			() => {
+				void (async () => {
+					try {
+						new Notice(`${APP_NAME}：正在复制数据…`)
+						const files = await copyDirAsync(source, target)
+						const srcBooks = countJson(pathModule.join(source, 'books'))
+						const dstBooks = countJson(pathModule.join(target, 'books'))
+						if (srcBooks !== dstBooks) {
+							throw new Error(`校验失败：源 ${srcBooks} 份批注，目标 ${dstBooks} 份`)
+						}
+						this.settings.dataFolder = folder
+						await this.saveSettings()
+						this.oplog.add('迁移数据文件夹', `${sourceRoot} → ${targetRoot}；${dstBooks} 份批注`)
+						this.debug('data', 'migrate', { from: sourceRoot, to: targetRoot, files, books: dstBooks })
+						new Notice(`${APP_NAME}：已复制 ${files} 个文件。请重启 Obsidian 生效；旧数据确认无误后再删。`)
+					} catch (e) {
+						new Notice(`${APP_NAME}：迁移失败（${e instanceof Error ? e.message : String(e)}）。目标目录可能有残留文件，请检查后重试。`)
+					}
+				})()
+			},
+		).open()
+	}
+
+	/** 生成（如缺失）并打开使用指南 */	async openUsageDoc(): Promise<void> {
 		const folder = normalizePath(this.settings.notesFolder?.trim() || '阅读笔记')
 		if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder)
 		const path = normalizePath(`${folder}/${USAGE_DOC_NAME}`)
@@ -1397,4 +1480,12 @@ async function copyDirAsync(src: string, dst: string): Promise<number> {
 		}
 	}
 	return n
+}
+
+function countJson(dir: string): number {
+	try {
+		return fs.readdirSync(dir).filter(name => name.endsWith('.json')).length
+	} catch {
+		return 0
+	}
 }

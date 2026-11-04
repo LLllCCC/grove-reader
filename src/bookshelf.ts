@@ -1095,8 +1095,9 @@ export class BookshelfView extends ItemView {
 
 	#showTooltip(card: HTMLElement, text: string): void {
 		this.#hideTooltip()
-		const el = document.body.createDiv('grove-card-tooltip')
+		const el = document.body.createDiv('tooltip grove-card-tooltip')
 		el.setText(text)
+		el.createDiv('tooltip-arrow')
 		const rect = card.getBoundingClientRect()
 		const margin = 10
 		const width = el.offsetWidth
@@ -1110,11 +1111,12 @@ export class BookshelfView extends ItemView {
 			above = true
 		}
 		top = Math.max(margin, top)
-		el.addClass(above ? 'is-above' : 'is-below')
+		if (above) el.addClass('mod-top')
 		el.style.left = `${left}px`
 		el.style.top = `${top}px`
 		const arrowX = Math.min(width - 14, Math.max(14, center - (left - width / 2)))
-		el.style.setProperty('--grove-arrow-x', `${arrowX}px`)
+		const arrow = el.querySelector('.tooltip-arrow')
+		if (arrow instanceof HTMLElement) arrow.style.left = `${arrowX}px`
 		this.tooltipEl = el
 	}
 

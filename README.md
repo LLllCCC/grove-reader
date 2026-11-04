@@ -66,7 +66,7 @@ Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / c
 
 ## 数据安全（个人自用优先级最高项）
 
-- 每本书一个 JSON，默认在 `.obsidian/plugins/grove-reader/data/books/<bookId>.json`；设置 → 数据安全 → **数据文件夹** 可把整个 `data/` 改到库内普通文件夹（填 `Grove Reader` 时实际写入 `Grove Reader/data/`），便于随库同步与备份。修改后需手动把原 `data/` 内容复制到新位置并重启 Obsidian；Markdown 笔记只是导出视图，JSON 才是数据源头；
+- 每本书一个 JSON，默认在 `.obsidian/plugins/grove-reader/data/books/<bookId>.json`；设置 → 数据与维护 → **数据文件夹** 可把整个 `data/` 改到库内普通文件夹（填 `Grove Reader` 时实际写入 `Grove Reader/data/`），便于随库同步与备份。修改后点 **「迁移数据…」** 自动复制到新位置并重启 Obsidian；旧数据不会自动删除，`.trash` 回收站不随迁移复制；Markdown 笔记只是导出视图，JSON 才是数据源头；
 - 写入为「临时文件 + 原子重命名」，不会出现写一半的半截文件；
 - 覆盖前滚动备份（每 10 分钟最多一份，默认保留 10 份，可设置）；
 - 主文件损坏时自动从最新备份恢复，损坏文件留档为 `*.corrupt-*`；

@@ -478,6 +478,19 @@ export class ReaderView extends ItemView {
 		this.fullTextSearchStatus?.setText('输入关键词后按 Enter 搜索全文')
 	}
 
+	/** 从命令面板/书架直接发起本书全文搜索，复用侧栏的全文搜索 */
+	searchFullText(query: string): void {
+		const q = query.trim()
+		if (!q) return
+		if (!this.foliate) {
+			new Notice('Grove Reader：书籍还在加载，请稍后再试')
+			return
+		}
+		this.fullTextSearchEl.open = true
+		this.fullTextSearchInput.value = q
+		void this.#runFullTextSearch()
+	}
+
 	async #runFullTextSearch(): Promise<void> {
 		const query = this.fullTextSearchInput.value.trim()
 		const foliate = this.foliate

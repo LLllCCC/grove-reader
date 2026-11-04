@@ -318,7 +318,7 @@ export class GroveSettingTab extends PluginSettingTab {
 		containerEl.createEl('h3', { text: '数据安全' })
 		new Setting(containerEl)
 			.setName('数据文件夹')
-			.setDesc('批注 JSON、封面、书单、阅读统计的存放位置（库内相对路径）。留空 = 插件目录下的 data/。修改后需把原 data/ 内容复制到新位置并重启 Obsidian')
+			.setDesc('批注 JSON、封面、书单、阅读统计的存放位置（库内相对路径）。留空 = 插件目录下的 data/。直接改路径不会搬数据；请用右侧「迁移数据…」复制后重启')
 			.addText(text =>
 				text
 					.setPlaceholder('例如：Grove Reader')
@@ -333,6 +333,8 @@ export class GroveSettingTab extends PluginSettingTab {
 						this.plugin.settings.dataFolder = value
 						await this.plugin.saveSettings()
 					}))
+			.addButton(button =>
+				button.setButtonText('迁移数据…').onClick(() => this.plugin.promptMigrateDataFolder()))
 		new Setting(containerEl)
 			.setName('库内备份文件夹')
 			.setDesc('「立即备份」写入的库内文件夹（相对路径，可含子目录，如「00-Obsidian插件/插件运行时产生的文件/Grove Reader/数据备份」）。修改后光标离开输入框时，旧文件夹里的备份自动转移到新路径')

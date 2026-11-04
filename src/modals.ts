@@ -1096,3 +1096,48 @@ export class TemplateEditModal extends Modal {
 		this.contentEl.empty()
 	}
 }
+
+export class PromptModal extends Modal {
+	constructor(
+		app: App,
+		private titleText: string,
+		private placeholder: string,
+		private onSubmit: (value: string) => void,
+	) {
+		super(app)
+	}
+
+	onOpen(): void {
+		this.contentEl.empty()
+		this.contentEl.createEl('h3', { text: this.titleText })
+		const input = this.contentEl.createEl('input', {
+			cls: 'grove-folder-input',
+			attr: { type: 'text', placeholder: this.placeholder },
+		})
+		const submit = (): void => {
+			const value = input.value.trim()
+			if (!value) {
+				new Notice('请输入关键词')
+				return
+			}
+			this.onSubmit(value)
+			this.close()
+		}
+		input.addEventListener('keydown', e => {
+			if (e.key === 'Enter') {
+				e.preventDefault()
+				submit()
+			}
+		})
+		const buttons = this.contentEl.createDiv('modal-button-container')
+		const cancel = buttons.createEl('button', { text: '取消' })
+		cancel.addEventListener('click', () => this.close())
+		const ok = buttons.createEl('button', { text: '搜索', cls: 'mod-cta' })
+		ok.addEventListener('click', submit)
+		window.setTimeout(() => input.focus(), 50)
+	}
+
+	onClose(): void {
+		this.contentEl.empty()
+	}
+}
