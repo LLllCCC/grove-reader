@@ -811,12 +811,14 @@ export class BookshelfView extends ItemView {
 		input.click()
 	}
 
-	/** 删除书籍：可选择是否连原文件一起移到回收站 */
+	/** 删除书籍：可选择是否连原文件、生成的阅读笔记一起删除 */
 	async #deleteBook(path: string): Promise<void> {
 		const title = this.#displayTitle(path)
 		const data = this.plugin.store.load(path)
 		const count = data.annotations?.length ?? 0
-		new DeleteBookModal(this.app, title, count, async deleteFile => {
+		const notePath = data.notePath && fs.existsSync(this.#absPath(data.notePath)) ? data.notePath : undefined
+		const noteName = notePath ? basenameOf(notePath) : undefined
+		new DeleteBookModal(this.app, title, count, noteName, async (deleteFile, deleteNote) => {
 			if (deleteFile) {
 				const file = this.app.vault.getAbstractFileByPath(path)
 				if (file instanceof TFile) await this.app.fileManager.trashFile(file)
@@ -825,6 +827,10 @@ export class BookshelfView extends ItemView {
 			const closed = this.plugin.closeBookViews(path)
 			// 关闭阅读视图时可能触发一次 onClose 写盘，等它落完再删数据
 			if (closed) await new Promise(resolve => window.setTimeout(resolve, 300))
+			if (deleteNote && notePath) {
+				const noteFile = this.app.vault.getAbstractFileByPath(notePath)
+				if (noteFile instanceof TFile) await this.app.fileManager.trashFile(noteFile)
+			}
 			if (deleteFile) {
 				this.plugin.store.delete(path)
 				this.plugin.stats.remove(path)
@@ -833,12 +839,19 @@ export class BookshelfView extends ItemView {
 				const hidden = this.plugin.settings.hiddenBooks ?? []
 				this.plugin.settings.hiddenBooks = hidden.filter(p => p !== path)
 				await this.plugin.saveSettings()
+				this.plugin.oplog.add('删除书籍', `《${title}》；原文件已删除；阅读笔记${deleteNote ? '已删除' : '保留'}`)
 				new Notice(`已删除《${title}》及其阅读数据`)
 			} else {
 				const hidden = this.plugin.settings.hiddenBooks ?? []
 				if (!hidden.includes(path)) hidden.push(path)
 				this.plugin.settings.hiddenBooks = hidden
+				if (deleteNote && notePath) {
+					const fresh = this.plugin.store.load(path)
+					fresh.notePath = undefined
+					this.plugin.store.save(fresh)
+				}
 				await this.plugin.saveSettings()
+				this.plugin.oplog.add('删除书籍', `《${title}》；仅移出书架；阅读笔记${deleteNote ? '已删除' : '保留'}`)
 				new Notice('已从书架移除，原文件与批注数据都保留')
 			}
 			await this.refresh({ rescan: true })

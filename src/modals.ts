@@ -231,7 +231,8 @@ export class DeleteBookModal extends Modal {
 		app: App,
 		private bookTitle: string,
 		private annotationCount: number,
-		private onConfirm: (deleteFile: boolean) => Promise<void> | void,
+		private noteName: string | undefined,
+		private onConfirm: (deleteFile: boolean, deleteNote: boolean) => Promise<void> | void,
 	) {
 		super(app)
 	}
@@ -242,16 +243,26 @@ export class DeleteBookModal extends Modal {
 		this.contentEl.createEl('p', { text: `《${this.bookTitle}》` })
 		this.contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: `将删除这本书的阅读数据：${this.annotationCount} 条批注、阅读位置、书单归属。生成的 Markdown 笔记不会被删除。`,
+			text: `将删除这本书的阅读数据：${this.annotationCount} 条批注、阅读位置、书单归属。生成的 Markdown 笔记是否一起删除，可在下方选择。`,
 		})
 		const row = this.contentEl.createDiv('grove-delete-check')
 		const checkbox = row.createEl('input', { type: 'checkbox' })
 		checkbox.id = 'grove-delete-file'
 		const label = row.createEl('label', { text: '同时删除库里的原文件（按 Obsidian 的删除设置处理）' })
 		label.setAttr('for', 'grove-delete-file')
+
+		const noteRow = this.contentEl.createDiv('grove-delete-check')
+		const noteBox = noteRow.createEl('input', { type: 'checkbox' })
+		noteBox.id = 'grove-delete-note'
+		noteBox.disabled = !this.noteName
+		const noteLabel = noteRow.createEl('label', {
+			text: this.noteName ? `同时删除生成的阅读笔记（${this.noteName}）` : '这本书还没有生成阅读笔记',
+		})
+		noteLabel.setAttr('for', 'grove-delete-note')
+
 		const hint = this.contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: '不勾选时只从书架移除：原文件和批注数据都会保留，之后可以在设置里恢复。',
+			text: '不勾选删除原文件时只从书架移除：原文件和批注数据都会保留，之后可以在设置里恢复。只删笔记不会删批注数据，之后仍可重新生成。',
 		})
 		hint.addClass('grove-delete-hint')
 
@@ -264,7 +275,7 @@ export class DeleteBookModal extends Modal {
 				ok.disabled = true
 				ok.setText('删除中…')
 				try {
-					await this.onConfirm(checkbox.checked)
+					await this.onConfirm(checkbox.checked, noteBox.checked && !!this.noteName)
 					this.close()
 				} catch (e) {
 					ok.disabled = false

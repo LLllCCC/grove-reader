@@ -22,13 +22,14 @@ import {
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
 import { PdfView, VIEW_TYPE_GROVE_PDF } from './pdfView'
-import { BookPickerModal, DangerConfirmModal, ReadingStatsModal } from './modals'
+import { BookPickerModal, DangerConfirmModal, OpLogModal, ReadingStatsModal } from './modals'
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
 import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
 import { isReaderExt, isShelfExt } from './types'
 import { usageDocMarkdown, USAGE_DOC_NAME } from './usageDoc'
 import { LOGO_OPTIONS, logoById } from './logos'
+import { OpLog } from './oplog'
 
 export default class GroveReaderPlugin extends Plugin {
 	settings: GroveSettings = { ...DEFAULT_SETTINGS, appearance: { ...DEFAULT_APPEARANCE } }
@@ -36,6 +37,7 @@ export default class GroveReaderPlugin extends Plugin {
 	shelfCache!: ShelfCache
 	lists!: ListsStore
 	stats!: StatsStore
+	oplog!: OpLog
 	vaultBase = ''
 	/** 插件安装目录（data.json 在这里，不随数据目录迁移） */
 	pluginDir = ''
@@ -62,10 +64,13 @@ export default class GroveReaderPlugin extends Plugin {
 		this.dataRoot = dataFolder
 			? (this.vaultBase ? pathModule.join(this.vaultBase, normalizePath(dataFolder)) : normalizePath(dataFolder))
 			: this.pluginDir
+		this.oplog = new OpLog(this.dataRoot)
+		this.oplog.load()
 		this.store = new BookStore(this.dataRoot, this.settings.maxBackups)
 		let lastSaveErrorAt = 0
 		this.store.onError = e => {
 			console.error('[Grove Reader] 批注数据保存失败', e)
+			this.oplog?.add('批注保存失败', e instanceof Error ? e.message : String(e))
 			const now = Date.now()
 			if (now - lastSaveErrorAt > 30_000) {
 				lastSaveErrorAt = now
@@ -103,6 +108,7 @@ export default class GroveReaderPlugin extends Plugin {
 	onunload(): void {
 		// 各视图的 onClose 会负责落盘与销毁渲染器
 		this.stats?.saveNow()
+		this.oplog?.saveNow()
 	}
 
 	/** 当前应使用的图标 id（original 或无效值时回退到 Obsidian 原生 library） */
@@ -287,6 +293,7 @@ export default class GroveReaderPlugin extends Plugin {
 		this.settings.hiddenBooks = []
 		await this.saveSettings()
 		this.refreshShelfViews()
+		this.oplog.add('恢复隐藏书籍', `${count} 本`)
 		new Notice(`${APP_NAME}：已恢复 ${count} 本`)
 	}
 
@@ -313,6 +320,7 @@ export default class GroveReaderPlugin extends Plugin {
 					this.store.save(fresh)
 					this.refreshNoteForBook(bookPath)
 					this.refreshShelfViews()
+					this.oplog.add('清空批注', `《${title}》；${count} 条`)
 					new Notice(`已清空 ${count} 条批注`)
 				}
 				if (closed) window.setTimeout(finish, 300)
@@ -586,6 +594,11 @@ export default class GroveReaderPlugin extends Plugin {
 					if (view instanceof BookshelfView) void view.refresh({ rescan: true })
 				}
 			},
+		})
+		this.addCommand({
+			id: 'view-oplog',
+			name: '查看操作记录',
+			callback: () => new OpLogModal(this.app, this.oplog.list()).open(),
 		})
 		this.addCommand({
 			id: 'restore-hidden-books',
@@ -973,6 +986,7 @@ export default class GroveReaderPlugin extends Plugin {
 					extra = `（额外位置 ${target} 复制失败，库内备份已完成；请检查路径/磁盘是否可用）`
 				}
 			}
+			this.oplog?.add('备份数据', `${bookCount} 本书；库内「${rel}」`)
 			new Notice(`Grove Reader：已备份 ${bookCount} 本书的批注数据到库内「${rel}」${extra}`)
 		} catch (e) {
 			console.error('[Grove Reader] 备份批注数据失败', e)
