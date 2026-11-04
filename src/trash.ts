@@ -173,8 +173,9 @@ export class TrashStore {
 			}
 			if (entry.files.cover && coverTarget) {
 				if (fs.existsSync(coverTarget)) {
-					// 已有同名封面时以现有为准，不覆盖
+					// 已有同名封面时以现有为准，不覆盖；书架仍指向这个名字
 					fs.rmSync(pathModule.join(dir, entry.files.cover), { force: true })
+					coverRestored = true
 				} else {
 					moveFile(pathModule.join(dir, entry.files.cover), coverTarget)
 					moved.push([pathModule.join(dir, entry.files.cover), coverTarget])
