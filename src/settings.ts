@@ -184,7 +184,7 @@ export class GroveSettingTab extends PluginSettingTab {
 			.addButton(button =>
 				button.setButtonText('生成 / 打开').onClick(() => void this.plugin.openUsageDoc()))
 			.addButton(button =>
-				button.setButtonText('重新生成').onClick(() => void this.plugin.regenerateUsageDoc()))
+				button.setButtonText('重新生成').onClick(() => this.plugin.confirmRegenerateUsageDoc()))
 
 		// —— 数据安全 ——
 		containerEl.createEl('h3', { text: '数据安全' })
@@ -195,8 +195,14 @@ export class GroveSettingTab extends PluginSettingTab {
 				text
 					.setPlaceholder('例如：Grove Reader')
 					.setValue(this.plugin.settings.dataFolder ?? '')
-					.onChange(async value => {
-						this.plugin.settings.dataFolder = value.trim().replace(/[\\/]+$/, '')
+					.onChange(async raw => {
+						const value = raw.trim().replace(/[\\/]+$/, '')
+						if (value && (isAbsolutePath(value) || value.split(/[\\/]/).includes('..'))) {
+							new Notice('请填写库内相对路径（例如 Grove Reader），不要填盘符或 ..')
+							text.setValue(this.plugin.settings.dataFolder ?? '')
+							return
+						}
+						this.plugin.settings.dataFolder = value
 						await this.plugin.saveSettings()
 					}))
 		new Setting(containerEl)

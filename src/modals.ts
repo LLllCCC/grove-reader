@@ -261,9 +261,17 @@ export class DeleteBookModal extends Modal {
 		})
 		noteLabel.setAttr('for', 'grove-delete-note')
 
+		// 选项联动：删笔记必然要删原文件；取消删原文件时，笔记选项一并取消
+		checkbox.addEventListener('change', () => {
+			if (!checkbox.checked) noteBox.checked = false
+		})
+		noteBox.addEventListener('change', () => {
+			if (noteBox.checked) checkbox.checked = true
+		})
+
 		const hint = this.contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: '不勾选删除原文件时只从书架移除：原文件和批注数据都会保留，之后可以在设置里恢复。只删笔记不会删批注数据，之后仍可重新生成。',
+			text: '勾选删除阅读笔记会自动勾选删除原文件；取消删除原文件会同时取消笔记。只移出书架时，文件、批注、笔记都会保留，可在设置里恢复。',
 		})
 		hint.addClass('grove-delete-hint')
 

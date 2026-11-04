@@ -36,6 +36,9 @@ export class OpLog {
 	}
 
 	add(action: string, detail: string): void {
+		const last = this.entries[this.entries.length - 1]
+		// 同一个错误在 5 分钟内反复出现时只记一条，避免刷掉有用的记录
+		if (last && last.action === action && last.detail === detail && Date.now() - last.at < 5 * 60_000) return
 		this.entries.push({ at: Date.now(), action, detail })
 		if (this.entries.length > MAX_ENTRIES) {
 			this.entries.splice(0, this.entries.length - MAX_ENTRIES)

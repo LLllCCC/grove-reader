@@ -6,6 +6,9 @@ export const APP_NAME = 'Grove Reader'
 /** 本库把书籍/笔记/数据统一放在这个根目录下（库内相对路径） */
 export const LIBRARY_ROOT = 'Grove Reader'
 
+/** 迁移前的旧目录名：仅用于启动时识别被旧实例写回的设置 */
+export const LEGACY_LIBRARY_ROOT = '林间书屋'
+
 /** 库内备份文件夹名（「备份批注数据到库内」命令生成） */
 export const BACKUP_FOLDER_NAME = 'Grove Reader 数据备份'
 

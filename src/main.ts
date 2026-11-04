@@ -12,6 +12,7 @@ import {
 	DEFAULT_SETTINGS,
 	DEFAULT_SHELF_DISPLAY,
 	LIBRARY_ROOT,
+	LEGACY_LIBRARY_ROOT,
 	BookData,
 	GroveSettings,
 	HIGHLIGHT_COLORS,
@@ -22,7 +23,7 @@ import {
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
 import { PdfView, VIEW_TYPE_GROVE_PDF } from './pdfView'
-import { BookPickerModal, DangerConfirmModal, OpLogModal, ReadingStatsModal } from './modals'
+import { BookPickerModal, ConfirmModal, DangerConfirmModal, OpLogModal, ReadingStatsModal } from './modals'
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
 import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
@@ -166,10 +167,12 @@ export default class GroveReaderPlugin extends Plugin {
 				return false
 			}
 		})()
-		// 旧目录可能被旧实例重建出 shelf.json（但没有 books/*.json），此时以有批注数据的目录为准
+		// 旧目录可能被旧实例重建出 shelf.json（但没有 books/*.json），此时以有批注数据的目录为准；
+		// 但用户主动设置的其他自定义目录要尊重，只有空值或旧目录名才自动纠正
 		const canonicalHasData = hasBookJson(root)
 		const configuredHasData = configuredData ? hasBookJson(pathModule.join(this.vaultBase, configuredData)) : false
-		if (dataOk && (!configuredDataOk || (canonicalHasData && !configuredHasData))) {
+		const configuredIsLegacy = !configuredData || configuredData === LEGACY_LIBRARY_ROOT || configuredData === LIBRARY_ROOT
+		if (dataOk && (!configuredDataOk || (configuredIsLegacy && canonicalHasData && !configuredHasData))) {
 			this.settings.dataFolder = LIBRARY_ROOT
 			changed = true
 		}
@@ -273,9 +276,16 @@ export default class GroveReaderPlugin extends Plugin {
 		})()
 	}
 
+	/** 这本书是否有打开着的阅读/PDF 视图 */
+	hasOpenBookView(bookPath: string): boolean {
+		return this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_READER)
+			.some(leaf => leaf.view instanceof ReaderView && leaf.view.bookPath === bookPath)
+			|| this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_PDF)
+				.some(leaf => leaf.view instanceof PdfView && leaf.view.bookPath === bookPath)
+	}
+
 	/** 删除书籍前关掉仍打开着它的阅读视图，避免继续写回数据；返回关闭的视图数 */
-	closeBookViews(bookPath: string): number {
-		let closed = 0
+	closeBookViews(bookPath: string): number {		let closed = 0
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_READER)) {
 			const view = leaf.view
 			if (view instanceof ReaderView && view.bookPath === bookPath) {
@@ -316,10 +326,11 @@ export default class GroveReaderPlugin extends Plugin {
 			return
 		}
 		const title = data.title || bookPath.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || '这本书'
+		const openHint = this.hasOpenBookView(bookPath) ? ' 当前有打开的阅读窗口，清空后会自动关闭它。' : ''
 		new DangerConfirmModal(
 			this.app,
 			'清空本书批注',
-			`将删除《${title}》的 ${count} 条批注与评论；阅读位置会保留。`,
+			`将删除《${title}》的 ${count} 条批注与评论；阅读位置会保留。${openHint}`,
 			'清空',
 			() => {
 				const closed = this.closeBookViews(bookPath)
@@ -355,6 +366,11 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	async openBookByPath(bookPath: string, cfi?: string): Promise<void> {
+		const absPath = isAbsolutePath(bookPath) ? bookPath : pathModule.join(this.vaultBase, bookPath)
+		if (!fs.existsSync(absPath)) {
+			new Notice(`${APP_NAME}：文件不存在或已被移动：${bookPath}`)
+			return
+		}
 		const ext = (bookPath.split('.').pop() ?? '').toLowerCase()
 		if (ext === 'pdf') {
 			await this.#openPdfBook(bookPath, cfi)
@@ -618,7 +634,7 @@ export default class GroveReaderPlugin extends Plugin {
 		this.addCommand({
 			id: 'regenerate-usage-doc',
 			name: '重新生成使用指南',
-			callback: () => void this.regenerateUsageDoc(),
+			callback: () => this.confirmRegenerateUsageDoc(),
 		})
 		this.addCommand({
 			id: 'backup-data',
@@ -862,6 +878,13 @@ export default class GroveReaderPlugin extends Plugin {
 		if (f instanceof TFile) await this.app.workspace.getLeaf('tab').openFile(f)
 	}
 
+	/** 覆盖前确认：使用指南可能被用户改过 */
+	confirmRegenerateUsageDoc(): void {
+		new ConfirmModal(this.app, '重新生成会覆盖当前使用指南，包括你在里面手写的内容。继续？', () => {
+			void this.regenerateUsageDoc()
+		}).open()
+	}
+
 	/** 用当前版本的内容覆盖已生成的使用指南（用户可在设置里手动触发） */
 	async regenerateUsageDoc(): Promise<void> {
 		const folder = normalizePath(this.settings.notesFolder?.trim() || '阅读笔记')
@@ -912,7 +935,7 @@ export default class GroveReaderPlugin extends Plugin {
 				} catch {
 					legacy = false
 				}
-				const clash = entries.some(n => ['books', 'covers', 'shelf.json', 'lists.json', 'data.json'].includes(n))
+				const clash = entries.some(n => ['books', 'covers', 'shelf.json', 'lists.json', 'data.json', 'oplog.json'].includes(n))
 				if (clash && !legacy) {
 					new Notice(`Grove Reader：目标文件夹「${rel}」里已有同名文件，为避免误删已中止。请换一个空文件夹，或清空后重试`)
 					return
@@ -936,7 +959,7 @@ export default class GroveReaderPlugin extends Plugin {
 			}
 			await prune(pathModule.join(root, 'books'), name => name.endsWith('.json'))
 			await prune(pathModule.join(root, 'covers'), () => true)
-			for (const name of ['shelf.json', 'lists.json', 'data.json']) {
+			for (const name of ['shelf.json', 'lists.json', 'data.json', 'oplog.json']) {
 				await fsp.rm(pathModule.join(root, name), { force: true }).catch(() => { })
 			}
 
