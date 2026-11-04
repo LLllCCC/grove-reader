@@ -23,7 +23,7 @@ import {
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
 import { PdfView, VIEW_TYPE_GROVE_PDF } from './pdfView'
-import { BookPickerModal, ConfirmModal, DangerConfirmModal, HealthReportModal, OpLogModal, ReadingStatsModal, TrashModal } from './modals'
+import { BookPickerModal, ConfirmModal, DangerConfirmModal, HealthReportModal, OpLogModal, ReadingStatsModal, SearchModal, TrashModal } from './modals'
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
 import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
@@ -34,6 +34,8 @@ import { OpLog } from './oplog'
 import { DebugLog } from './debugLog'
 import { buildHealthReport, healthCleanupCount, HealthReport } from './health'
 import { TrashStore } from './trash'
+import { buildSearchIndex, exportCsv, exportMarkdown } from './search'
+import type { SearchDoc } from './search'
 import { shell } from 'electron'
 
 export default class GroveReaderPlugin extends Plugin {
@@ -284,6 +286,52 @@ export default class GroveReaderPlugin extends Plugin {
 
 	showTrash(): void {
 		new TrashModal(this.app, this).open()
+	}
+
+	loadSearchIndex(): SearchDoc[] {
+		return buildSearchIndex(this.dataRoot, this.vaultBase)
+	}
+
+	showSearch(): void {
+		new SearchModal(this.app, this).open()
+	}
+
+	async exportSearchResults(docs: SearchDoc[], query: string, format: 'md' | 'csv'): Promise<void> {
+		if (!docs.length) {
+			new Notice(`${APP_NAME}：没有可导出的结果`)
+			return
+		}
+		const baseFolder = (this.settings.notesFolder?.trim() || '阅读笔记').replace(/\\/g, '/').replace(/\/+$/, '')
+		const folder = `${baseFolder}/批注检索`
+		try {
+			fs.mkdirSync(pathModule.join(this.vaultBase, folder), { recursive: true })
+		} catch {
+			// 写文件时会再报错
+		}
+		const now = new Date()
+		const p = (n: number): string => String(n).padStart(2, '0')
+		const base = `批注检索-${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`
+		const ext = format === 'md' ? 'md' : 'csv'
+		let target = `${folder}/${base}.${ext}`
+		let i = 2
+		while (this.app.vault.getAbstractFileByPath(target) || fs.existsSync(pathModule.join(this.vaultBase, target))) {
+			target = `${folder}/${base}-${i}.${ext}`
+			i++
+		}
+		const content = format === 'md' ? exportMarkdown(docs, query) : exportCsv(docs)
+		try {
+			await this.app.vault.create(target, content)
+		} catch {
+			try {
+				fs.writeFileSync(pathModule.join(this.vaultBase, target), content, 'utf-8')
+			} catch (e) {
+				new Notice(`${APP_NAME}：导出失败（${e instanceof Error ? e.message : String(e)}）`)
+				return
+			}
+		}
+		this.oplog.add('导出批注检索', `${docs.length} 条 → ${target}`)
+		this.debug('search', 'export', { count: docs.length, target, format })
+		new Notice(`${APP_NAME}：已导出 ${docs.length} 条到 ${target}`)
 	}
 
 	/**
@@ -785,6 +833,11 @@ export default class GroveReaderPlugin extends Plugin {
 			id: 'view-oplog',
 			name: '查看操作记录',
 			callback: () => new OpLogModal(this.app, this.oplog.list()).open(),
+		})
+		this.addCommand({
+			id: 'search-annotations',
+			name: '全局搜索批注',
+			callback: () => this.showSearch(),
 		})
 		this.addCommand({
 			id: 'open-trash',

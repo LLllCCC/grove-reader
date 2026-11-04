@@ -1,5 +1,7 @@
 import { App, AbstractInputSuggest, FuzzySuggestModal, Modal, Notice, TFile, TFolder } from 'obsidian'
-import { isShelfExt } from './types'
+import { colorName, isShelfExt } from './types'
+import { colorDot, normalizeTerms, searchDocs } from './search'
+import type { SearchDoc } from './search'
 import type { BookList } from './lists'
 import { todayKey } from './stats'
 import type GroveReaderPlugin from './main'
@@ -757,4 +759,194 @@ function formatSize(bytes: number): string {
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
 	if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 	return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+export class SearchModal extends Modal {
+	private docs: SearchDoc[] = []
+	private results: SearchDoc[] = []
+	private query = ''
+	private onlyNotes = false
+	private limit = 80
+	private timer: number | null = null
+	private inputEl!: HTMLInputElement
+	private resultsEl!: HTMLElement
+	private countEl!: HTMLElement
+	private exportMdBtn!: HTMLButtonElement
+	private exportCsvBtn!: HTMLButtonElement
+	private exporting = false
+
+	constructor(app: App, private plugin: GroveReaderPlugin) {
+		super(app)
+	}
+
+	onOpen(): void {
+		this.modalEl.addClass('grove-search-modal')
+		this.docs = this.plugin.loadSearchIndex()
+		this.renderShell()
+		this.runSearch()
+	}
+
+	private renderShell(): void {
+		const { contentEl } = this
+		contentEl.empty()
+		contentEl.createEl('h3', { text: '全局批注检索' })
+		this.inputEl = contentEl.createEl('input', {
+			type: 'search',
+			cls: 'grove-search-input',
+			attr: { placeholder: '搜索划线、评论、章节或书名…' },
+		})
+		this.inputEl.addEventListener('input', () => {
+			if (this.timer) window.clearTimeout(this.timer)
+			this.timer = window.setTimeout(() => {
+				this.timer = null
+				this.query = this.inputEl.value
+				this.limit = 80
+				this.runSearch()
+			}, 120)
+		})
+		this.inputEl.addEventListener('keydown', e => {
+			if (e.key === 'Enter' && this.results[0]?.bookExists) {
+				e.preventDefault()
+				this.openHit(this.results[0])
+			}
+		})
+
+		const bar = contentEl.createDiv('grove-search-bar')
+		this.countEl = bar.createSpan('grove-search-count')
+		const only = bar.createEl('label', { cls: 'grove-search-only' })
+		const onlyBox = only.createEl('input', { type: 'checkbox' })
+		only.createSpan({ text: '只看有评论的' })
+		onlyBox.addEventListener('change', () => {
+			this.onlyNotes = onlyBox.checked
+			this.limit = 80
+			this.runSearch()
+		})
+		const rebuild = bar.createEl('button', { text: '重新索引' })
+		rebuild.addEventListener('click', () => {
+			this.docs = this.plugin.loadSearchIndex()
+			this.runSearch()
+			new Notice(`已重新索引 ${this.docs.length} 条批注`)
+		})
+
+		this.resultsEl = contentEl.createDiv('grove-search-results')
+		const footer = contentEl.createDiv('modal-button-container')
+		this.exportMdBtn = footer.createEl('button', { text: '导出 Markdown' })
+		this.exportMdBtn.addEventListener('click', () => void this.doExport('md'))
+		this.exportCsvBtn = footer.createEl('button', { text: '导出 CSV' })
+		this.exportCsvBtn.addEventListener('click', () => void this.doExport('csv'))
+		const close = footer.createEl('button', { text: '关闭', cls: 'mod-cta' })
+		close.addEventListener('click', () => this.close())
+	}
+
+	private async doExport(format: 'md' | 'csv'): Promise<void> {
+		if (this.exporting) return
+		this.exporting = true
+		this.exportMdBtn.disabled = true
+		this.exportCsvBtn.disabled = true
+		try {
+			await this.plugin.exportSearchResults(this.results, this.query, format)
+		} catch (e) {
+			new Notice(`导出失败：${e instanceof Error ? e.message : String(e)}`)
+		} finally {
+			this.exporting = false
+			const disabled = this.results.length === 0
+			this.exportMdBtn.disabled = disabled
+			this.exportCsvBtn.disabled = disabled
+		}
+	}
+
+	private runSearch(): void {
+		this.query = this.inputEl.value
+		this.results = this.query.trim() ? searchDocs(this.docs, this.query, { onlyNotes: this.onlyNotes }) : []
+		if (!this.query.trim()) {
+			this.countEl.setText(`共 ${this.docs.length} 条批注`)
+		} else {
+			this.countEl.setText(`${this.results.length} 条结果 / 共 ${this.docs.length} 条`)
+		}
+		const disabled = this.results.length === 0
+		this.exportMdBtn.disabled = disabled
+		this.exportCsvBtn.disabled = disabled
+		this.renderResults()
+	}
+
+	private renderResults(): void {
+		const { resultsEl } = this
+		resultsEl.empty()
+		if (!this.query.trim()) {
+			resultsEl.createDiv({ cls: 'grove-search-empty', text: '输入关键词，搜索所有书的划线与评论。空格分隔多个词时按 AND 匹配。' })
+			return
+		}
+		if (!this.results.length) {
+			resultsEl.createDiv({ cls: 'grove-search-empty', text: '没有匹配的批注。试试减少关键词，或取消「只看有评论的」。' })
+			return
+		}
+		const terms = normalizeTerms(this.query)
+		for (const doc of this.results.slice(0, this.limit)) {
+			const hit = resultsEl.createDiv('grove-search-hit')
+			if (!doc.bookExists) hit.addClass('is-missing')
+			const head = hit.createDiv('grove-search-hit-head')
+			head.createSpan({ cls: 'grove-search-dot' }).style.background = colorDot(doc.annotation.color)
+			head.createSpan({ cls: 'grove-search-book', text: doc.bookTitle })
+			const meta = [doc.annotation.chapter, doc.annotation.cfi.startsWith('page:') ? `第 ${doc.annotation.cfi.slice(5)} 页` : '', colorName(doc.annotation.color)]
+				.filter(Boolean)
+				.join(' · ')
+			if (meta) head.createSpan({ cls: 'grove-search-meta', text: meta })
+			if (!doc.bookExists) head.createSpan({ cls: 'grove-search-missing', text: '原文件缺失' })
+			const quote = hit.createDiv('grove-search-quote')
+			this.appendHighlighted(quote, doc.annotation.text, terms)
+			if (doc.annotation.note?.trim()) {
+				const note = hit.createDiv('grove-search-note')
+				this.appendHighlighted(note, doc.annotation.note, terms)
+			}
+			if (doc.bookExists) {
+				hit.tabIndex = 0
+				hit.setAttr('role', 'button')
+				hit.addEventListener('click', () => this.openHit(doc))
+				hit.addEventListener('keydown', e => {
+					if (e.key === 'Enter' || e.key === ' ') {
+						e.preventDefault()
+						this.openHit(doc)
+					}
+				})
+			}
+		}
+		if (this.results.length > this.limit) {
+			const more = resultsEl.createEl('button', { cls: 'grove-search-more', text: `显示更多（还有 ${this.results.length - this.limit} 条）` })
+			more.addEventListener('click', () => {
+				this.limit += 80
+				this.renderResults()
+			})
+		}
+	}
+
+	private appendHighlighted(el: HTMLElement, text: string, terms: string[]): void {
+		if (!terms.length) {
+			el.setText(text)
+			return
+		}
+		const re = new RegExp(`(${terms.map(escapeRegExp).join('|')})`, 'gi')
+		let last = 0
+		for (const match of text.matchAll(re)) {
+			const index = match.index ?? 0
+			if (index > last) el.createSpan({ text: text.slice(last, index) })
+			el.createEl('mark', { cls: 'grove-search-mark', text: match[0] })
+			last = index + match[0].length
+		}
+		if (last < text.length) el.createSpan({ text: text.slice(last) })
+	}
+
+	private openHit(doc: SearchDoc): void {
+		if (!doc.bookExists) return
+		this.close()
+		void this.plugin.openBookByPath(doc.bookPath, doc.annotation.cfi)
+	}
+
+	onClose(): void {
+		if (this.timer) window.clearTimeout(this.timer)
+		this.contentEl.empty()
+	}
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }

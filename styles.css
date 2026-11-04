@@ -1702,3 +1702,118 @@
 	width: 100%;
 	height: 100%;
 }
+
+/* ---------- 全局批注检索 ---------- */
+
+.grove-search-modal {
+	width: min(820px, 94vw);
+}
+
+.grove-search-input {
+	width: 100%;
+	margin: 6px 0 8px;
+}
+
+.grove-search-bar {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	flex-wrap: wrap;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.grove-search-count {
+	margin-right: auto;
+}
+
+.grove-search-only {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.grove-search-results {
+	max-height: 52vh;
+	overflow-y: auto;
+	margin: 8px 0;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.grove-search-hit {
+	padding: 10px 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+.grove-search-hit:hover {
+	background: var(--background-modifier-hover);
+}
+
+.grove-search-hit.is-missing {
+	opacity: 0.65;
+	cursor: default;
+}
+
+.grove-search-hit-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.grove-search-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	flex: none;
+}
+
+.grove-search-book {
+	font-weight: 600;
+	font-size: var(--font-ui-small);
+}
+
+.grove-search-meta,
+.grove-search-missing {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.grove-search-missing {
+	color: var(--text-error);
+}
+
+.grove-search-quote {
+	margin: 6px 0 2px;
+	padding-left: 10px;
+	border-left: 2px solid var(--background-modifier-border);
+	white-space: pre-wrap;
+	font-size: var(--font-ui-small);
+}
+
+.grove-search-note {
+	margin-top: 4px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	white-space: pre-wrap;
+}
+
+.grove-search-mark {
+	background: var(--text-highlight-bg);
+	color: inherit;
+	padding: 0 1px;
+	border-radius: 2px;
+}
+
+.grove-search-empty {
+	padding: 28px 12px;
+	text-align: center;
+	color: var(--text-muted);
+}
+
+.grove-search-more {
+	display: block;
+	margin: 10px auto;
+}

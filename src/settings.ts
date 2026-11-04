@@ -271,6 +271,14 @@ export class GroveSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings()
 					}))
 
+		// —— 检索与导出 ——
+		containerEl.createEl('h3', { text: '检索与导出' })
+		new Setting(containerEl)
+			.setName('全局批注检索')
+			.setDesc('跨书搜索划线与评论；结果可跳回原文，导出 Markdown / CSV 到笔记文件夹')
+			.addButton(button =>
+				button.setButtonText('搜索').setCta().onClick(() => this.plugin.showSearch()))
+
 		// —— 回收站 ——
 		containerEl.createEl('h3', { text: '回收站' })
 		const trashCount = this.plugin.trash.list().length
