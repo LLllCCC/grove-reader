@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { BookData, DATA_VERSION } from './types'
-import { basenameOf, bookIdFor, stripNumericTitlePrefix } from './util'
+import { basenameOf, bookIdFor, cleanBookTitle, stripNumericTitlePrefix } from './util'
 
 const BACKUP_INTERVAL_MS = 10 * 60 * 1000
 
@@ -160,8 +160,8 @@ export class BookStore {
 		}
 		if (typeof data.version !== 'number') data.version = DATA_VERSION
 		if (typeof data.title !== 'string') data.title = ''
-		// 与书架一致：洗掉下载站数字 ID 前缀（笔记标题取 data.title）
-		if (data.title) data.title = stripNumericTitlePrefix(data.title)
+		// 与书架一致：洗掉下载站前缀/截图后缀/OCR 标记（笔记标题取 data.title）
+		if (data.title) data.title = cleanBookTitle(stripNumericTitlePrefix(data.title))
 		if (typeof data.author !== 'string') data.author = ''
 	}
 

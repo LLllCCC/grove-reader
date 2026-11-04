@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import pathModule from 'node:path'
 import { Annotation, HIGHLIGHT_COLORS, colorName } from './types'
-import { bookIdFor, isAbsolutePath } from './util'
+import { bookIdFor, cleanBookTitle, isAbsolutePath } from './util'
 
 export interface SearchDoc {
 	bookPath: string
@@ -43,8 +43,8 @@ export function buildSearchIndex(dataRoot: string, vaultBase: string): SearchDoc
 		const bookPath = typeof data.bookPath === 'string' ? data.bookPath : ''
 		const abs = bookPath ? (isAbsolutePath(bookPath) ? bookPath : pathModule.join(vaultBase, bookPath)) : ''
 		const bookExists = !!abs && fs.existsSync(abs)
-		const bookTitle = (typeof data.title === 'string' && data.title.trim())
-			|| (bookPath ? pathModule.basename(bookPath).replace(/\.[^.]+$/, '') : '未命名')
+		const bookTitle = cleanBookTitle((typeof data.title === 'string' && data.title.trim())
+			|| (bookPath ? pathModule.basename(bookPath).replace(/\.[^.]+$/, '') : '未命名'))
 		const author = typeof data.author === 'string' ? data.author : ''
 		const bookId = bookPath ? bookIdFor(bookPath) : ''
 		for (const raw of Array.isArray(data.annotations) ? data.annotations : []) {

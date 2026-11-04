@@ -559,7 +559,7 @@
 }
 
 .grove-settings-brand svg {
-	width: 280px;
+	width: 180px;
 	max-width: 100%;
 	height: auto;
 	display: block;
@@ -577,6 +577,46 @@
 .grove-settings-brand-name {
 	font-size: 20px;
 	font-weight: 700;
+}
+
+.grove-settings-tabs {
+	display: flex;
+	gap: 4px;
+	margin: 4px 0 18px;
+	padding: 4px;
+	background: var(--background-secondary);
+	border-radius: 8px;
+	overflow-x: auto;
+	position: sticky;
+	top: 0;
+	z-index: 10;
+}
+
+.grove-settings-tab {
+	flex: 1 1 auto;
+	height: auto;
+	min-height: 30px;
+	padding: 6px 10px;
+	border: none;
+	box-shadow: none;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	border-radius: 6px;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.grove-settings-tab:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.grove-settings-tab.is-active {
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-weight: 600;
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
 .grove-logo-grid {
@@ -1709,6 +1749,13 @@
 	width: min(820px, 94vw);
 }
 
+.grove-search-modal .modal-content {
+	display: flex;
+	flex-direction: column;
+	max-height: min(82vh, 820px);
+	overflow: hidden;
+}
+
 .grove-search-input {
 	width: 100%;
 	margin: 6px 0 8px;
@@ -1734,10 +1781,22 @@
 }
 
 .grove-search-results {
-	max-height: 52vh;
+	flex: 1 1 auto;
+	min-height: 0;
 	overflow-y: auto;
 	margin: 8px 0;
 	border-top: 1px solid var(--background-modifier-border);
+}
+
+.grove-search-modal .modal-button-container {
+	flex: none;
+	position: sticky;
+	bottom: 0;
+	z-index: 2;
+	margin-top: 8px;
+	padding-top: 8px;
+	border-top: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
 }
 
 .grove-search-hit {

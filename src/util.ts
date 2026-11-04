@@ -149,18 +149,36 @@ export function stripNumericTitlePrefix(t: string): string {
  * 去掉 [OCR]、(Z-Library) 等常见标记与尾部下载时间戳，
  * 如 `[OCR]_大国县治 (杨华) (Z-Library)_20260911_0340.layered` → `大国县治 (杨华)`
  */
-export function cleanPdfDisplayTitle(fileName: string): string {
-	const original = fileName.replace(/\.[^.]+$/, '')
+/**
+ * 把下载/截图/OCR 弄脏的文件名洗成可读书名：
+ * - 去掉 `@image#1:Clipboard_Screenshot...`、`Pasted image...` 等附件后缀
+ * - 去掉 `(Z-Library)`、`(z-library.sk, 1lib.sk, z-lib.sk)` 等站点标记
+ * - 去掉 `[OCR]_`、`_OCR`、`.layered`、`_20260911_0340` 等 OCR/时间戳
+ * - 下划线转空格，压掉多余空白
+ * 不主动删作者、副标题或括号里的版次信息。
+ */
+export function cleanBookTitle(fileName: string): string {
+	const original = fileName.replace(/\.(epub|mobi|azw3|azw|fb2|cbz|pdf|txt)$/i, '').trim()
 	let t = original
 	t = stripNumericTitlePrefix(t)
+	// 截图/附件后缀：书名@image#1:Clipboard_Screenshot.png、书名_Clipboard_Screenshot-1
+	t = t.replace(/[@\s_-]*@?image#\d+:.*$/i, ' ')
+	t = t.replace(/[@\s_-]*(?:clipboard[_\s-]?screenshot|pasted[_\s-]?image).*$/i, ' ')
+	// 下载站标记：全角/半角括号、方括号；含多站点列表
+	t = t.replace(/[（(]\s*(?:z[-_\s]?lib(?:rary)?(?:\.[a-z]+)?|1lib(?:\.[a-z]+)?)[^）)]*[）)]/gi, ' ')
+	t = t.replace(/[\[【]\s*(?:z[-_\s]?lib(?:rary)?|1lib)[^\]】]*[\]】]/gi, ' ')
+	// OCR / layered / 时间戳
 	t = t.replace(/\.(layered|ocr)\b/gi, ' ')
 	t = t.replace(/\[\s*ocr\s*\]/gi, ' ')
-	t = t.replace(/\(\s*z[-\s]?lib(rary)?\s*\)/gi, ' ')
+	t = t.replace(/[_\s-]*ocr[_\s-]*/gi, ' ')
 	t = t.replace(/[-_\s]*\d{8}[-_]\d{4,6}\s*$/, ' ')
 	t = t.replace(/_+/g, ' ').replace(/\s{2,}/g, ' ')
 	t = t.replace(/^[-_\s]+|[-_\s]+$/g, '')
 	return t || original
 }
+
+/** 兼容旧调用名：PDF 书架标题也走同一套清洗 */
+export const cleanPdfDisplayTitle = cleanBookTitle
 
 export function isAbsolutePath(p: string): boolean {
 	return /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith('\\\\') || p.startsWith('/')

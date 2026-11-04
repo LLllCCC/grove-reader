@@ -7,7 +7,7 @@ import { shell } from 'electron'
 import { makeBook } from '../lib/foliate-js/view.js'
 import type GroveReaderPlugin from './main'
 import { FORMAT_LABELS, ShelfBookInfo, isReaderExt, isShelfExt } from './types'
-import { basenameOf, cleanPdfDisplayTitle, duplicateKeyOf, formatAuthor, formatBytes, formatDuration, formatLanguageMap, isAbsolutePath, relativeTime, stripNumericTitlePrefix, truncate } from './util'
+import { basenameOf, cleanBookTitle, duplicateKeyOf, formatAuthor, formatBytes, formatDuration, formatLanguageMap, isAbsolutePath, relativeTime, stripNumericTitlePrefix, truncate } from './util'
 import { readPdfShelfInfo } from './pdfThumbnail'
 import { BookInfoModal, ConfirmModal, CoverUrlModal, DeleteBookModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
 import type { BookInfoValues } from './modals'
@@ -70,10 +70,17 @@ export class ShelfCache {
 			const parsed = JSON.parse(fs.readFileSync(this.file, 'utf-8')) as ShelfCacheFile
 			if (parsed && typeof parsed === 'object' && parsed.entries) {
 				this.data = parsed
-				// 旧缓存里带数字 ID 前缀的书名一次性洗掉
+				// 旧缓存里带数字前缀/下载站后缀的书名一次性洗掉；手动改过的不动
+				let changed = false
 				for (const entry of Object.values(this.data.entries)) {
-					if (entry.title) entry.title = stripNumericTitlePrefix(entry.title)
+					if (!entry.title || entry.manualMeta) continue
+					const next = cleanBookTitle(stripNumericTitlePrefix(entry.title))
+					if (next !== entry.title) {
+						entry.title = next
+						changed = true
+					}
 				}
+				if (changed) this.saveSoon()
 			}
 		} catch {
 			// 首次或损坏时使用空缓存
@@ -566,7 +573,7 @@ export class BookshelfView extends ItemView {
 		const row = this.continueEl.createDiv('grove-continue-row')
 		for (const [path, info] of items) {
 			const item = row.createEl('button', { cls: 'grove-continue-item', attr: { type: 'button' } })
-			item.title = basenameOf(path)
+			item.title = cleanBookTitle(basenameOf(path))
 			const cover = item.createDiv('grove-continue-cover')
 			const url = this.plugin.shelfCache.coverDataUrl(this.plugin.shelfCache.get(path)?.cover)
 			if (url) {
@@ -663,7 +670,7 @@ export class BookshelfView extends ItemView {
 	}
 
 	#displayTitle(path: string): string {
-		return this.plugin.shelfCache.get(path)?.title || basenameOf(path).replace(/\.[^.]+$/, '')
+		return this.plugin.shelfCache.get(path)?.title || cleanBookTitle(basenameOf(path))
 	}
 
 	#sortPaths(paths: string[], stats: Map<string, ShelfBookInfo>): string[] {
@@ -751,7 +758,7 @@ export class BookshelfView extends ItemView {
 		const cache = this.plugin.shelfCache
 		const entry = cache.get(path) ?? {}
 		const current: BookInfoValues = {
-			title: entry.title ?? basenameOf(path).replace(/\.[^.]+$/, ''),
+			title: entry.title ?? cleanBookTitle(basenameOf(path)),
 			author: entry.author ?? '',
 			publisher: entry.publisher ?? '',
 		}
@@ -891,7 +898,7 @@ export class BookshelfView extends ItemView {
 		const card = this.gridEl.createDiv('grove-shelf-card')
 		this.cardEls.set(path, card)
 
-		const fallbackTitle = basenameOf(path).replace(/\.[^.]+$/, '')
+		const fallbackTitle = cleanBookTitle(basenameOf(path))
 		const title = entry?.title || fallbackTitle
 		const author = entry?.author ?? ''
 		const publisher = entry?.publisher ?? ''
@@ -1082,7 +1089,7 @@ export class BookshelfView extends ItemView {
 
 		// PDF：渲染首页为封面 + 读取元数据标题（比文件名干净）
 		if (ext === 'pdf') {
-			let title = cleanPdfDisplayTitle(basenameOf(path))
+			let title = cleanBookTitle(basenameOf(path))
 			let author: string | undefined
 			let coverName: string | undefined
 			// 旧版缓存条目可能没有封面也没有 failed 标记（阶段一只存了文件名），
@@ -1091,7 +1098,7 @@ export class BookshelfView extends ItemView {
 				try {
 					const bytes = await plugin.readBookBytes(path)
 					const info = await readPdfShelfInfo(bytes, 300, rel => plugin.pdfjsAssetUrl(rel))
-					if (info.title) title = stripNumericTitlePrefix(info.title)
+					if (info.title) title = cleanBookTitle(stripNumericTitlePrefix(info.title))
 					if (info.author) author = info.author
 					if (existing?.customCover && existing.cover && !force) {
 						coverName = existing.cover
@@ -1125,7 +1132,7 @@ export class BookshelfView extends ItemView {
 		try {
 			const bytes = await plugin.readBookBytes(path)
 			const book = await makeBook(new File([bytes], basenameOf(path)))
-			let title = stripNumericTitlePrefix(formatLanguageMap(book.metadata?.title))
+			let title = cleanBookTitle(stripNumericTitlePrefix(formatLanguageMap(book.metadata?.title)))
 			let author = formatAuthor(book.metadata?.author)
 			let publisher = formatAuthor(book.metadata?.publisher)
 			// 手动编辑过的信息不被自动解析覆盖（「重新解析」除外）

@@ -1,7 +1,7 @@
 {
 	"id": "grove-reader",
 	"name": "Grove Reader",
-	"version": "0.10.0",
+	"version": "0.11.0",
 	"minAppVersion": "1.5.0",
 	"description": "电子书阅读器：阅读 → 划线批注 → 生成 Markdown 笔记 → 一键回跳原文（个人自用）",
 	"author": "grove",

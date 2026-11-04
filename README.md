@@ -34,6 +34,8 @@ Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / c
 
 阅读位置自动记忆：重开书籍从上次位置继续（工作区重启后同样恢复）。
 
+书名优先取书内元数据；PDF 没有元数据时自动清洗文件名——去掉 `(Z-Library)`、`(z-library.sk, 1lib.sk, z-lib.sk)`、`[OCR]_`、`_OCR`、`_20260911_0340.layered`、`@image#1:Clipboard_Screenshot...` 等下载站/OCR/截图后缀。
+
 ### 书架显示
 
 设置 → **书架显示** 里可逐项开关卡片信息，改动即时生效：

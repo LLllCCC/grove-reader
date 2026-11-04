@@ -5,7 +5,18 @@ import { APP_NAME, BACKUP_FOLDER_NAME, DEFAULT_SHELF_DISPLAY } from './types'
 import { isAbsolutePath } from './util'
 import { LOGO_OPTIONS } from './logos'
 
+type SettingsTab = 'appearance' | 'shelf' | 'reading' | 'data'
+
+const SETTINGS_TABS: Array<{ id: SettingsTab; name: string }> = [
+	{ id: 'appearance', name: '外观' },
+	{ id: 'shelf', name: '书架' },
+	{ id: 'reading', name: '阅读与笔记' },
+	{ id: 'data', name: '数据与维护' },
+]
+
 export class GroveSettingTab extends PluginSettingTab {
+	private activeTab: SettingsTab = 'appearance'
+
 	constructor(app: App, private plugin: GroveReaderPlugin) {
 		super(app, plugin)
 	}
@@ -26,7 +37,44 @@ export class GroveSettingTab extends PluginSettingTab {
 		}
 
 		containerEl.createEl('h2', { text: `${APP_NAME} 设置` })
+		this.#renderTabs(containerEl)
 
+		const body = containerEl.createDiv('grove-settings-body')
+		switch (this.activeTab) {
+			case 'appearance':
+				this.#renderAppearance(body, currentLogo)
+				break
+			case 'shelf':
+				this.#renderShelf(body)
+				break
+			case 'reading':
+				this.#renderReading(body)
+				break
+			case 'data':
+				this.#renderData(body)
+				break
+		}
+	}
+
+	/** 顶部四个入口；以后新增设置时，先选一个 tab，再在对应 render 里加 Setting 即可 */
+	#renderTabs(containerEl: HTMLElement): void {
+		const nav = containerEl.createDiv('grove-settings-tabs')
+		nav.setAttr('role', 'tablist')
+		for (const tab of SETTINGS_TABS) {
+			const button = nav.createEl('button', { cls: 'grove-settings-tab', text: tab.name })
+			button.type = 'button'
+			button.setAttr('role', 'tab')
+			button.setAttr('aria-selected', String(this.activeTab === tab.id))
+			if (this.activeTab === tab.id) button.addClass('is-active')
+			button.addEventListener('click', () => {
+				if (this.activeTab === tab.id) return
+				this.activeTab = tab.id
+				this.display()
+			})
+		}
+	}
+
+	#renderAppearance(containerEl: HTMLElement, currentLogo: string): void {
 		// —— 标志 ——
 		containerEl.createEl('h3', { text: '标志' })
 		containerEl.createEl('p', {
@@ -58,8 +106,39 @@ export class GroveSettingTab extends PluginSettingTab {
 			})
 		}
 
-		// —— 书架扫描文件夹 ——
-		containerEl.createEl('h3', { text: '书架' })
+		// —— 书架显示 ——
+		containerEl.createEl('h3', { text: '书架显示' })
+		containerEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: '卡片上显示哪些信息。默认只留最常用的几项，信息多时卡片会换行变高。',
+		})
+		const shelfToggle = (name: string, desc: string, key: keyof typeof DEFAULT_SHELF_DISPLAY): void => {
+			new Setting(containerEl)
+				.setName(name)
+				.setDesc(desc)
+				.addToggle(toggle =>
+					toggle
+						.setValue(this.plugin.settings.shelfDisplay[key])
+						.onChange(async value => {
+							this.plugin.settings.shelfDisplay[key] = value
+							await this.plugin.saveSettings()
+							this.plugin.refreshShelfViews()
+						}))
+		}
+		shelfToggle('格式徽章', '在卡片信息行显示 EPUB / PDF / MOBI 等格式标签', 'showFormatBadge')
+		shelfToggle('阅读进度', '封面底部进度条 + 卡片上的百分比；读完后显示「已读」', 'showProgress')
+		shelfToggle('批注条数', '显示这本书有多少条批注', 'showAnnotationCount')
+		shelfToggle('最近阅读', '显示「3 天前」这类相对时间', 'showLastRead')
+		shelfToggle('笔记标记', '已生成阅读笔记的书显示文档图标，点击直接打开笔记', 'showNoteBadge')
+		shelfToggle('文件大小', '在卡片上显示文件体积（关闭时仍可在悬浮提示里看到）', 'showFileSize')
+		shelfToggle('继续阅读', '书架顶部显示最近在读、尚未读完的书（最多 6 本）', 'showContinueReading')
+		shelfToggle('作者与出版社合并一行', '关闭后作者、出版社各占一行，卡片会更高', 'mergeAuthorPublisher')
+		shelfToggle('书单色条', '卡片左侧显示所属书单的色条（颜色由书单自动生成）', 'showListColor')
+	}
+
+	#renderShelf(containerEl: HTMLElement): void {
+		// —— 扫描文件夹 ——
+		containerEl.createEl('h3', { text: '扫描文件夹' })
 		new Setting(containerEl)
 			.setName('扫描文件夹')
 			.setDesc('书架从这些文件夹扫描书籍；支持库内文件夹或本机绝对路径（子文件夹会一并扫描）。PDF 也会被收纳进书架，点击用 Obsidian 自带查看器打开')
@@ -90,6 +169,8 @@ export class GroveSettingTab extends PluginSettingTab {
 				}))
 		}
 
+		// —— 隐藏的书 ——
+		containerEl.createEl('h3', { text: '隐藏与恢复' })
 		const hiddenCount = this.plugin.settings.hiddenBooks?.length ?? 0
 		new Setting(containerEl)
 			.setName('从书架移除的书籍')
@@ -104,36 +185,9 @@ export class GroveSettingTab extends PluginSettingTab {
 						await this.plugin.restoreHiddenBooks()
 						this.display()
 					}))
+	}
 
-		// —— 书架显示 ——
-		containerEl.createEl('h3', { text: '书架显示' })
-		containerEl.createEl('p', {
-			cls: 'setting-item-description',
-			text: '卡片上显示哪些信息。默认只留最常用的几项，信息多时卡片会换行变高。',
-		})
-		const shelfToggle = (name: string, desc: string, key: keyof typeof DEFAULT_SHELF_DISPLAY): void => {
-			new Setting(containerEl)
-				.setName(name)
-				.setDesc(desc)
-				.addToggle(toggle =>
-					toggle
-						.setValue(this.plugin.settings.shelfDisplay[key])
-						.onChange(async value => {
-							this.plugin.settings.shelfDisplay[key] = value
-							await this.plugin.saveSettings()
-							this.plugin.refreshShelfViews()
-						}))
-		}
-		shelfToggle('格式徽章', '在卡片信息行显示 EPUB / PDF / MOBI 等格式标签', 'showFormatBadge')
-		shelfToggle('阅读进度', '封面底部进度条 + 卡片上的百分比；读完后显示「已读」', 'showProgress')
-		shelfToggle('批注条数', '显示这本书有多少条批注', 'showAnnotationCount')
-		shelfToggle('最近阅读', '显示「3 天前」这类相对时间', 'showLastRead')
-		shelfToggle('笔记标记', '已生成阅读笔记的书显示文档图标，点击直接打开笔记', 'showNoteBadge')
-		shelfToggle('文件大小', '在卡片上显示文件体积（关闭时仍可在悬浮提示里看到）', 'showFileSize')
-		shelfToggle('继续阅读', '书架顶部显示最近在读、尚未读完的书（最多 6 本）', 'showContinueReading')
-		shelfToggle('作者与出版社合并一行', '关闭后作者、出版社各占一行，卡片会更高', 'mergeAuthorPublisher')
-		shelfToggle('书单色条', '卡片左侧显示所属书单的色条（颜色由书单自动生成）', 'showListColor')
-
+	#renderReading(containerEl: HTMLElement): void {
 		// —— 阅读 ——
 		containerEl.createEl('h3', { text: '阅读' })
 		new Setting(containerEl)
@@ -185,7 +239,9 @@ export class GroveSettingTab extends PluginSettingTab {
 				button.setButtonText('生成 / 打开').onClick(() => void this.plugin.openUsageDoc()))
 			.addButton(button =>
 				button.setButtonText('重新生成').onClick(() => this.plugin.confirmRegenerateUsageDoc()))
+	}
 
+	#renderData(containerEl: HTMLElement): void {
 		// —— 数据安全 ——
 		containerEl.createEl('h3', { text: '数据安全' })
 		new Setting(containerEl)
