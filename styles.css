@@ -1879,7 +1879,7 @@
 
 /* ---------- 书架卡片悬浮提示（只保留一个） ---------- */
 
-.grove-card-tooltip {
+.tooltip.grove-card-tooltip {
 	max-width: min(360px, calc(100vw - 20px));
 	text-align: left;
 	line-height: 1.45;

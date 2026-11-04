@@ -1189,6 +1189,10 @@ export default class GroveReaderPlugin extends Plugin {
 			new Notice(`${APP_NAME}：数据文件夹请填库内相对路径（例如 Grove Reader）`)
 			return
 		}
+		if (folder.split('/').includes('..')) {
+			new Notice(`${APP_NAME}：数据文件夹不能包含 ..`)
+			return
+		}
 		const sourceRoot = this.dataRoot
 		const targetRoot = pathModule.join(this.vaultBase, normalizePath(folder))
 		const source = pathModule.join(sourceRoot, 'data')
