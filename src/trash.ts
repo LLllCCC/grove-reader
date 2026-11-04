@@ -49,7 +49,9 @@ export class TrashStore {
 
 	constructor(dataRoot: string, vaultBase: string) {
 		this.dataRoot = dataRoot
-		this.root = pathModule.join(dataRoot, 'data', 'trash')
+		// 放在书库根目录的隐藏文件夹里：和书库同盘（移动是瞬时 rename），
+		// 又不会被 Obsidian 文件列表索引成大文件
+		this.root = pathModule.join(dataRoot, '.trash')
 		this.vaultBase = vaultBase
 	}
 

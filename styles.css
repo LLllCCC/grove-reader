@@ -500,6 +500,48 @@
 	color: var(--text-muted);
 }
 
+/* ---------- 回收站 ---------- */
+
+.grove-trash-list {
+	max-height: 55vh;
+	overflow-y: auto;
+	margin: 8px 0;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.grove-trash-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 10px 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+	flex-wrap: wrap;
+}
+
+.grove-trash-info {
+	min-width: 0;
+	flex: 1;
+}
+
+.grove-trash-title {
+	font-weight: 600;
+	word-break: break-word;
+}
+
+.grove-trash-meta {
+	margin-top: 2px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.grove-trash-actions {
+	display: flex;
+	gap: 6px;
+	flex: none;
+	margin-left: auto;
+}
+
 .grove-setting-sub {
 	border: none;
 	padding-left: 24px;

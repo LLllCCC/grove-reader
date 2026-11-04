@@ -59,6 +59,12 @@ export class StatsStore {
 		return b
 	}
 
+	/** 恢复回收站时写回统计 */
+	setBook(bookPath: string, data: StatsBook): void {
+		this.data.books[bookPath] = data
+		this.saveSoon()
+	}
+
 	/** 删除某本书的阅读统计（删书时调用） */
 	remove(bookPath: string): void {
 		if (this.data.books[bookPath]) {

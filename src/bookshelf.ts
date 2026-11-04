@@ -22,7 +22,7 @@ const MAX_CACHED_COVER_CHARS = 24_000_000
 // 书架缓存：metadata + 封面，存于插件数据目录，避免每次进书架重复解析
 // ------------------------------------------------------------------
 
-interface ShelfEntry {
+export interface ShelfEntry {
 	title?: string
 	author?: string
 	publisher?: string
@@ -848,52 +848,37 @@ export class BookshelfView extends ItemView {
 		const notePath = data.notePath && fs.existsSync(this.#absPath(data.notePath)) ? data.notePath : undefined
 		const noteName = notePath ? basenameOf(notePath) : undefined
 		new DeleteBookModal(this.app, title, count, noteName, async (deleteFile, deleteNote) => {
-			if (deleteFile) {
-				const file = this.app.vault.getAbstractFileByPath(path)
-				if (file instanceof TFile) await this.app.fileManager.trashFile(file)
-				else if (fs.existsSync(this.#absPath(path))) await shell.trashItem(this.#absPath(path))
-			}
 			const closed = this.plugin.closeBookViews(path)
-			// 关闭阅读视图时可能触发一次 onClose 写盘，等它落完再删数据
+			// 关闭阅读视图时可能触发一次 onClose 写盘，等它落完再移动数据
 			if (closed) await new Promise(resolve => window.setTimeout(resolve, 300))
-			let noteError: unknown
-			if (deleteNote && notePath) {
-				try {
-					const noteFile = this.app.vault.getAbstractFileByPath(notePath)
-					if (noteFile instanceof TFile) await this.app.fileManager.trashFile(noteFile)
-				} catch (e) {
-					noteError = e
-				}
-			}
-			const noteState = deleteNote ? (noteError ? '删除失败' : '已删除') : '保留'
 			this.plugin.debug('delete', 'book', { path, deleteFile, deleteNote })
 			if (deleteFile) {
-				const entry = this.plugin.shelfCache.get(path)
+				this.plugin.moveToTrash(path, title, deleteNote ? notePath : undefined)
+				// 批注 JSON 已移入回收站，这里只清自动备份与索引
 				this.plugin.store.delete(path)
 				this.plugin.stats.remove(path)
 				this.plugin.lists.setMember(path, null)
 				this.plugin.shelfCache.remove(path)
-				this.plugin.shelfCache.removeCover(entry?.cover)
 				const hidden = this.plugin.settings.hiddenBooks ?? []
 				this.plugin.settings.hiddenBooks = hidden.filter(p => p !== path)
 				await this.plugin.saveSettings()
-				this.plugin.oplog.add('删除书籍', `《${title}》；原文件已删除；阅读笔记${noteState}`)
-				new Notice(`已删除《${title}》及其阅读数据`)
+				this.plugin.oplog.add('删除书籍', `《${title}》；移入回收站；阅读笔记${deleteNote ? '一并移入' : '保留'}`)
+				new Notice('已移入回收站，可在 设置 → 回收站 恢复')
 			} else {
 				const hidden = this.plugin.settings.hiddenBooks ?? []
 				if (!hidden.includes(path)) hidden.push(path)
 				this.plugin.settings.hiddenBooks = hidden
 				if (deleteNote && notePath) {
+					// 级联下不会出现；兜底时按 Obsidian 的删除设置处理笔记
+					const noteFile = this.app.vault.getAbstractFileByPath(notePath)
+					if (noteFile instanceof TFile) await this.app.fileManager.trashFile(noteFile)
 					const fresh = this.plugin.store.load(path)
 					fresh.notePath = undefined
 					this.plugin.store.save(fresh)
 				}
 				await this.plugin.saveSettings()
-				this.plugin.oplog.add('删除书籍', `《${title}》；仅移出书架；阅读笔记${noteState}`)
+				this.plugin.oplog.add('删除书籍', `《${title}》；仅移出书架；阅读笔记${deleteNote ? '已删除' : '保留'}`)
 				new Notice('已从书架移除，原文件与批注数据都保留')
-			}
-			if (noteError) {
-				new Notice(`阅读笔记删除失败：${noteError instanceof Error ? noteError.message : String(noteError)}`)
 			}
 			await this.refresh({ rescan: true })
 		}).open()

@@ -245,12 +245,12 @@ export class DeleteBookModal extends Modal {
 		this.contentEl.createEl('p', { text: `《${this.bookTitle}》` })
 		this.contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: `这本书有 ${this.annotationCount} 条批注。勾选删除原文件时，会同时删除阅读数据（批注、阅读位置、书单归属）；只移出书架则全部保留。生成的 Markdown 笔记是否删除可在下方选择。`,
+			text: `这本书有 ${this.annotationCount} 条批注。勾选删除原文件时，书籍、阅读数据（批注、阅读位置、书单归属）会一起移入插件回收站；只移出书架则全部保留。`,
 		})
 		const row = this.contentEl.createDiv('grove-delete-check')
 		const checkbox = row.createEl('input', { type: 'checkbox' })
 		checkbox.id = 'grove-delete-file'
-		const label = row.createEl('label', { text: '同时删除库里的原文件（按 Obsidian 的删除设置处理）' })
+		const label = row.createEl('label', { text: '同时删除原文件（移入插件回收站，30 天后清理）' })
 		label.setAttr('for', 'grove-delete-file')
 
 		const noteRow = this.contentEl.createDiv('grove-delete-check')
@@ -258,7 +258,7 @@ export class DeleteBookModal extends Modal {
 		noteBox.id = 'grove-delete-note'
 		noteBox.disabled = !this.noteName
 		const noteLabel = noteRow.createEl('label', {
-			text: this.noteName ? `同时删除生成的阅读笔记（${this.noteName}）` : '这本书还没有生成阅读笔记',
+			text: this.noteName ? `同时把生成的阅读笔记移入回收站（${this.noteName}）` : '这本书还没有生成阅读笔记',
 		})
 		noteLabel.setAttr('for', 'grove-delete-note')
 
@@ -272,7 +272,7 @@ export class DeleteBookModal extends Modal {
 
 		const hint = this.contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: '勾选删除阅读笔记会自动勾选删除原文件；取消删除原文件会同时取消笔记。只移出书架时，文件、批注、笔记都会保留，可在设置里恢复。',
+			text: '勾选删除阅读笔记会自动勾选删除原文件；取消删除原文件会同时取消笔记。删除后可在 设置 → 回收站 恢复，30 天后自动清理。',
 		})
 		hint.addClass('grove-delete-hint')
 
@@ -678,4 +678,83 @@ export class HealthReportModal extends Modal {
 	onClose(): void {
 		this.contentEl.empty()
 	}
+}
+
+export class TrashModal extends Modal {
+	constructor(app: App, private plugin: GroveReaderPlugin) {
+		super(app)
+	}
+
+	onOpen(): void {
+		this.render()
+	}
+
+	private render(): void {
+		const { contentEl } = this
+		contentEl.empty()
+		contentEl.createEl('h3', { text: '回收站' })
+		const entries = this.plugin.trash.list()
+		contentEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: `删除的书籍、笔记、批注和封面会先放在这里，保留 ${this.plugin.trash.retentionDays()} 天。恢复会放回原路径；原位置已有同名文件时会拒绝恢复。`,
+		})
+		if (!entries.length) {
+			contentEl.createEl('p', { text: '回收站是空的。' })
+		} else {
+			const total = entries.reduce((sum, entry) => sum + entry.size, 0)
+			contentEl.createEl('p', { text: `共 ${entries.length} 项，占用 ${formatSize(total)}。` })
+			const list = contentEl.createDiv('grove-trash-list')
+			for (const entry of entries) {
+				const row = list.createDiv('grove-trash-row')
+				const info = row.createDiv('grove-trash-info')
+				info.createDiv('grove-trash-title').setText(entry.title || basenameOf(entry.bookPath))
+				const date = new Date(entry.deletedAt).toLocaleString('zh-CN', { hour12: false })
+				info.createDiv('grove-trash-meta').setText(`${date} · ${formatSize(entry.size)}${entry.files.note ? ' · 含阅读笔记' : ''}`)
+				const actions = row.createDiv('grove-trash-actions')
+				const restore = actions.createEl('button', { text: '恢复' })
+				restore.addEventListener('click', () => {
+					void (async () => {
+						try {
+							await this.plugin.restoreTrash(entry.id)
+							this.render()
+						} catch (e) {
+							new Notice(e instanceof Error ? e.message : String(e))
+						}
+					})()
+				})
+				const purge = actions.createEl('button', { text: '永久删除', cls: 'mod-warning' })
+				purge.addEventListener('click', () => {
+					new ConfirmModal(this.app, `永久删除《${entry.title || '这本书'}》？将同时删除回收站里的原文件、笔记和批注，无法恢复。`, () => {
+						this.plugin.purgeTrash(entry.id)
+						this.render()
+					}).open()
+				})
+			}
+		}
+
+		const buttons = contentEl.createDiv('modal-button-container')
+		if (entries.length) {
+			const empty = buttons.createEl('button', { text: '清空回收站', cls: 'mod-warning' })
+			empty.addEventListener('click', () => {
+				new ConfirmModal(this.app, `清空回收站里的 ${entries.length} 项？将永久删除，无法恢复。`, () => {
+					this.plugin.emptyTrash()
+					this.render()
+				}).open()
+			})
+		}
+		const close = buttons.createEl('button', { text: '关闭', cls: 'mod-cta' })
+		close.addEventListener('click', () => this.close())
+	}
+
+	onClose(): void {
+		this.contentEl.empty()
+	}
+}
+
+function formatSize(bytes: number): string {
+	if (!bytes) return '0 B'
+	if (bytes < 1024) return `${bytes} B`
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+	if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+	return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
 }

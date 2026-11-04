@@ -271,6 +271,15 @@ export class GroveSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings()
 					}))
 
+		// —— 回收站 ——
+		containerEl.createEl('h3', { text: '回收站' })
+		const trashCount = this.plugin.trash.list().length
+		new Setting(containerEl)
+			.setName('已删除的书籍')
+			.setDesc(`删书时把原文件、笔记、批注和封面移到这里，保留 ${this.plugin.trash.retentionDays()} 天；可恢复或永久删除`)
+			.addButton(button =>
+				button.setButtonText(`打开（${trashCount}）`).onClick(() => this.plugin.showTrash()))
+
 		// —— 操作记录 ——
 		containerEl.createEl('h3', { text: '操作记录' })
 		new Setting(containerEl)

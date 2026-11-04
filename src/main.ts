@@ -23,7 +23,7 @@ import {
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
 import { PdfView, VIEW_TYPE_GROVE_PDF } from './pdfView'
-import { BookPickerModal, ConfirmModal, DangerConfirmModal, HealthReportModal, OpLogModal, ReadingStatsModal } from './modals'
+import { BookPickerModal, ConfirmModal, DangerConfirmModal, HealthReportModal, OpLogModal, ReadingStatsModal, TrashModal } from './modals'
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
 import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
@@ -33,6 +33,7 @@ import { LOGO_OPTIONS, logoById } from './logos'
 import { OpLog } from './oplog'
 import { DebugLog } from './debugLog'
 import { buildHealthReport, healthCleanupCount, HealthReport } from './health'
+import { TrashStore } from './trash'
 import { shell } from 'electron'
 
 export default class GroveReaderPlugin extends Plugin {
@@ -43,6 +44,7 @@ export default class GroveReaderPlugin extends Plugin {
 	stats!: StatsStore
 	oplog!: OpLog
 	debugLog!: DebugLog
+	trash!: TrashStore
 	vaultBase = ''
 	/** 插件安装目录（data.json 在这里，不随数据目录迁移） */
 	pluginDir = ''
@@ -72,6 +74,12 @@ export default class GroveReaderPlugin extends Plugin {
 		this.oplog = new OpLog(this.dataRoot)
 		this.oplog.load()
 		this.debugLog = new DebugLog(this.dataRoot, this.settings.debugMode)
+		this.trash = new TrashStore(this.dataRoot, this.vaultBase)
+		const purged = this.trash.purgeExpired()
+		if (purged) {
+			this.oplog.add('回收站清理', `自动清理 ${purged} 项`)
+			this.debug('trash', 'purge expired', { count: purged })
+		}
 		this.store = new BookStore(this.dataRoot, this.settings.maxBackups)
 		let lastSaveErrorAt = 0
 		this.store.onError = e => {
@@ -227,6 +235,55 @@ export default class GroveReaderPlugin extends Plugin {
 		this.debug('health', 'cleanup', { removed })
 		this.refreshShelfViews()
 		new Notice(`${APP_NAME}：已清理 ${removed} 项失效引用`)
+	}
+
+	/** 删除书籍时把书籍/笔记/批注/封面一起移入插件回收站 */
+	moveToTrash(bookPath: string, title: string, notePath?: string): void {
+		const entry = this.shelfCache.get(bookPath)
+		const dataFile = `${bookIdFor(bookPath)}.json`
+		const hasData = fs.existsSync(pathModule.join(this.dataRoot, 'data', 'books', dataFile))
+		this.trash.move({
+			title,
+			bookPath,
+			notePath,
+			dataFile: hasData ? dataFile : undefined,
+			cover: entry?.cover,
+			shelfEntry: entry ?? null,
+			statsEntry: this.stats.peek(bookPath) ?? null,
+			listId: this.lists.listIdOf(bookPath),
+		})
+	}
+
+	async restoreTrash(id: string): Promise<void> {
+		const entry = this.trash.restore(id)
+		this.shelfCache.set(entry.bookPath, entry.shelfEntry ?? {})
+		if (entry.statsEntry) this.stats.setBook(entry.bookPath, entry.statsEntry)
+		if (entry.listId) this.lists.setMember(entry.bookPath, entry.listId)
+		this.settings.hiddenBooks = (this.settings.hiddenBooks ?? []).filter(p => p !== entry.bookPath)
+		await this.saveSettings()
+		this.refreshShelfViews()
+		this.oplog.add('恢复回收站', `《${entry.title}》`)
+		this.debug('trash', 'restore', { id, bookPath: entry.bookPath })
+		new Notice(`${APP_NAME}：已恢复《${entry.title}》`)
+	}
+
+	purgeTrash(id: string): void {
+		const entry = this.trash.list().find(e => e.id === id)
+		this.trash.purge(id)
+		this.oplog.add('回收站永久删除', entry ? `《${entry.title}》` : id)
+		this.debug('trash', 'purge', { id })
+		new Notice(`${APP_NAME}：已永久删除`)
+	}
+
+	emptyTrash(): void {
+		const count = this.trash.empty()
+		this.oplog.add('清空回收站', `${count} 项`)
+		this.debug('trash', 'empty', { count })
+		new Notice(`${APP_NAME}：已清空回收站（${count} 项）`)
+	}
+
+	showTrash(): void {
+		new TrashModal(this.app, this).open()
 	}
 
 	/**
@@ -728,6 +785,11 @@ export default class GroveReaderPlugin extends Plugin {
 			id: 'view-oplog',
 			name: '查看操作记录',
 			callback: () => new OpLogModal(this.app, this.oplog.list()).open(),
+		})
+		this.addCommand({
+			id: 'open-trash',
+			name: '打开回收站',
+			callback: () => this.showTrash(),
 		})
 		this.addCommand({
 			id: 'health-check',
