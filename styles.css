@@ -478,6 +478,28 @@
 	word-break: break-word;
 }
 
+/* ---------- 数据体检 ---------- */
+
+.grove-health-body {
+	max-height: 55vh;
+	overflow-y: auto;
+	margin-top: 8px;
+}
+
+.grove-health-list {
+	margin: 4px 0 12px 20px;
+}
+
+.grove-health-list li {
+	margin: 2px 0;
+	font-size: var(--font-ui-small);
+	word-break: break-word;
+}
+
+.grove-health-more {
+	color: var(--text-muted);
+}
+
 .grove-setting-sub {
 	border: none;
 	padding-left: 24px;

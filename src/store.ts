@@ -103,6 +103,14 @@ export class BookStore {
 		}
 	}
 
+	/** 清掉某本书记录的笔记路径（笔记已删除时用），不动批注 */
+	clearNotePath(vaultPath: string): void {
+		const data = this.load(vaultPath)
+		if (!data.notePath) return
+		data.notePath = undefined
+		this.save(data)
+	}
+
 	/** 删除某本书的全部批注数据与自动备份（书籍文件由调用方处理） */
 	delete(vaultPath: string): void {
 		const id = this.bookId(vaultPath)

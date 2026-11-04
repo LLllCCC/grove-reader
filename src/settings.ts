@@ -259,6 +259,17 @@ export class GroveSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings()
 					}
 				}))
+		new Setting(containerEl)
+			.setName('自动备份')
+			.setDesc('每天/每周首次启动时自动把批注、书架、书单导出到库内备份文件夹；关闭则只手动备份')
+			.addDropdown(dropdown =>
+				dropdown
+					.addOptions({ off: '关闭', daily: '每天', weekly: '每周' })
+					.setValue(this.plugin.settings.autoBackup)
+					.onChange(async value => {
+						this.plugin.settings.autoBackup = value as 'off' | 'daily' | 'weekly'
+						await this.plugin.saveSettings()
+					}))
 
 		// —— 操作记录 ——
 		containerEl.createEl('h3', { text: '操作记录' })
@@ -276,6 +287,25 @@ export class GroveSettingTab extends PluginSettingTab {
 						new Notice('已清空操作记录')
 					}).open()
 				}))
+
+		// —— 维护 ——
+		containerEl.createEl('h3', { text: '维护' })
+		new Setting(containerEl)
+			.setName('数据体检')
+			.setDesc('检查批注 JSON、笔记、书架缓存、书单、统计之间的引用是否还对得上；只读，不会删除书籍或批注')
+			.addButton(button =>
+				button.setButtonText('运行').setCta().onClick(() => this.plugin.showHealthReport()))
+		new Setting(containerEl)
+			.setName('调试模式')
+			.setDesc('把打开书籍、删除、清空、备份等事件写入 data/debug.log（512KB 轮转），默认关闭；反馈问题时再开')
+			.addToggle(toggle =>
+				toggle.setValue(this.plugin.settings.debugMode).onChange(async value => {
+					this.plugin.settings.debugMode = value
+					await this.plugin.saveSettings()
+					this.plugin.setDebugMode(value)
+				}))
+			.addButton(button =>
+				button.setButtonText('打开日志').onClick(() => void this.plugin.openDebugLog()))
 
 		containerEl.createEl('p', {
 			cls: 'setting-item-description',

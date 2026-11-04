@@ -23,7 +23,7 @@ import {
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
 import { PdfView, VIEW_TYPE_GROVE_PDF } from './pdfView'
-import { BookPickerModal, ConfirmModal, DangerConfirmModal, OpLogModal, ReadingStatsModal } from './modals'
+import { BookPickerModal, ConfirmModal, DangerConfirmModal, HealthReportModal, OpLogModal, ReadingStatsModal } from './modals'
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
 import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
@@ -31,6 +31,9 @@ import { isReaderExt, isShelfExt } from './types'
 import { usageDocMarkdown, USAGE_DOC_NAME } from './usageDoc'
 import { LOGO_OPTIONS, logoById } from './logos'
 import { OpLog } from './oplog'
+import { DebugLog } from './debugLog'
+import { buildHealthReport, healthCleanupCount, HealthReport } from './health'
+import { shell } from 'electron'
 
 export default class GroveReaderPlugin extends Plugin {
 	settings: GroveSettings = { ...DEFAULT_SETTINGS, appearance: { ...DEFAULT_APPEARANCE } }
@@ -39,6 +42,7 @@ export default class GroveReaderPlugin extends Plugin {
 	lists!: ListsStore
 	stats!: StatsStore
 	oplog!: OpLog
+	debugLog!: DebugLog
 	vaultBase = ''
 	/** 插件安装目录（data.json 在这里，不随数据目录迁移） */
 	pluginDir = ''
@@ -67,11 +71,13 @@ export default class GroveReaderPlugin extends Plugin {
 			: this.pluginDir
 		this.oplog = new OpLog(this.dataRoot)
 		this.oplog.load()
+		this.debugLog = new DebugLog(this.dataRoot, this.settings.debugMode)
 		this.store = new BookStore(this.dataRoot, this.settings.maxBackups)
 		let lastSaveErrorAt = 0
 		this.store.onError = e => {
 			console.error('[Grove Reader] 批注数据保存失败', e)
 			this.oplog?.add('批注保存失败', e instanceof Error ? e.message : String(e))
+			this.debug('store', 'save error', e instanceof Error ? e.message : String(e))
 			const now = Date.now()
 			if (now - lastSaveErrorAt > 30_000) {
 				lastSaveErrorAt = now
@@ -104,6 +110,8 @@ export default class GroveReaderPlugin extends Plugin {
 			}
 		}))
 		this.#startStatsTracking()
+		this.app.workspace.onLayoutReady(() => void this.maybeAutoBackup())
+		this.debug('app', 'onload', { version: this.manifest.version, dataRoot: this.dataRoot })
 	}
 
 	onunload(): void {
@@ -127,6 +135,98 @@ export default class GroveReaderPlugin extends Plugin {
 	applyLogo(): void {
 		if (this.ribbonEl) setIcon(this.ribbonEl, this.currentLogoIcon())
 		this.refreshShelfViews()
+	}
+
+	/** 调试日志：默认关闭；开启后同时写控制台与 data/debug.log */
+	debug(category: string, message: string, data?: unknown): void {
+		if (!this.settings.debugMode) return
+		console.debug(`[Grove Reader][${category}] ${message}`, data ?? '')
+		this.debugLog?.write(category, message, data)
+	}
+
+	setDebugMode(enabled: boolean): void {
+		this.debugLog?.setEnabled(enabled)
+		if (enabled) this.debug('app', 'debug mode enabled')
+	}
+
+	async openDebugLog(): Promise<void> {
+		if (!this.settings.debugMode) {
+			new Notice(`${APP_NAME}：请先开启调试模式`)
+			return
+		}
+		this.debug('app', 'open debug log')
+		try {
+			await shell.openPath(this.debugLog.path())
+		} catch (e) {
+			new Notice(`${APP_NAME}：无法打开日志文件（${e instanceof Error ? e.message : String(e)}）`)
+		}
+	}
+
+	/** 每天/每周首次启动时自动备份；时间戳先落盘，避免同一天重复执行 */
+	async maybeAutoBackup(): Promise<void> {
+		const mode = this.settings.autoBackup
+		if (mode !== 'daily' && mode !== 'weekly') return
+		const interval = mode === 'daily' ? 86_400_000 : 7 * 86_400_000
+		if (Date.now() - (this.settings.lastAutoBackupAt || 0) < interval) return
+		this.settings.lastAutoBackupAt = Date.now()
+		await this.saveSettings()
+		this.debug('backup', 'auto start', { mode })
+		await this.exportDataBackup()
+	}
+
+	/** 数据体检：只读扫描，不删任何东西 */
+	showHealthReport(): void {
+		const report = buildHealthReport(this.vaultBase, this.dataRoot, this.settings.notesFolder)
+		this.debug('health', 'scan', {
+			json: report.jsonCount,
+			missingBooks: report.missingBooks.length,
+			missingNotes: report.missingNotes.length,
+		})
+		new HealthReportModal(this.app, report, healthCleanupCount(report, this.vaultBase), () => this.confirmCleanupHealth(report)).open()
+	}
+
+	private confirmCleanupHealth(report: HealthReport): void {
+		const count = healthCleanupCount(report, this.vaultBase)
+		if (!count) {
+			new Notice(`${APP_NAME}：没有可清理的失效引用`)
+			return
+		}
+		new ConfirmModal(
+			this.app,
+			`将移除 ${count} 项失效引用（书架缓存、书单、统计、笔记路径），不会删除任何书籍或批注 JSON。继续？`,
+			() => this.cleanupHealth(report),
+		).open()
+	}
+
+	/** 只清理“指向不存在文件”的引用，不动孤儿批注 JSON 本身 */
+	cleanupHealth(report: HealthReport): void {
+		let removed = 0
+		for (const path of report.staleShelf) {
+			this.shelfCache.remove(path)
+			removed++
+		}
+		for (const path of report.staleLists) {
+			this.lists.setMember(path, null)
+			removed++
+		}
+		for (const path of report.staleStats) {
+			this.stats.remove(path)
+			removed++
+		}
+		for (const issue of report.missingNotes) {
+			if (!issue.bookPath) continue
+			const abs = isAbsolutePath(issue.bookPath) ? issue.bookPath : pathModule.join(this.vaultBase, issue.bookPath)
+			if (!fs.existsSync(abs)) continue
+			this.store.clearNotePath(issue.bookPath)
+			removed++
+		}
+		this.shelfCache.saveNow()
+		this.lists.saveNow()
+		this.stats.saveNow()
+		this.oplog.add('数据体检清理', `移除失效引用 ${removed} 项`)
+		this.debug('health', 'cleanup', { removed })
+		this.refreshShelfViews()
+		new Notice(`${APP_NAME}：已清理 ${removed} 项失效引用`)
 	}
 
 	/**
@@ -191,6 +291,7 @@ export default class GroveReaderPlugin extends Plugin {
 		if (changed) {
 			void this.saveSettings()
 			console.log('[Grove Reader] 已自动接管迁移后的书库目录')
+			this.debug('adopt', 'switched settings to current library root', { root: LIBRARY_ROOT })
 		}
 	}
 
@@ -342,6 +443,7 @@ export default class GroveReaderPlugin extends Plugin {
 					this.refreshNoteForBook(bookPath)
 					this.refreshShelfViews()
 					this.oplog.add('清空批注', `《${title}》；${count} 条`)
+					this.debug('annotations', 'clear', { bookPath, count })
 					new Notice(`已清空 ${count} 条批注`)
 				}
 				if (closed) window.setTimeout(finish, 300)
@@ -372,6 +474,7 @@ export default class GroveReaderPlugin extends Plugin {
 			return
 		}
 		const ext = (bookPath.split('.').pop() ?? '').toLowerCase()
+		this.debug('reader', 'open', bookPath)
 		if (ext === 'pdf') {
 			await this.#openPdfBook(bookPath, cfi)
 			return
@@ -625,6 +728,24 @@ export default class GroveReaderPlugin extends Plugin {
 			id: 'view-oplog',
 			name: '查看操作记录',
 			callback: () => new OpLogModal(this.app, this.oplog.list()).open(),
+		})
+		this.addCommand({
+			id: 'health-check',
+			name: '运行数据体检',
+			callback: () => this.showHealthReport(),
+		})
+		this.addCommand({
+			id: 'open-debug-log',
+			name: '打开调试日志',
+			callback: () => void this.openDebugLog(),
+		})
+		this.addCommand({
+			id: 'clear-debug-log',
+			name: '清空调试日志',
+			callback: () => {
+				this.debugLog.clear()
+				new Notice(`${APP_NAME}：调试日志已清空`)
+			},
 		})
 		this.addCommand({
 			id: 'restore-hidden-books',
@@ -1021,6 +1142,7 @@ export default class GroveReaderPlugin extends Plugin {
 				}
 			}
 			this.oplog?.add('备份数据', `${bookCount} 本书；库内「${rel}」`)
+			this.debug('backup', 'export', { rel, bookCount })
 			new Notice(`Grove Reader：已备份 ${bookCount} 本书的批注数据到库内「${rel}」${extra}`)
 		} catch (e) {
 			console.error('[Grove Reader] 备份批注数据失败', e)

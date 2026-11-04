@@ -866,6 +866,7 @@ export class BookshelfView extends ItemView {
 				}
 			}
 			const noteState = deleteNote ? (noteError ? '删除失败' : '已删除') : '保留'
+			this.plugin.debug('delete', 'book', { path, deleteFile, deleteNote })
 			if (deleteFile) {
 				const entry = this.plugin.shelfCache.get(path)
 				this.plugin.store.delete(path)

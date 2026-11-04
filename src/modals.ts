@@ -5,6 +5,7 @@ import { todayKey } from './stats'
 import type GroveReaderPlugin from './main'
 import { basenameOf } from './util'
 import type { OpEntry } from './oplog'
+import type { HealthReport } from './health'
 
 export class BookPickerModal extends FuzzySuggestModal<TFile> {
 	constructor(app: App, private onPick: (file: TFile) => void) {
@@ -584,6 +585,87 @@ export class OpLogModal extends Modal {
 			body.createSpan('grove-oplog-action').setText(entry.action)
 			body.createSpan('grove-oplog-detail').setText(entry.detail)
 		}
+	}
+
+	onClose(): void {
+		this.contentEl.empty()
+	}
+}
+
+export class HealthReportModal extends Modal {
+	constructor(
+		app: App,
+		private report: HealthReport,
+		private cleanupCount: number,
+		private onCleanup: () => void,
+	) {
+		super(app)
+	}
+
+	onOpen(): void {
+		const { report } = this
+		this.contentEl.empty()
+		this.contentEl.createEl('h3', { text: '数据体检' })
+		const issueCount = report.missingBooks.length + report.missingNotes.length + report.duplicates.length
+			+ report.staleShelf.length + report.staleLists.length + report.staleStats.length + report.brokenNoteIds.length
+		this.contentEl.createEl('p', {
+			text: `批注数据 ${report.jsonCount} 份 / ${report.annotationCount} 条；发现 ${issueCount} 项需要关注。`,
+		})
+		if (!issueCount) {
+			this.contentEl.createEl('p', { text: '没有发现结构性问题：书籍路径、笔记、书架、书单和统计都能对上。' })
+		} else {
+			const body = this.contentEl.createDiv('grove-health-body')
+			const section = (title: string, items: string[]): void => {
+				if (!items.length) return
+				body.createEl('h4', { text: `${title}（${items.length}）` })
+				const list = body.createEl('ul', { cls: 'grove-health-list' })
+				for (const item of items.slice(0, 8)) list.createEl('li', { text: item })
+				if (items.length > 8) list.createEl('li', { text: `…还有 ${items.length - 8} 项`, cls: 'grove-health-more' })
+			}
+			section('找不到原文件的批注', report.missingBooks.map(b =>
+				`《${b.title || '未命名'}》 · ${b.annotations} 条 · ${b.bookPath || '无路径'}`))
+			section('笔记文件不存在', report.missingNotes.map(n => `《${n.title || '未命名'}》 → ${n.notePath}`))
+			section('同一路径有多份批注数据', report.duplicates.map(d => `${d.bookPath}（${d.files.length} 份）`))
+			section('书架缓存指向不存在的文件', report.staleShelf)
+			section('书单指向不存在的文件', report.staleLists)
+			section('阅读统计指向不存在的文件', report.staleStats)
+			section('笔记里的书籍 ID 找不到数据', report.brokenNoteIds.map(b => `${b.note} → ${b.id.slice(0, 12)}…`))
+		}
+
+		const buttons = this.contentEl.createDiv('modal-button-container')
+		const copy = buttons.createEl('button', { text: '复制报告' })
+		copy.addEventListener('click', () => {
+			void navigator.clipboard.writeText(this.#reportText())
+			new Notice('体检报告已复制')
+		})
+		const cleanupable = this.cleanupCount
+		if (cleanupable) {
+			const cleanup = buttons.createEl('button', { text: `清理 ${cleanupable} 项失效引用`, cls: 'mod-warning' })
+			cleanup.addEventListener('click', () => {
+				this.close()
+				this.onCleanup()
+			})
+		}
+		const close = buttons.createEl('button', { text: '关闭', cls: 'mod-cta' })
+		close.addEventListener('click', () => this.close())
+	}
+
+	#reportText(): string {
+		const { report } = this
+		const lines: string[] = [`Grove Reader 数据体检 ${new Date().toLocaleString('zh-CN', { hour12: false })}`]
+		lines.push(`批注数据 ${report.jsonCount} 份 / ${report.annotationCount} 条`)
+		const add = (title: string, items: string[]): void => {
+			if (!items.length) return
+			lines.push('', `${title}（${items.length}）`, ...items)
+		}
+		add('找不到原文件的批注', report.missingBooks.map(b => `《${b.title || '未命名'}》 ${b.annotations} 条 ${b.bookPath}`))
+		add('笔记文件不存在', report.missingNotes.map(n => `《${n.title}》 ${n.notePath}`))
+		add('重复路径', report.duplicates.map(d => `${d.bookPath} (${d.files.join(', ')})`))
+		add('书架缓存失效', report.staleShelf)
+		add('书单失效', report.staleLists)
+		add('统计失效', report.staleStats)
+		add('笔记 ID 失联', report.brokenNoteIds.map(b => `${b.note} ${b.id}`))
+		return lines.join('\n')
 	}
 
 	onClose(): void {

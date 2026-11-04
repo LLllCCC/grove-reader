@@ -215,6 +215,12 @@ export interface GroveSettings {
 	scanFolders: string[]
 	/** 从书架移除但保留原文件的书籍路径（可随时恢复） */
 	hiddenBooks: string[]
+	/** 调试模式：把关键事件写入 data/debug.log（默认关） */
+	debugMode: boolean
+	/** 自动备份：off / daily / weekly */
+	autoBackup: 'off' | 'daily' | 'weekly'
+	/** 上次自动备份的时间戳（毫秒） */
+	lastAutoBackupAt: number
 	/**
 	 * 数据目录（库内相对路径）：批注 JSON、封面、书单、统计的存放位置。
 	 * 留空 = 沿用旧行为（插件目录下的 data/）。
@@ -243,6 +249,9 @@ export const DEFAULT_SETTINGS: GroveSettings = {
 	maxBackups: 10,
 	scanFolders: [],
 	hiddenBooks: [],
+	debugMode: false,
+	autoBackup: 'off',
+	lastAutoBackupAt: 0,
 	dataFolder: '',
 	shelfSort: 'default',
 	logoStyle: 'original',
