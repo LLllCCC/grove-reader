@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { BookData, DATA_VERSION } from './types'
-import { basenameOf, bookIdFor, cleanBookTitle, stripNumericTitlePrefix } from './util'
+import { basenameOf, bookIdFor, cleanBookTitle, stripNumericTitlePrefix, stripTitleAuthor } from './util'
 
 const BACKUP_INTERVAL_MS = 10 * 60 * 1000
 
@@ -160,9 +160,9 @@ export class BookStore {
 		}
 		if (typeof data.version !== 'number') data.version = DATA_VERSION
 		if (typeof data.title !== 'string') data.title = ''
-		// 与书架一致：洗掉下载站前缀/截图后缀/OCR 标记（笔记标题取 data.title）
-		if (data.title) data.title = cleanBookTitle(stripNumericTitlePrefix(data.title))
 		if (typeof data.author !== 'string') data.author = ''
+		// 与书架一致：洗掉下载站前缀/截图后缀/OCR 标记，并去掉标题尾部的作者括号
+		if (data.title) data.title = stripTitleAuthor(cleanBookTitle(stripNumericTitlePrefix(data.title)), data.author)
 	}
 
 	#recoverByBookPath(id: string, vaultPath: string): string | null {

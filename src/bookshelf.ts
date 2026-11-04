@@ -7,7 +7,7 @@ import { shell } from 'electron'
 import { makeBook } from '../lib/foliate-js/view.js'
 import type GroveReaderPlugin from './main'
 import { FORMAT_LABELS, ShelfBookInfo, isReaderExt, isShelfExt } from './types'
-import { basenameOf, cleanBookTitle, duplicateKeyOf, formatAuthor, formatBytes, formatDuration, formatLanguageMap, isAbsolutePath, relativeTime, stripNumericTitlePrefix, truncate } from './util'
+import { basenameOf, cleanBookTitle, duplicateKeyOf, formatAuthor, formatBytes, formatDuration, formatLanguageMap, isAbsolutePath, relativeTime, stripNumericTitlePrefix, stripTitleAuthor, truncate } from './util'
 import { readPdfShelfInfo } from './pdfThumbnail'
 import { BookInfoModal, ConfirmModal, CoverUrlModal, DeleteBookModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
 import type { BookInfoValues } from './modals'
@@ -74,7 +74,7 @@ export class ShelfCache {
 				let changed = false
 				for (const entry of Object.values(this.data.entries)) {
 					if (!entry.title || entry.manualMeta) continue
-					const next = cleanBookTitle(stripNumericTitlePrefix(entry.title))
+					const next = stripTitleAuthor(cleanBookTitle(stripNumericTitlePrefix(entry.title)), entry.author ?? '')
 					if (next !== entry.title) {
 						entry.title = next
 						changed = true
@@ -313,6 +313,9 @@ export class BookshelfView extends ItemView {
 	/** 目录扫描缓存：手动刷新 / 文件夹变更 / 库内增删改名时递增 */
 	private scanToken = 0
 	private scanCache: { key: string; token: number; paths: string[] } | null = null
+	private tooltipEl: HTMLElement | null = null
+	private tooltipTimer: number | null = null
+	private cardSeq = 0
 
 	constructor(leaf: WorkspaceLeaf, private plugin: GroveReaderPlugin) {
 		super(leaf)
@@ -335,6 +338,8 @@ export class BookshelfView extends ItemView {
 		const root = this.contentEl
 		root.empty()
 		root.addClass('grove-shelf-content')
+		this.registerDomEvent(root, 'scroll', () => this.#hideTooltip(), true)
+		this.registerDomEvent(window, 'resize', () => this.#hideTooltip())
 
 		// 顶部一行：左边是扫描文件夹标签，右边是操作按钮（同一水平线）
 		const topRow = root.createDiv('grove-shelf-toprow')
@@ -411,6 +416,7 @@ export class BookshelfView extends ItemView {
 		if (this.refreshTimer != null) window.clearTimeout(this.refreshTimer)
 		this.searchTimer = null
 		this.refreshTimer = null
+		this.#hideTooltip()
 		this.plugin.shelfCache.saveNow()
 		this.plugin.lists.saveNow()
 	}
@@ -418,6 +424,7 @@ export class BookshelfView extends ItemView {
 	async refresh(opts: { rescan?: boolean } = {}): Promise<void> {
 		const { plugin } = this
 		if (!this.gridEl) return
+		this.#hideTooltip()
 		if (opts.rescan) this.scanToken++
 		this.cardEls.clear()
 		this.gridEl.empty()
@@ -670,7 +677,8 @@ export class BookshelfView extends ItemView {
 	}
 
 	#displayTitle(path: string): string {
-		return this.plugin.shelfCache.get(path)?.title || cleanBookTitle(basenameOf(path))
+		const entry = this.plugin.shelfCache.get(path)
+		return entry?.title || stripTitleAuthor(cleanBookTitle(basenameOf(path)), entry?.author ?? '')
 	}
 
 	#sortPaths(paths: string[], stats: Map<string, ShelfBookInfo>): string[] {
@@ -898,7 +906,7 @@ export class BookshelfView extends ItemView {
 		const card = this.gridEl.createDiv('grove-shelf-card')
 		this.cardEls.set(path, card)
 
-		const fallbackTitle = cleanBookTitle(basenameOf(path))
+		const fallbackTitle = stripTitleAuthor(cleanBookTitle(basenameOf(path)), entry?.author ?? '')
 		const title = entry?.title || fallbackTitle
 		const author = entry?.author ?? ''
 		const publisher = entry?.publisher ?? ''
@@ -909,7 +917,6 @@ export class BookshelfView extends ItemView {
 		// 键盘可达：卡片本身是按钮语义
 		card.tabIndex = 0
 		card.setAttr('role', 'button')
-		card.setAttr('aria-label', [title, author].filter(Boolean).join('，'))
 		if (display.showListColor) {
 			const lid = plugin.lists.listIdOf(path)
 			if (lid) {
@@ -932,14 +939,23 @@ export class BookshelfView extends ItemView {
 			track.title = fraction >= 0.995 ? '已读完' : `读至 ${pct}%`
 		}
 
-		// 悬浮显示完整文件名、大小与阅读时长
-		let tooltip = basenameOf(path)
-		if (size != null) tooltip += `\n${formatBytes(size)}`
-		if (info?.seconds) tooltip += `\n累计阅读 ${formatDuration(info.seconds)}`
-		if (info?.lastRead) tooltip += `\n最近阅读 ${new Date(info.lastRead).toLocaleString('zh-CN', { hour12: false })}`
-		card.title = tooltip
+		// 悬浮/键盘聚焦：只保留一个自定义提示，整合书名、文件名、大小与阅读信息
+		const detailLines = [title]
+		if (author) detailLines.push(author)
+		detailLines.push(`文件：${basenameOf(path)}`)
+		if (size != null) detailLines.push(`大小：${formatBytes(size)}`)
+		if (info?.seconds) detailLines.push(`累计阅读：${formatDuration(info.seconds)}`)
+		if (info?.lastRead) detailLines.push(`最近阅读：${new Date(info.lastRead).toLocaleString('zh-CN', { hour12: false })}`)
+		const detail = detailLines.join('\n')
+		card.addEventListener('mouseenter', () => this.#scheduleTooltip(card, detail))
+		card.addEventListener('mouseleave', () => this.#hideTooltip())
+		card.addEventListener('focus', () => this.#scheduleTooltip(card, detail))
+		card.addEventListener('blur', () => this.#hideTooltip())
 
-		card.createDiv('grove-shelf-booktitle').setText(truncate(title, 24))
+		const titleEl = card.createDiv('grove-shelf-booktitle')
+		titleEl.id = `grove-card-title-${++this.cardSeq}`
+		titleEl.setText(truncate(title, 24))
+		card.setAttr('aria-labelledby', titleEl.id)
 		if (display.mergeAuthorPublisher) {
 			card.createDiv('grove-shelf-author').setText([author, publisher].filter(Boolean).join(' · ') || ' ')
 		} else {
@@ -1068,6 +1084,41 @@ export class BookshelfView extends ItemView {
 		}
 	}
 
+	#scheduleTooltip(card: HTMLElement, text: string): void {
+		if (this.tooltipTimer != null) window.clearTimeout(this.tooltipTimer)
+		this.tooltipTimer = window.setTimeout(() => {
+			this.tooltipTimer = null
+			this.#showTooltip(card, text)
+		}, 220)
+	}
+
+	#showTooltip(card: HTMLElement, text: string): void {
+		this.#hideTooltip()
+		const el = document.body.createDiv('grove-card-tooltip')
+		el.setText(text)
+		const rect = card.getBoundingClientRect()
+		const margin = 10
+		const width = el.offsetWidth
+		const height = el.offsetHeight
+		const center = rect.left + rect.width / 2
+		const left = Math.min(window.innerWidth - width / 2 - margin, Math.max(width / 2 + margin, center))
+		let top = rect.bottom + 8
+		if (top + height > window.innerHeight - margin) top = rect.top - height - 8
+		top = Math.max(margin, top)
+		el.style.left = `${left}px`
+		el.style.top = `${top}px`
+		this.tooltipEl = el
+	}
+
+	#hideTooltip(): void {
+		if (this.tooltipTimer != null) {
+			window.clearTimeout(this.tooltipTimer)
+			this.tooltipTimer = null
+		}
+		this.tooltipEl?.remove()
+		this.tooltipEl = null
+	}
+
 	async #ensureEntry(path: string, card: HTMLElement, force = false): Promise<void> {
 		const { plugin } = this
 		const cache = plugin.shelfCache
@@ -1118,6 +1169,7 @@ export class BookshelfView extends ItemView {
 					author = existing.author ?? author
 					cache.set(path, { ...existing, cover: coverName, mtime, size, addedAt, failed: !coverName })
 				} else {
+					title = stripTitleAuthor(title, author ?? '')
 					cache.set(path, { title, author, cover: coverName, customCover: existing?.customCover, mtime, size, addedAt, failed: !coverName })
 				}
 			} else {
@@ -1140,6 +1192,8 @@ export class BookshelfView extends ItemView {
 				title = existing.title ?? title
 				author = existing.author ?? author
 				publisher = existing.publisher ?? publisher
+			} else {
+				title = stripTitleAuthor(title, author)
 			}
 			let coverName: string | undefined
 			if (existing?.customCover && existing.cover && !force) {

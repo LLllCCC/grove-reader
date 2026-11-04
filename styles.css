@@ -1876,3 +1876,23 @@
 	display: block;
 	margin: 10px auto;
 }
+
+/* ---------- 书架卡片悬浮提示（只保留一个） ---------- */
+
+.grove-card-tooltip {
+	position: fixed;
+	z-index: 1000;
+	max-width: min(360px, calc(100vw - 20px));
+	padding: 8px 10px;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	box-shadow: var(--shadow-s);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.45;
+	white-space: pre-line;
+	overflow-wrap: anywhere;
+	pointer-events: none;
+	transform: translateX(-50%);
+}

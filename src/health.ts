@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import pathModule from 'node:path'
-import { cleanBookTitle, isAbsolutePath } from './util'
+import { cleanBookTitle, isAbsolutePath, stripTitleAuthor } from './util'
 
 export interface MissingBook {
 	file: string
@@ -81,7 +81,8 @@ export function buildHealthReport(vaultBase: string, dataRoot: string, notesFold
 		}
 		report.jsonCount++
 		const bookPath = typeof data.bookPath === 'string' ? data.bookPath : ''
-		const title = typeof data.title === 'string' ? cleanBookTitle(data.title) : ''
+		const author = typeof data.author === 'string' ? data.author : ''
+		const title = typeof data.title === 'string' ? stripTitleAuthor(cleanBookTitle(data.title), author) : ''
 		const annotations = Array.isArray(data.annotations) ? data.annotations.length : 0
 		report.annotationCount += annotations
 		if (bookPath) {
