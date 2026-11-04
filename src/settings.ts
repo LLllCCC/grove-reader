@@ -70,6 +70,8 @@ export class GroveSettingTab extends PluginSettingTab {
 				if (this.activeTab === tab.id) return
 				this.activeTab = tab.id
 				this.display()
+				const scroller = this.containerEl.closest('.vertical-tab-content')
+				if (scroller instanceof HTMLElement) scroller.scrollTo({ top: 0 })
 			})
 		}
 	}
