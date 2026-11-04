@@ -14,6 +14,7 @@ import {
 	LIBRARY_ROOT,
 	LEGACY_LIBRARY_ROOT,
 	BookData,
+	NoteTemplate,
 	GroveSettings,
 	HIGHLIGHT_COLORS,
 	SUPPORTED_BOOK_EXTS,
@@ -23,7 +24,7 @@ import {
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
 import { PdfView, VIEW_TYPE_GROVE_PDF } from './pdfView'
-import { BookPickerModal, ConfirmModal, DangerConfirmModal, HealthReportModal, OpLogModal, ReadingStatsModal, SearchModal, TrashModal } from './modals'
+import { BookPickerModal, ConfirmModal, DangerConfirmModal, HealthReportModal, OpLogModal, ReadingStatsModal, SearchModal, TemplatePickerModal, TrashModal } from './modals'
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
 import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
@@ -840,6 +841,11 @@ export default class GroveReaderPlugin extends Plugin {
 			callback: () => this.showSearch(),
 		})
 		this.addCommand({
+			id: 'choose-note-template',
+			name: '选择当前书的笔记模板',
+			checkCallback: checking => this.withAnyReader(checking, v => this.showTemplatePicker(v.bookPath)),
+		})
+		this.addCommand({
 			id: 'open-trash',
 			name: '打开回收站',
 			callback: () => this.showTrash(),
@@ -1008,7 +1014,7 @@ export default class GroveReaderPlugin extends Plugin {
 
 	/** 读取模板并把批注数据渲染成完整笔记 Markdown（含 frontmatter 与标记区） */
 	async #composeNoteMarkdown(data: BookData, existing: string | null, announce: boolean): Promise<string> {
-		const tplPath = normalizePath(this.settings.noteTemplatePath?.trim() || DEFAULT_TEMPLATE_PATH)
+		const tplPath = this.templatePathFor(data)
 		let template: string | null = null
 		const tplFile = this.app.vault.getAbstractFileByPath(tplPath)
 		if (tplFile instanceof TFile) template = await this.app.vault.read(tplFile)
@@ -1094,7 +1100,7 @@ export default class GroveReaderPlugin extends Plugin {
 
 	/** 创建（如缺失）并打开笔记模板文件 */
 	async openNoteTemplate(): Promise<void> {
-		const tplPath = normalizePath(this.settings.noteTemplatePath?.trim() || DEFAULT_TEMPLATE_PATH)
+		const tplPath = this.defaultTemplatePath()
 		let f = this.app.vault.getAbstractFileByPath(tplPath)
 		if (!(f instanceof TFile)) {
 			await this.ensureFolderOf(tplPath)
@@ -1102,6 +1108,49 @@ export default class GroveReaderPlugin extends Plugin {
 			new Notice('Grove Reader：已创建笔记模板文件，可直接编辑')
 		}
 		if (f instanceof TFile) await this.app.workspace.getLeaf('tab').openFile(f)
+	}
+
+	/** 当前可用的模板列表；没有配置时退回旧的单模板路径 */
+	templateList(): NoteTemplate[] {
+		const list = (this.settings.noteTemplates ?? []).filter(t => t && t.id && t.path)
+		if (list.length) return list
+		return [{
+			id: 'legacy',
+			name: '默认模板',
+			path: this.settings.noteTemplatePath?.trim() || DEFAULT_TEMPLATE_PATH,
+		}]
+	}
+
+	defaultTemplatePath(): string {
+		const list = this.templateList()
+		const tpl = list.find(t => t.id === this.settings.defaultNoteTemplateId) ?? list[0]
+		return normalizePath(tpl?.path || DEFAULT_TEMPLATE_PATH)
+	}
+
+	/** 单本书：自己的模板优先，其次默认模板 */
+	templatePathFor(data: BookData): string {
+		const list = this.templateList()
+		const tpl = (data.templateId && list.find(t => t.id === data.templateId))
+			|| list.find(t => t.id === this.settings.defaultNoteTemplateId)
+			|| list[0]
+		return normalizePath(tpl?.path || DEFAULT_TEMPLATE_PATH)
+	}
+
+	showTemplatePicker(bookPath: string): void {
+		new TemplatePickerModal(this.app, this, bookPath).open()
+	}
+
+	setBookTemplate(bookPath: string, templateId: string): void {
+		const data = this.store.load(bookPath)
+		if (templateId) data.templateId = templateId
+		else delete data.templateId
+		this.store.save(data)
+		const tpl = this.templateList().find(t => t.id === templateId)
+		const label = templateId ? (tpl?.name ?? '未知模板') : '跟随默认'
+		this.oplog.add('切换笔记模板', `《${data.title || bookPath}》 → ${label}`)
+		this.debug('template', 'set', { bookPath, templateId })
+		this.refreshNoteForBook(bookPath)
+		new Notice(`${APP_NAME}：笔记模板已切换为「${label}」`)
 	}
 
 	/** 生成（如缺失）并打开使用指南 */

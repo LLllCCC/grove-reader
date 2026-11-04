@@ -163,6 +163,7 @@ export class BookStore {
 		if (typeof data.author !== 'string') data.author = ''
 		// 与书架一致：洗掉下载站前缀/截图后缀/OCR 标记，并去掉标题尾部的作者括号
 		if (data.title) data.title = stripTitleAuthor(cleanBookTitle(stripNumericTitlePrefix(data.title)), data.author)
+		if (typeof data.templateId !== 'string' || !data.templateId) delete data.templateId
 	}
 
 	#recoverByBookPath(id: string, vaultPath: string): string | null {

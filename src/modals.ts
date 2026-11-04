@@ -5,7 +5,7 @@ import type { SearchDoc } from './search'
 import type { BookList } from './lists'
 import { todayKey } from './stats'
 import type GroveReaderPlugin from './main'
-import { basenameOf } from './util'
+import { basenameOf, cleanBookTitle } from './util'
 import type { OpEntry } from './oplog'
 import type { HealthReport } from './health'
 
@@ -459,6 +459,59 @@ export class ReadingStatsModal extends Modal {
 		this.contentEl.createEl('h3', { text: '阅读统计' })
 		const stats = this.plugin.stats
 		const books = stats.sortedBooks()
+		const today = todayKey()
+		const todaySec = stats.dailyTotals().get(today)?.seconds ?? 0
+		const totalSec = books.reduce((sum, [, b]) => sum + b.seconds, 0)
+		const streak = stats.streak()
+		const goalMin = Math.max(0, this.plugin.settings.dailyGoalMinutes || 0)
+		const goalSec = goalMin * 60
+
+		const summary = this.contentEl.createDiv('grove-stats-summary')
+		const card = (label: string, value: string, sub: string): HTMLElement => {
+			const el = summary.createDiv('grove-stats-card')
+			el.createDiv('grove-stats-card-label').setText(label)
+			el.createDiv('grove-stats-card-value').setText(value)
+			el.createDiv('grove-stats-card-sub').setText(sub)
+			return el
+		}
+		const todayCard = card(
+			'今日阅读',
+			formatDuration(todaySec),
+			goalSec ? (todaySec >= goalSec ? `已达成 ${goalMin} 分钟目标` : `目标 ${goalMin} 分钟`) : '未设目标',
+		)
+		if (goalSec > 0) {
+			const goal = todayCard.createDiv('grove-stats-goal')
+			const fill = goal.createDiv('grove-stats-goal-fill')
+			fill.style.width = `${Math.min(100, Math.round((todaySec / goalSec) * 100))}%`
+		}
+		card('连续阅读', `${streak.current} 天`, `最长 ${streak.longest} 天`)
+		card('活跃天数', `${streak.activeDays} 天`, '有阅读记录的天数')
+		card('累计阅读', formatDuration(totalSec), `${books.length} 本书`)
+
+		const heatDays = stats.recentDays(84)
+		const heatTotal = heatDays.reduce((sum, d) => sum + d.seconds, 0)
+		const heatPages = heatDays.reduce((sum, d) => sum + d.pages, 0)
+		const heatHead = this.contentEl.createDiv('grove-stats-chart-head')
+		heatHead.createSpan('grove-stats-chart-title').setText('最近 12 周')
+		heatHead.createSpan('grove-stats-chart-total').setText(
+			`合计 ${formatDuration(heatTotal)}${heatPages ? ` · ${heatPages} 页` : ''}`,
+		)
+		const heat = this.contentEl.createDiv('grove-stats-heatmap')
+		for (const d of heatDays) {
+			const cell = heat.createDiv('grove-stats-heat-cell')
+			const level = this.#heatLevel(d.seconds, goalSec)
+			cell.addClass(`is-level-${level}`)
+			if (d.day === today) cell.addClass('is-today')
+			const label = d.seconds > 0
+				? `${d.day}：${formatDuration(d.seconds)}${d.pages ? ` · ${d.pages} 页` : ''}`
+				: `${d.day}：未阅读`
+			cell.title = label
+			cell.setAttr('aria-label', label)
+		}
+		const legend = this.contentEl.createDiv('grove-stats-heat-legend')
+		legend.createSpan({ text: '少' })
+		for (let i = 0; i <= 4; i++) legend.createDiv(`grove-stats-heat-cell is-level-${i}`)
+		legend.createSpan({ text: '多' })
 
 		const table = this.contentEl.createEl('table', { cls: 'grove-stats-table' })
 		const head = table.createEl('tr')
@@ -466,9 +519,8 @@ export class ReadingStatsModal extends Modal {
 		if (!books.length) {
 			table.createEl('tr').createEl('td', { text: '还没有阅读记录。打开一本书读一会儿，这里就会出现数据。', attr: { colspan: '5' } })
 		}
-		const today = todayKey()
 		for (const [bookPath, b] of books) {
-			const title = this.plugin.shelfCache.get(bookPath)?.title || basenameOf(bookPath).replace(/\.[^.]+$/, '')
+			const title = this.plugin.shelfCache.get(bookPath)?.title || cleanBookTitle(basenameOf(bookPath))
 			const tr = table.createEl('tr')
 			tr.createEl('td', { text: title.length > 24 ? title.slice(0, 24) + '…' : title, attr: { title: bookPath } })
 			tr.createEl('td', { cls: 'grove-stats-num', text: formatDuration(b.seconds) })
@@ -482,32 +534,22 @@ export class ReadingStatsModal extends Modal {
 			}
 			tr.createEl('td', { text: formatLastRead(b.lastRead) })
 		}
+	}
 
-		if (books.length) {
-			const days = stats.recentDays(14)
-			const totalSec = days.reduce((s, d) => s + d.seconds, 0)
-			const totalPages = days.reduce((s, d) => s + d.pages, 0)
-			const headRow = this.contentEl.createDiv('grove-stats-chart-head')
-			headRow.createSpan('grove-stats-chart-title').setText('最近 14 天')
-			headRow.createSpan('grove-stats-chart-total').setText(
-				`合计 ${formatDuration(totalSec)}${totalPages ? ` · ${totalPages} 页` : ''}`,
-			)
-			const max = Math.max(...days.map(d => d.seconds), 1)
-			const chart = this.contentEl.createDiv('grove-stats-chart')
-			for (const d of days) {
-				const col = chart.createDiv('grove-stats-col')
-				col.title = d.seconds > 0
-					? `${d.day}：${formatDuration(d.seconds)}${d.pages ? ` · ${d.pages} 页` : ''}`
-					: `${d.day}：未阅读`
-				const track = col.createDiv('grove-stats-col-track')
-				if (d.seconds > 0) {
-					const bar = track.createDiv('grove-stats-col-bar')
-					bar.style.height = `${Math.max(4, Math.round((d.seconds / max) * 100))}%`
-				}
-				col.createDiv('grove-stats-col-date').setText(d.day.slice(8))
-				if (d.day === today) col.addClass('is-today')
-			}
+	#heatLevel(seconds: number, goalSec: number): number {
+		if (seconds <= 0) return 0
+		if (goalSec > 0) {
+			const ratio = seconds / goalSec
+			if (ratio <= 0.25) return 1
+			if (ratio <= 0.5) return 2
+			if (ratio <= 1) return 3
+			return 4
 		}
+		const minutes = seconds / 60
+		if (minutes < 15) return 1
+		if (minutes < 30) return 2
+		if (minutes < 60) return 3
+		return 4
 	}
 
 	onClose(): void {
@@ -949,4 +991,108 @@ export class SearchModal extends Modal {
 
 function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+export class TemplatePickerModal extends Modal {
+	constructor(
+		app: App,
+		private plugin: GroveReaderPlugin,
+		private bookPath: string,
+	) {
+		super(app)
+	}
+
+	onOpen(): void {
+		this.contentEl.empty()
+		this.contentEl.createEl('h3', { text: '笔记模板' })
+		const data = this.plugin.store.load(this.bookPath)
+		this.contentEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: `《${data.title || basenameOf(this.bookPath)}》使用哪一套模板生成阅读笔记。切换后已存在的笔记会按新模板重写生成区。`,
+		})
+		const list = this.plugin.templateList()
+		const current = data.templateId ?? ''
+		const options = [{ id: '', name: '跟随默认', path: this.plugin.defaultTemplatePath() }]
+		for (const tpl of list) {
+			if (tpl.id === 'legacy' && list.length === 1) continue
+			options.push({ id: tpl.id, name: tpl.name, path: tpl.path })
+		}
+		const wrap = this.contentEl.createDiv('grove-template-options')
+		for (const option of options) {
+			const row = wrap.createDiv('grove-template-option')
+			if (option.id === current) row.addClass('is-active')
+			row.createDiv('grove-template-option-name').setText(option.name)
+			row.createDiv('grove-template-option-path').setText(option.path)
+			row.tabIndex = 0
+			row.setAttr('role', 'button')
+			const choose = (): void => {
+				this.plugin.setBookTemplate(this.bookPath, option.id)
+				this.close()
+			}
+			row.addEventListener('click', choose)
+			row.addEventListener('keydown', e => {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault()
+					choose()
+				}
+			})
+		}
+		const buttons = this.contentEl.createDiv('modal-button-container')
+		const close = buttons.createEl('button', { text: '关闭', cls: 'mod-cta' })
+		close.addEventListener('click', () => this.close())
+	}
+
+	onClose(): void {
+		this.contentEl.empty()
+	}
+}
+
+export class TemplateEditModal extends Modal {
+	constructor(
+		app: App,
+		private titleText: string,
+		private initialName: string,
+		private initialPath: string,
+		private onSave: (name: string, path: string) => void,
+	) {
+		super(app)
+	}
+
+	onOpen(): void {
+		this.contentEl.empty()
+		this.contentEl.createEl('h3', { text: this.titleText })
+		this.contentEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: '模板是库内 Markdown 文件；可以复制一份现有模板再改。',
+		})
+		const name = this.contentEl.createEl('input', { attr: { type: 'text', placeholder: '模板名称，例如：教材 / 小说' }, cls: 'grove-folder-input' })
+		name.value = this.initialName
+		const path = this.contentEl.createEl('input', {
+			attr: { type: 'text', placeholder: '模板文件路径，例如：Grove Reader/阅读笔记/教材模板.md' },
+			cls: 'grove-folder-input',
+		})
+		path.value = this.initialPath
+		const buttons = this.contentEl.createDiv('modal-button-container')
+		const cancel = buttons.createEl('button', { text: '取消' })
+		cancel.addEventListener('click', () => this.close())
+		const save = buttons.createEl('button', { text: '保存', cls: 'mod-cta' })
+		save.addEventListener('click', () => {
+			const n = name.value.trim()
+			const p = path.value.trim().replace(/\\/g, '/')
+			if (!n) {
+				new Notice('请填写模板名称')
+				return
+			}
+			if (!p) {
+				new Notice('请填写模板文件路径')
+				return
+			}
+			this.onSave(n, p)
+			this.close()
+		})
+	}
+
+	onClose(): void {
+		this.contentEl.empty()
+	}
 }

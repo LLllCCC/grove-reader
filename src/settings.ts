@@ -1,6 +1,6 @@
 import { App, Notice, PluginSettingTab, Setting, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
-import { FolderPromptModal, FolderSuggest, ConfirmModal, OpLogModal } from './modals'
+import { FolderPromptModal, FolderSuggest, ConfirmModal, OpLogModal, TemplateEditModal } from './modals'
 import { APP_NAME, BACKUP_FOLDER_NAME, DEFAULT_SHELF_DISPLAY } from './types'
 import { isAbsolutePath } from './util'
 import { LOGO_OPTIONS } from './logos'
@@ -201,6 +201,18 @@ export class GroveSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings()
 				}))
 
+		new Setting(containerEl)
+			.setName('每日阅读目标')
+			.setDesc('分钟；0 = 不设目标。用于阅读统计页的今日进度和热力图深浅')
+			.addText(text =>
+				text.setValue(String(this.plugin.settings.dailyGoalMinutes ?? 30)).onChange(async value => {
+					const n = Number.parseInt(value, 10)
+					if (Number.isFinite(n) && n >= 0) {
+						this.plugin.settings.dailyGoalMinutes = Math.min(600, n)
+						await this.plugin.saveSettings()
+					}
+				}))
+
 		// —— 笔记 ——
 		containerEl.createEl('h3', { text: '笔记' })
 		new Setting(containerEl)
@@ -224,16 +236,74 @@ export class GroveSettingTab extends PluginSettingTab {
 					await save(value)
 				})
 			})
-		new Setting(containerEl)
-			.setName('笔记模板')
-			.setDesc('模板文件路径（库内）。文件不存在时使用内置默认模板；语法见使用指南')
-			.addText(text =>
-				text.setValue(this.plugin.settings.noteTemplatePath).onChange(async value => {
-					this.plugin.settings.noteTemplatePath = value.trim() || 'Grove Reader/阅读笔记/Grove 笔记模板.md'
-					await this.plugin.saveSettings()
-				}))
-			.addButton(button =>
-				button.setButtonText('创建 / 打开').setCta().onClick(() => void this.plugin.openNoteTemplate()))
+		const templates = this.plugin.settings.noteTemplates ?? []
+		const defaultId = this.plugin.settings.defaultNoteTemplateId ?? ''
+		const openAddTemplate = (): void => {
+			new TemplateEditModal(this.app, '添加笔记模板', '', this.plugin.defaultTemplatePath(), async (name, path) => {
+				const id = `tpl-${Date.now().toString(36)}`
+				this.plugin.settings.noteTemplates = [...(this.plugin.settings.noteTemplates ?? []), { id, name, path }]
+				if (!this.plugin.settings.defaultNoteTemplateId) this.plugin.settings.defaultNoteTemplateId = id
+				await this.plugin.saveSettings()
+				this.display()
+			}).open()
+		}
+		if (!templates.length) {
+			new Setting(containerEl)
+				.setName('默认模板')
+				.setDesc('模板文件路径（库内）。文件不存在时使用内置默认模板；可添加多套模板，按书单独切换')
+				.addText(text =>
+					text.setValue(this.plugin.settings.noteTemplatePath).onChange(async value => {
+						this.plugin.settings.noteTemplatePath = value.trim() || 'Grove Reader/阅读笔记/Grove 笔记模板.md'
+						await this.plugin.saveSettings()
+					}))
+				.addButton(button =>
+					button.setButtonText('创建 / 打开').setCta().onClick(() => void this.plugin.openNoteTemplate()))
+				.addButton(button =>
+					button.setButtonText('添加模板').onClick(openAddTemplate))
+		} else {
+			new Setting(containerEl)
+				.setName('默认笔记模板')
+				.setDesc('新书默认使用这一套；单本书可在书架右键「笔记模板…」单独切换')
+				.addDropdown(dropdown => {
+					for (const tpl of templates) dropdown.addOption(tpl.id, tpl.name)
+					dropdown
+						.setValue(templates.some(t => t.id === defaultId) ? defaultId : templates[0].id)
+						.onChange(async value => {
+							this.plugin.settings.defaultNoteTemplateId = value
+							await this.plugin.saveSettings()
+						})
+				})
+				.addButton(button =>
+					button.setButtonText('添加模板').setCta().onClick(openAddTemplate))
+			for (const tpl of templates) {
+				const setting = new Setting(containerEl).setName(tpl.name).setDesc(tpl.path)
+				setting.settingEl.addClass('grove-setting-sub')
+				if (tpl.id === (defaultId || templates[0].id)) {
+					setting.addButton(button => button.setButtonText('默认').setDisabled(true))
+				} else {
+					setting.addButton(button =>
+						button.setButtonText('设为默认').onClick(async () => {
+							this.plugin.settings.defaultNoteTemplateId = tpl.id
+							await this.plugin.saveSettings()
+							this.display()
+						}))
+				}
+				setting.addButton(button =>
+					button.setIcon('trash-2').setTooltip('从列表移除（不删模板文件）').onClick(async () => {
+						this.plugin.settings.noteTemplates = templates.filter(t => t.id !== tpl.id)
+						if (this.plugin.settings.defaultNoteTemplateId === tpl.id) {
+							this.plugin.settings.defaultNoteTemplateId = this.plugin.settings.noteTemplates[0]?.id ?? ''
+						}
+						await this.plugin.saveSettings()
+						this.display()
+					}))
+			}
+			new Setting(containerEl)
+				.setName('模板文件')
+				.setDesc('打开当前默认模板；文件不存在时会按内置内容创建')
+				.addButton(button =>
+					button.setButtonText('创建 / 打开').setCta().onClick(() => void this.plugin.openNoteTemplate()))
+		}
 		new Setting(containerEl)
 			.setName('使用指南')
 			.setDesc(`在笔记文件夹生成《${APP_NAME} 使用指南》；已存在时可直接打开，或用「重新生成」覆盖为当前版本`)

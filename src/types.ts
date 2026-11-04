@@ -96,8 +96,17 @@ export interface BookData {
 	author: string
 	/** 生成的阅读笔记路径（库内相对路径） */
 	notePath?: string
+	/** 本书单独使用的笔记模板 id；空 = 跟随默认模板 */
+	templateId?: string
 	lastLocation?: LastLocation
 	annotations: Annotation[]
+}
+
+/** 一套可命名的笔记模板；path 为库内 Markdown 路径 */
+export interface NoteTemplate {
+	id: string
+	name: string
+	path: string
 }
 
 // ------------------------------------------------------------------
@@ -221,6 +230,12 @@ export interface GroveSettings {
 	autoBackup: 'off' | 'daily' | 'weekly'
 	/** 上次自动备份的时间戳（毫秒） */
 	lastAutoBackupAt: number
+	/** 每日阅读目标（分钟），0 = 不设目标 */
+	dailyGoalMinutes: number
+	/** 多套笔记模板；为空时退回 noteTemplatePath */
+	noteTemplates: NoteTemplate[]
+	/** 默认笔记模板 id；为空时用列表第一套 */
+	defaultNoteTemplateId: string
 	/**
 	 * 数据目录（库内相对路径）：批注 JSON、封面、书单、统计的存放位置。
 	 * 留空 = 沿用旧行为（插件目录下的 data/）。
@@ -252,6 +267,9 @@ export const DEFAULT_SETTINGS: GroveSettings = {
 	debugMode: false,
 	autoBackup: 'off',
 	lastAutoBackupAt: 0,
+	dailyGoalMinutes: 30,
+	noteTemplates: [],
+	defaultNoteTemplateId: '',
 	dataFolder: '',
 	shelfSort: 'default',
 	logoStyle: 'original',

@@ -1884,15 +1884,173 @@
 	z-index: 1000;
 	max-width: min(360px, calc(100vw - 20px));
 	padding: 8px 10px;
-	background: var(--background-primary);
-	color: var(--text-normal);
-	border: 1px solid var(--background-modifier-border);
-	border-radius: 6px;
-	box-shadow: var(--shadow-s);
+	background: #1b1b1b;
+	color: #f2f2f2;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 8px;
+	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 	font-size: var(--font-ui-smaller);
-	line-height: 1.45;
+	line-height: 1.5;
 	white-space: pre-line;
 	overflow-wrap: anywhere;
 	pointer-events: none;
 	transform: translateX(-50%);
+}
+
+.grove-card-tooltip::after {
+	content: '';
+	position: absolute;
+	left: var(--grove-arrow-x, 50%);
+	margin-left: -6px;
+	width: 0;
+	height: 0;
+	border: 6px solid transparent;
+}
+
+.grove-card-tooltip.is-below::after {
+	top: -12px;
+	border-bottom-color: #1b1b1b;
+}
+
+.grove-card-tooltip.is-above::after {
+	bottom: -12px;
+	border-top-color: #1b1b1b;
+}
+
+/* ---------- 阅读目标 / 热力图 ---------- */
+
+.grove-stats-summary {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+	gap: 8px;
+	margin: 10px 0 16px;
+}
+
+.grove-stats-card {
+	padding: 10px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-secondary);
+}
+
+.grove-stats-card-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.grove-stats-card-value {
+	margin-top: 2px;
+	font-size: 20px;
+	font-weight: 700;
+}
+
+.grove-stats-card-sub {
+	margin-top: 2px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.grove-stats-goal {
+	height: 4px;
+	margin-top: 8px;
+	background: var(--background-modifier-border);
+	border-radius: 2px;
+	overflow: hidden;
+}
+
+.grove-stats-goal-fill {
+	height: 100%;
+	background: var(--interactive-accent);
+	border-radius: 2px;
+}
+
+.grove-stats-heatmap {
+	display: grid;
+	grid-auto-flow: column;
+	grid-template-rows: repeat(7, 12px);
+	gap: 3px;
+	padding: 4px 0 2px;
+	overflow-x: auto;
+}
+
+.grove-stats-heat-cell {
+	width: 12px;
+	height: 12px;
+	border-radius: 2px;
+	background: var(--background-modifier-border);
+}
+
+.grove-stats-heat-cell.is-level-1 {
+	background: color-mix(in srgb, var(--interactive-accent) 25%, transparent);
+}
+
+.grove-stats-heat-cell.is-level-2 {
+	background: color-mix(in srgb, var(--interactive-accent) 45%, transparent);
+}
+
+.grove-stats-heat-cell.is-level-3 {
+	background: color-mix(in srgb, var(--interactive-accent) 65%, transparent);
+}
+
+.grove-stats-heat-cell.is-level-4 {
+	background: color-mix(in srgb, var(--interactive-accent) 90%, transparent);
+}
+
+.grove-stats-heat-cell.is-today {
+	outline: 1px solid var(--text-normal);
+	outline-offset: 1px;
+}
+
+.grove-stats-heat-legend {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 4px;
+	margin-bottom: 10px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.grove-stats-heat-legend .grove-stats-heat-cell {
+	width: 10px;
+	height: 10px;
+}
+
+/* ---------- 笔记模板选择 ---------- */
+
+.grove-template-options {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin: 8px 0;
+	max-height: 55vh;
+	overflow-y: auto;
+}
+
+.grove-template-option {
+	padding: 9px 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 7px;
+	cursor: pointer;
+}
+
+.grove-template-option:hover {
+	background: var(--background-modifier-hover);
+}
+
+.grove-template-option.is-active {
+	border-color: var(--interactive-accent);
+	background: var(--background-modifier-hover);
+}
+
+.grove-template-option-name {
+	font-weight: 600;
+	font-size: var(--font-ui-small);
+}
+
+.grove-template-option-path {
+	margin-top: 2px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	word-break: break-all;
 }

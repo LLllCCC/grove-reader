@@ -1031,6 +1031,7 @@ export class BookshelfView extends ItemView {
 			e.preventDefault()
 			const menu = new Menu()
 			menu.addItem(item => item.setTitle('打开书籍').setIcon('book-open').onClick(() => void plugin.openBookByPath(path)))
+			menu.addItem(item => item.setTitle('笔记模板…').setIcon('file-text').onClick(() => plugin.showTemplatePicker(path)))
 			menu.addItem(item => item.setTitle('更换封面').setIcon('image').onClick(() => void this.#changeCover(path, card)))
 			menu.addItem(item => item.setTitle('用图片链接更换封面…').setIcon('link').onClick(() => void this.#changeCoverByUrl(path, card)))
 			menu.addItem(item => item.setTitle('编辑书籍信息').setIcon('pencil').onClick(() => this.#editInfo(path)))
@@ -1103,10 +1104,17 @@ export class BookshelfView extends ItemView {
 		const center = rect.left + rect.width / 2
 		const left = Math.min(window.innerWidth - width / 2 - margin, Math.max(width / 2 + margin, center))
 		let top = rect.bottom + 8
-		if (top + height > window.innerHeight - margin) top = rect.top - height - 8
+		let above = false
+		if (top + height > window.innerHeight - margin) {
+			top = rect.top - height - 8
+			above = true
+		}
 		top = Math.max(margin, top)
+		el.addClass(above ? 'is-above' : 'is-below')
 		el.style.left = `${left}px`
 		el.style.top = `${top}px`
+		const arrowX = Math.min(width - 14, Math.max(14, center - (left - width / 2)))
+		el.style.setProperty('--grove-arrow-x', `${arrowX}px`)
 		this.tooltipEl = el
 	}
 
