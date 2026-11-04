@@ -586,7 +586,7 @@
 	padding: 4px;
 	background: var(--background-secondary);
 	border-radius: 8px;
-	overflow-x: auto;
+	flex-wrap: wrap;
 	position: sticky;
 	top: 0;
 	z-index: 10;
