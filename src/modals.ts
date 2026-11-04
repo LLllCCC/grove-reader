@@ -630,13 +630,20 @@ export class HealthReportModal extends Modal {
 			section('书单指向不存在的文件', report.staleLists)
 			section('阅读统计指向不存在的文件', report.staleStats)
 			section('笔记里的书籍 ID 找不到数据', report.brokenNoteIds.map(b => `${b.note} → ${b.id.slice(0, 12)}…`))
+			if (report.missingBooks.length) {
+				this.contentEl.createEl('p', {
+					cls: 'setting-item-description',
+					text: '孤儿批注 JSON 不会被自动删除；确认无用后可在 data/books/ 手动清理（建议先备份）。',
+				})
+			}
 		}
 
 		const buttons = this.contentEl.createDiv('modal-button-container')
 		const copy = buttons.createEl('button', { text: '复制报告' })
 		copy.addEventListener('click', () => {
 			void navigator.clipboard.writeText(this.#reportText())
-			new Notice('体检报告已复制')
+				.then(() => new Notice('体检报告已复制'))
+				.catch(() => new Notice('复制失败，请手动选择文本'))
 		})
 		const cleanupable = this.cleanupCount
 		if (cleanupable) {

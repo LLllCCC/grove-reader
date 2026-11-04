@@ -132,19 +132,21 @@ export function buildHealthReport(vaultBase: string, dataRoot: string, notesFold
 		// 没有统计
 	}
 
-	const notesRoot = pathModule.join(vaultBase, notesFolder)
-	for (const note of walkMarkdown(notesRoot)) {
-		let text = ''
-		try {
-			text = fs.readFileSync(note, 'utf-8')
-		} catch {
-			continue
-		}
-		const line = text.split('\n').find(l => l.startsWith('grove-book:'))
-		if (!line) continue
-		const id = line.slice('grove-book:'.length).trim()
-		if (id && !ids.has(id)) {
-			report.brokenNoteIds.push({ note: pathModule.basename(note), id })
+	const notesRoot = notesFolder ? pathModule.join(vaultBase, notesFolder) : ''
+	if (notesRoot) {
+		for (const note of walkMarkdown(notesRoot)) {
+			let text = ''
+			try {
+				text = fs.readFileSync(note, 'utf-8')
+			} catch {
+				continue
+			}
+			const line = text.split('\n').find(l => l.startsWith('grove-book:'))
+			if (!line) continue
+			const id = line.slice('grove-book:'.length).trim()
+			if (id && !ids.has(id)) {
+				report.brokenNoteIds.push({ note: pathModule.basename(note), id })
+			}
 		}
 	}
 
