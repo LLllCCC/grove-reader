@@ -295,8 +295,7 @@ function listHue(id: string): number {
 export class BookshelfView extends ItemView {
 	private gridEl!: HTMLElement
 	private hintEl!: HTMLElement
-	private countEl!: HTMLElement
-	private listsEl!: HTMLElement
+	private countEl!: HTMLElement	private listsEl!: HTMLElement
 	/** 'all' = 全部，'none' = 未分类，其余为书单 id */
 	private listFilter = 'all'
 	private toolsEl!: HTMLElement
