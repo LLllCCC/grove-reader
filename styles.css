@@ -2022,3 +2022,16 @@
 	color: var(--text-muted);
 	word-break: break-all;
 }
+
+.grove-appear-toggle {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.grove-appear-toggle input {
+	margin: 0;
+}

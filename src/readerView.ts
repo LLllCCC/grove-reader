@@ -127,6 +127,9 @@ export class ReaderView extends ItemView {
 	private fullTextSearchStatus!: HTMLElement
 	private fullTextSearchResults!: HTMLElement
 	private fullTextSearchTaskId = 0
+	private wheelAccum = 0
+	private wheelLast = 0
+	private wheelDocs = new WeakSet<Document>()
 	private clearBtnEl!: HTMLButtonElement
 	private filterDotEls = new Map<string, HTMLElement>()
 	private annItemEls = new Map<string, HTMLElement>()
@@ -278,6 +281,7 @@ export class ReaderView extends ItemView {
 		const body = root.createDiv('grove-body')
 		this.readerEl = body.createDiv('grove-reader')
 		this.readerInnerEl = this.readerEl.createDiv('grove-reader-inner')
+		this.registerDomEvent(this.readerInnerEl, 'wheel', e => this.#onWheel(e), { passive: false })
 
 		// 右下角悬浮翻页按钮
 		const pageBtns = this.readerEl.createDiv('grove-page-btns')
@@ -698,6 +702,16 @@ export class ReaderView extends ItemView {
 			})
 		}
 
+		// —— 翻页 ——
+		const pageRow = panel.createDiv('grove-appear-row')
+		pageRow.createSpan('grove-appear-label').setText('翻页')
+		const pageCol = pageRow.createDiv('grove-appear-col')
+		const wheelLabel = pageCol.createEl('label', { cls: 'grove-appear-toggle' })
+		const wheelBox = wheelLabel.createEl('input', { attr: { type: 'checkbox' } })
+		wheelBox.checked = a.wheelPageTurn
+		wheelLabel.createSpan({ text: '鼠标滚动切换（上下滚动翻页）' })
+		wheelBox.addEventListener('change', () => this.#patchAppearance({ wheelPageTurn: wheelBox.checked }))
+
 		const foot = panel.createDiv('grove-appear-foot')
 		const reset = foot.createEl('button', { text: '恢复默认' })
 		reset.addEventListener('click', () => {
@@ -726,6 +740,11 @@ export class ReaderView extends ItemView {
 
 	#onLoad = (e: Event): void => {
 		const { doc, index } = (e as CustomEvent<{ doc: Document; index: number }>).detail
+		// EPUB 正文在 iframe 里，滚轮事件不会冒泡到外层阅读区
+		if (!this.wheelDocs.has(doc)) {
+			this.wheelDocs.add(doc)
+			doc.addEventListener('wheel', (we: WheelEvent) => this.#onWheel(we), { passive: false })
+		}
 		doc.addEventListener('pointerup', (ev: PointerEvent) => {
 			const t = ev.target
 			if (t instanceof Element && t.closest('.grove-sel-popup')) return
@@ -1377,6 +1396,29 @@ export class ReaderView extends ItemView {
 	// ------------------------------------------------------------------
 	// 命令入口（供 main.ts 调用）
 	// ------------------------------------------------------------------
+
+	/** 鼠标滚轮/触控板上下滚动翻页；输入框、侧栏和选择弹窗不拦 */
+	#onWheel(e: WheelEvent): void {
+		if (!this.plugin.settings.appearance.wheelPageTurn || !this.foliate) return
+		if (e.ctrlKey || e.metaKey || e.defaultPrevented) return
+		const sel = e.view?.getSelection?.()
+		if (sel && !sel.isCollapsed) return
+		const target = e.target as Element | null
+		if (target && typeof target.closest === 'function' && target.closest('input, textarea, select, .grove-sel-popup, .grove-page-btns, .grove-appear-panel')) return
+		const horizontal = Math.abs(e.deltaX) > Math.abs(e.deltaY)
+		const raw = horizontal ? e.deltaX : e.deltaY
+		const delta = e.deltaMode === 1 ? raw * 16 : e.deltaMode === 2 ? raw * window.innerHeight : raw
+		if (!delta) return
+		const now = Date.now()
+		if (now - this.wheelLast > 420) this.wheelAccum = 0
+		this.wheelLast = now
+		this.wheelAccum += delta
+		if (Math.abs(this.wheelAccum) < 36) return
+		e.preventDefault()
+		if (this.wheelAccum > 0) this.nextPage()
+		else this.prevPage()
+		this.wheelAccum = 0
+	}
 
 	nextPage(): void {
 		this.foliate?.goRight()

@@ -146,6 +146,8 @@ export interface ReaderAppearance {
 	maxInlineSize: number
 	/** 段间距 em，0 = 跟随书籍 */
 	paragraphSpacing: number
+	/** 鼠标滚轮上下滚动时翻页（仅 EPUB 分页视图） */
+	wheelPageTurn: boolean
 }
 
 export const DEFAULT_APPEARANCE: ReaderAppearance = {
@@ -158,6 +160,7 @@ export const DEFAULT_APPEARANCE: ReaderAppearance = {
 	pageMargin: 48,
 	maxInlineSize: 700,
 	paragraphSpacing: 0,
+	wheelPageTurn: true,
 }
 
 // ------------------------------------------------------------------
