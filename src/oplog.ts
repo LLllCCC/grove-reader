@@ -53,7 +53,7 @@ export class OpLog {
 		this.saveNow()
 	}
 
-	private #saveSoon(): void {
+	#saveSoon(): void {
 		if (this.timer) clearTimeout(this.timer)
 		this.timer = setTimeout(() => {
 			this.timer = null

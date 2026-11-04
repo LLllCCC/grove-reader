@@ -149,6 +149,13 @@ export default class GroveReaderPlugin extends Plugin {
 
 		let changed = false
 		const configuredData = this.settings.dataFolder?.trim() ?? ''
+		const hasBookJson = (folder: string): boolean => {
+			try {
+				return fs.readdirSync(pathModule.join(folder, 'data', 'books')).some(n => n.endsWith('.json'))
+			} catch {
+				return false
+			}
+		}
 		// 配置的数据目录必须真的指向存在的书，否则视为迁移后的旧路径
 		const configuredDataOk = ((): boolean => {
 			if (!configuredData) return false
@@ -159,7 +166,10 @@ export default class GroveReaderPlugin extends Plugin {
 				return false
 			}
 		})()
-		if (dataOk && !configuredDataOk) {
+		// 旧目录可能被旧实例重建出 shelf.json（但没有 books/*.json），此时以有批注数据的目录为准
+		const canonicalHasData = hasBookJson(root)
+		const configuredHasData = configuredData ? hasBookJson(pathModule.join(this.vaultBase, configuredData)) : false
+		if (dataOk && (!configuredDataOk || (canonicalHasData && !configuredHasData))) {
 			this.settings.dataFolder = LIBRARY_ROOT
 			changed = true
 		}
@@ -947,6 +957,7 @@ export default class GroveReaderPlugin extends Plugin {
 			for (const [src, dst] of [
 				[pathModule.join(this.dataRoot, 'data', 'shelf.json'), 'shelf.json'],
 				[pathModule.join(this.dataRoot, 'data', 'lists.json'), 'lists.json'],
+				[pathModule.join(this.dataRoot, 'data', 'oplog.json'), 'oplog.json'],
 				[pathModule.join(this.pluginDir, 'data.json'), 'data.json'],
 			] as const) {
 				await fsp.copyFile(src, pathModule.join(root, dst)).catch(() => { })

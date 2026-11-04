@@ -1,6 +1,6 @@
 import { App, Notice, PluginSettingTab, Setting, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
-import { FolderPromptModal, FolderSuggest } from './modals'
+import { FolderPromptModal, FolderSuggest, ConfirmModal, OpLogModal } from './modals'
 import { APP_NAME, BACKUP_FOLDER_NAME, DEFAULT_SHELF_DISPLAY } from './types'
 import { isAbsolutePath } from './util'
 import { LOGO_OPTIONS } from './logos'
@@ -252,6 +252,23 @@ export class GroveSettingTab extends PluginSettingTab {
 						this.plugin.settings.maxBackups = n
 						await this.plugin.saveSettings()
 					}
+				}))
+
+		// —— 操作记录 ——
+		containerEl.createEl('h3', { text: '操作记录' })
+		new Setting(containerEl)
+			.setName('关键操作记录')
+			.setDesc('只记录删除书籍、清空批注、恢复隐藏、备份等低频但重要的动作，最多 200 条；翻页、搜索不记录。')
+			.addButton(button =>
+				button.setButtonText('查看').onClick(() => {
+					new OpLogModal(this.app, this.plugin.oplog.list()).open()
+				}))
+			.addButton(button =>
+				button.setButtonText('清空').onClick(() => {
+					new ConfirmModal(this.app, '清空操作记录？只删日志，不影响批注数据。', () => {
+						this.plugin.oplog.clear()
+						new Notice('已清空操作记录')
+					}).open()
 				}))
 
 		containerEl.createEl('p', {

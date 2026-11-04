@@ -4,6 +4,7 @@ import type { BookList } from './lists'
 import { todayKey } from './stats'
 import type GroveReaderPlugin from './main'
 import { basenameOf } from './util'
+import type { OpEntry } from './oplog'
 
 export class BookPickerModal extends FuzzySuggestModal<TFile> {
 	constructor(app: App, private onPick: (file: TFile) => void) {
@@ -243,7 +244,7 @@ export class DeleteBookModal extends Modal {
 		this.contentEl.createEl('p', { text: `《${this.bookTitle}》` })
 		this.contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: `将删除这本书的阅读数据：${this.annotationCount} 条批注、阅读位置、书单归属。生成的 Markdown 笔记是否一起删除，可在下方选择。`,
+			text: `这本书有 ${this.annotationCount} 条批注。勾选删除原文件时，会同时删除阅读数据（批注、阅读位置、书单归属）；只移出书架则全部保留。生成的 Markdown 笔记是否删除可在下方选择。`,
 		})
 		const row = this.contentEl.createDiv('grove-delete-check')
 		const checkbox = row.createEl('input', { type: 'checkbox' })
@@ -544,6 +545,37 @@ export class FolderPromptModal extends Modal {
 		const cancel = buttons.createEl('button', { text: '取消' })
 		cancel.addEventListener('click', () => this.close())
 		window.setTimeout(() => input.focus(), 50)
+	}
+
+	onClose(): void {
+		this.contentEl.empty()
+	}
+}
+
+export class OpLogModal extends Modal {
+	constructor(app: App, private entries: OpEntry[]) {
+		super(app)
+	}
+
+	onOpen(): void {
+		this.contentEl.empty()
+		this.contentEl.createEl('h3', { text: '操作记录' })
+		this.contentEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: '只记录删除书籍、清空批注、恢复隐藏、备份失败等关键动作，最多保留 200 条；翻页、搜索等高频操作不记录。',
+		})
+		if (!this.entries.length) {
+			this.contentEl.createEl('p', { text: '还没有记录。' })
+			return
+		}
+		const list = this.contentEl.createDiv('grove-oplog-list')
+		for (const entry of this.entries) {
+			const row = list.createDiv('grove-oplog-row')
+			row.createSpan('grove-oplog-time').setText(new Date(entry.at).toLocaleString('zh-CN', { hour12: false }))
+			const body = row.createDiv('grove-oplog-body')
+			body.createSpan('grove-oplog-action').setText(entry.action)
+			body.createSpan('grove-oplog-detail').setText(entry.detail)
+		}
 	}
 
 	onClose(): void {
