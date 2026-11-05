@@ -862,10 +862,6 @@
 	overflow-y: auto;
 }
 
-.grove-shelf-count {
-	color: var(--text-muted);
-	font-size: var(--font-ui-small);
-}
 
 .grove-shelf-grid {
 	display: grid;
@@ -1038,10 +1034,6 @@
 	flex: none;
 }
 
-.grove-shelf-tools .grove-shelf-count {
-	margin-left: auto;
-	white-space: nowrap;
-}
 
 .grove-info-label {
 	font-size: var(--font-ui-small);

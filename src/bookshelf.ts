@@ -294,7 +294,6 @@ function listHue(id: string): number {
 
 export class BookshelfView extends ItemView {
 	private gridEl!: HTMLElement
-	private countEl!: HTMLElement
 	private listsEl!: HTMLElement
 	/** 视图头部动作只注册一次，避免 onOpen 重入时重复 */
 	private headerActionsAdded = false
@@ -434,7 +433,6 @@ export class BookshelfView extends ItemView {
 			void this.plugin.saveSettings()
 			void this.refresh()
 		})
-		this.countEl = this.toolsEl.createSpan('grove-shelf-count')
 	}
 
 	async onClose(): Promise<void> {
@@ -463,7 +461,6 @@ export class BookshelfView extends ItemView {
 		const folders = plugin.settings.scanFolders
 
 		if (!folders.length) {
-			this.countEl.setText('')
 			this.#showEmpty('还没有扫描文件夹。选择一个放书的文件夹（库内或本机任意路径），书架会递归扫描其中的电子书与 PDF。')
 			const addBtn = this.emptyEl.createEl('button', { text: '添加文件夹', cls: 'mod-cta' })
 			addBtn.addEventListener('click', () => void this.#addFolder())
@@ -493,7 +490,6 @@ export class BookshelfView extends ItemView {
 		this.#renderContinue(stats, visiblePaths)
 
 		if (!inList.length) {
-			this.countEl.setText('共 0 本')
 			const hiddenCount = plugin.settings.hiddenBooks?.length ?? 0
 			if (!visiblePaths.length && hiddenCount) {
 				this.#showEmpty(`扫描到的 ${hiddenCount} 本书都被移出书架了，原文件仍在库中。`)
@@ -557,7 +553,6 @@ export class BookshelfView extends ItemView {
 			if (match) shown++
 		}
 		const total = this.cardEls.size
-		this.countEl.setText(q ? `找到 ${shown} / ${total} 本` : `共 ${total} 本`)
 		if (shown === 0 && total > 0) {
 			this.#showEmpty('没有匹配的书。试试只输书名或作者里的关键词。')
 		} else {
