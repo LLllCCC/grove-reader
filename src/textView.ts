@@ -614,11 +614,23 @@ export class TextView extends ItemView {
 	// ------------------------------------------------------------------
 
 	/** 视口内可排版宽度（扣除左右内边距） */
-	#contentWidth(): number {
+	/** 视口当前能给的宽度（窗口变化后立刻反映） */
+	#targetWidth(): number {
+		if (!this.scrollEl) return 0
 		const style = getComputedStyle(this.scrollEl)
 		const pad = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
 		const width = this.scrollEl.clientWidth || this.scrollEl.getBoundingClientRect().width
 		return Math.max(0, width - pad)
+	}
+
+	/**
+	 * 当前实际排版用的宽度。
+	 * 窗口刚变化时 textEl 还是旧宽度（style.width 是显式 px，不会跟着视口变），
+	 * 这时必须用旧值来换算屏号，否则新旧尺寸混用会把位置算跑。
+	 */
+	#contentWidth(): number {
+		const laid = Number.parseFloat(this.textEl?.style.width || '0')
+		return laid > 0 ? laid : this.#targetWidth()
 	}
 
 	#contentHeight(): number {
@@ -647,8 +659,8 @@ export class TextView extends ItemView {
 
 	#layout(): void {
 		if (!this.scrollEl || !this.textEl) return
-		if (this.#contentWidth() < 80) return
-		this.textEl.style.width = `${this.#contentWidth()}px`
+		if (this.#targetWidth() < 80) return
+		this.textEl.style.width = `${this.#targetWidth()}px`
 		this.textEl.style.height = `${this.#contentHeight()}px`
 		this.textEl.style.columnCount = String(this.#columnCount())
 		this.textEl.style.columnGap = `${this.#columnGap()}px`
@@ -658,14 +670,17 @@ export class TextView extends ItemView {
 		const step = this.#step()
 		const total = this.textEl.scrollWidth
 		if (!Number.isFinite(total) || total <= 0 || step <= 0) return 1
-		return Math.max(1, Math.ceil(total / step))
+		// 按可滚动范围算：保证最后一屏 scrollLeft 不超过 max，
+		// 否则会被夹回去，左边露出上一列的半截字（最后一屏右侧留白是正常的）
+		const max = Math.max(0, total - this.scrollEl.clientWidth)
+		return Math.max(1, Math.floor(max / step + 0.02) + 1)
 	}
 
 	/** 渲染当前逻辑页（含高亮），等一帧后测量屏数并定位 */
 	#renderPage(): void {
 		if (!this.textEl) return
 		// 视图刚挂载时容器宽度还是 0，这时排版会算错每屏字符数，等下一帧再试
-		if (this.#contentWidth() < 80) {
+		if (this.#targetWidth() < 80) {
 			if (this.layoutRetry < 40) {
 				this.layoutRetry += 1
 				window.requestAnimationFrame(() => this.#renderPage())
@@ -725,7 +740,7 @@ export class TextView extends ItemView {
 			this.#flashPendingMark()
 			// 视图刚打开时可能是小尺寸排版，等真实宽度出现后自愈一次
 			const laid = Number.parseFloat(this.textEl.style.width || '0')
-			if (Math.abs(this.#contentWidth() - laid) > 4) this.#scheduleRelayout()
+			if (Math.abs(this.#targetWidth() - laid) > 4) this.#scheduleRelayout()
 		})
 	}
 
