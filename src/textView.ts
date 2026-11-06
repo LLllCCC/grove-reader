@@ -349,7 +349,7 @@ export class TextView extends ItemView {
 		this.scrollEl.style.backgroundColor = bg
 		this.textEl.style.color = fg
 		this.textEl.style.fontFamily = font
-		this.textEl.style.fontSize = `${a.fontSize}%`
+		this.textEl.style.fontSize = `${((16 * a.fontSize) / 100).toFixed(1)}px`
 		this.textEl.style.lineHeight = String(a.lineHeight)
 		this.textEl.style.maxWidth = `${a.maxInlineSize}px`
 		this.textEl.style.paddingTop = `${a.pageMargin}px`
