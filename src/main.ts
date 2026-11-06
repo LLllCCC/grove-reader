@@ -439,7 +439,7 @@ export default class GroveReaderPlugin extends Plugin {
 		return this.app.workspace.getActiveViewOfType(ReaderView)
 	}
 
-	private withAnyReader(checking: boolean, run: (view: ReaderView | PdfView) => unknown): boolean {
+	private withAnyReader(checking: boolean, run: (view: ReaderView | PdfView | TextView) => unknown): boolean {
 		const r = this.activeReader()
 		if (r?.ready) {
 			if (!checking) run(r)
@@ -448,6 +448,11 @@ export default class GroveReaderPlugin extends Plugin {
 		const p = this.app.workspace.getActiveViewOfType(PdfView)
 		if (p?.ready) {
 			if (!checking) run(p)
+			return true
+		}
+		const t = this.app.workspace.getActiveViewOfType(TextView)
+		if (t?.ready) {
+			if (!checking) run(t)
 			return true
 		}
 		return false
@@ -597,7 +602,7 @@ export default class GroveReaderPlugin extends Plugin {
 			return
 		}
 		if (ext === 'txt') {
-			await this.#openTextBook(bookPath)
+			await this.#openTextBook(bookPath, cfi)
 			return
 		}
 		if (!isReaderExt(ext)) {
@@ -621,20 +626,21 @@ export default class GroveReaderPlugin extends Plugin {
 		this.app.workspace.revealLeaf(leaf)
 	}
 
-	/** 在 Grove Reader 内打开 TXT（自动识别 UTF-8 / GB18030 / Big5） */
-	async #openTextBook(bookPath: string): Promise<void> {
+	/** 在 Grove Reader 内打开 TXT（自动识别 UTF-8 / GB18030 / Big5）；cfi 为批注回跳定位 */
+	async #openTextBook(bookPath: string, cfi?: string): Promise<void> {
 		const existing = this.app.workspace
 			.getLeavesOfType(VIEW_TYPE_GROVE_TEXT)
 			.find(leaf => leaf.view instanceof TextView && leaf.view.bookPath === bookPath)
 		if (existing && existing.view instanceof TextView) {
 			this.app.workspace.revealLeaf(existing)
+			if (cfi) existing.view.jumpTo(cfi)
 			return
 		}
 		const leaf = this.app.workspace.getLeaf('tab')
 		await leaf.setViewState({
 			type: VIEW_TYPE_GROVE_TEXT,
 			active: true,
-			state: { bookPath },
+			state: { bookPath, cfi },
 		})
 		this.app.workspace.revealLeaf(leaf)
 	}
@@ -943,7 +949,7 @@ export default class GroveReaderPlugin extends Plugin {
 	// 笔记生成
 	// ------------------------------------------------------------------
 
-	async generateNoteFor(view: ReaderView | PdfView): Promise<void> {
+	async generateNoteFor(view: ReaderView | PdfView | TextView): Promise<void> {
 		const data = view.snapshot()
 		if (!data) {
 			new Notice('Grove Reader：当前没有已打开的书籍')
@@ -1082,7 +1088,7 @@ export default class GroveReaderPlugin extends Plugin {
 	private noteRefreshTimer: number | null = null
 
 	/** 批注/元数据变更后防抖刷新已存在的笔记（不新建、不弹 Notice、不跳转） */
-	scheduleNoteRefresh(view: ReaderView | PdfView): void {
+	scheduleNoteRefresh(view: ReaderView | PdfView | TextView): void {
 		if (!this.settings.autoUpdateNote) return
 		if (this.noteRefreshTimer != null) window.clearTimeout(this.noteRefreshTimer)
 		this.noteRefreshTimer = window.setTimeout(() => {
@@ -1091,7 +1097,7 @@ export default class GroveReaderPlugin extends Plugin {
 		}, 1500)
 	}
 
-	async #autoRefreshNote(view: ReaderView | PdfView): Promise<void> {
+	async #autoRefreshNote(view: ReaderView | PdfView | TextView): Promise<void> {
 		const data = view.snapshot()
 		if (!data?.notePath) return
 		let file = this.app.vault.getAbstractFileByPath(data.notePath)

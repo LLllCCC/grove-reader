@@ -16,6 +16,8 @@ export interface DecodedText {
 export interface TextViewState {
 	bookPath?: string
 	page?: number
+	/** 回跳链接带来的定位（txt:<start>-<end>） */
+	cfi?: string
 }
 
 /**

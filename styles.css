@@ -2031,3 +2031,22 @@
 .grove-text-content::selection {
 	background: var(--text-selection, rgba(120, 160, 255, 0.35));
 }
+
+/* TXT 正文里的高亮（批注）：背景与文字色由内联样式给出，这里只管交互反馈 */
+.grove-text-content mark.grove-txt-mark {
+	padding: 0;
+	border-radius: 2px;
+	cursor: pointer;
+	box-decoration-break: clone;
+	-webkit-box-decoration-break: clone;
+	transition: outline-color 0.15s ease;
+	outline: 2px solid transparent;
+}
+
+.grove-text-content mark.grove-txt-mark:hover {
+	outline-color: color-mix(in srgb, var(--interactive-accent) 55%, transparent);
+}
+
+.grove-text-content mark.grove-txt-mark.is-flash {
+	outline-color: var(--interactive-accent);
+}
