@@ -11,7 +11,7 @@ import {
 } from './types'
 import { CommentModal, ConfirmModal } from './modals'
 import { basenameOf, cleanBookTitle, contrastFg, isDarkColor, randomId, truncate } from './util'
-import { decodeTextBuffer, paginateText, TextViewState, VIEW_TYPE_GROVE_TEXT } from './textCodec'
+import { decodeTextBuffer, TextViewState, VIEW_TYPE_GROVE_TEXT } from './textCodec'
 
 export { VIEW_TYPE_GROVE_TEXT } from './textCodec'
 
@@ -115,6 +115,11 @@ export class TextView extends ItemView {
 	private gotoLastScreen = false
 	/** 需要在渲染后闪烁提示的批注 id */
 	private flashAnnId: string | null = null
+	/** 跳转时是否让目标文字顶到列首（目录/进度跳转用） */
+	private alignToColumnTop = false
+	/** 首次渲染/定位过程中，忽略 ResizeObserver 的重排请求 */
+	private rendering = false
+	private layoutRetry = 0
 	private resizeObserver: ResizeObserver | null = null
 	private relayoutTimer: number | null = null
 
@@ -450,14 +455,8 @@ export class TextView extends ItemView {
 		const decoded = decodeTextBuffer(this.bytes, this.encoding)
 		this.detected = decoded.encoding
 		this.warning = decoded.warning
-		this.pages = paginateText(decoded.text)
-		this.pageStarts = []
-		let acc = 0
-		for (const p of this.pages) {
-			this.pageStarts.push(acc)
-			acc += p.length
-		}
 		this.#buildChapters(decoded.text)
+		this.#buildPages(decoded.text)
 
 		let target: number | null = null
 		const jump = this.pendingCfi ? parseTextCfi(this.pendingCfi) : null
@@ -473,6 +472,7 @@ export class TextView extends ItemView {
 		this.screen = 0
 		this.screenCount = 1
 		this.gotoLastScreen = false
+		this.alignToColumnTop = false
 		// 交给 #renderPage 在排版完成后精确定位到那一屏
 		this.pendingOffset = target
 
@@ -509,6 +509,44 @@ export class TextView extends ItemView {
 		this.chapters = out
 	}
 
+	/**
+	 * 按章节切分逻辑页：每章从新的一页开始，标题天然落在页首（与 EPUB「每章一个文档」一致）。
+	 * 章节过长时按 3 万字硬切；相邻标题相距不足 200 字时只保留前一个，避免出现大半页空白。
+	 */
+	#buildPages(text: string): void {
+		const points: number[] = []
+		for (const c of this.chapters) {
+			if (c.offset <= 0 || c.offset >= text.length) continue
+			const last = points.length ? points[points.length - 1] : 0
+			if (c.offset - last < 200) continue
+			points.push(c.offset)
+		}
+		const hard = 30_000
+		const maxPages = 6000
+		const pages: string[] = []
+		const starts: number[] = []
+		let start = 0
+		for (const cut of [...points, text.length]) {
+			while (cut - start > hard) {
+				pages.push(text.slice(start, start + hard))
+				starts.push(start)
+				start += hard
+			}
+			if (cut > start) {
+				pages.push(text.slice(start, cut))
+				starts.push(start)
+				start = cut
+			}
+			if (pages.length >= maxPages) break
+		}
+		if (start < text.length && pages.length < maxPages) {
+			pages.push(text.slice(start))
+			starts.push(start)
+		}
+		this.pages = pages.length ? pages : ['']
+		this.pageStarts = starts.length ? starts : [0]
+	}
+
 	#buildToc(): void {
 		if (!this.tocSelect) return
 		this.tocSelect.empty()
@@ -521,9 +559,16 @@ export class TextView extends ItemView {
 		}
 	}
 
-	#syncToc(): void {
+	#syncToc(offsetArg?: number): void {
 		if (!this.tocSelect || !this.chapters.length) return
-		const idx = this.#sectionIndexOf(this.pageStarts[this.page] ?? 0)
+		// 用当前屏的起始字符，而不是逻辑页起点：一页 3 万字里可能跨好几节
+		const start = offsetArg ?? this.#currentOffset()
+		const pageLen = this.pages[this.page]?.length ?? 0
+		const span = pageLen / Math.max(1, this.screenCount)
+		let idx = this.#sectionIndexOf(start)
+		// 这一屏里刚好开始了下一章（目录跳转后标题通常就在屏内），优先显示它
+		const next = idx + 1
+		if (next < this.chapters.length && this.chapters[next].offset < start + span) idx = next
 		this.tocSelect.value = idx >= 0 ? String(this.chapters[idx].offset) : ''
 	}
 
@@ -572,9 +617,8 @@ export class TextView extends ItemView {
 	#contentWidth(): number {
 		const style = getComputedStyle(this.scrollEl)
 		const pad = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
-		// 视图刚打开时容器可能还是 0 宽，先给一个兜底值，resize 后会自动重排
 		const width = this.scrollEl.clientWidth || this.scrollEl.getBoundingClientRect().width
-		return Math.max(240, width - pad)
+		return Math.max(0, width - pad)
 	}
 
 	#contentHeight(): number {
@@ -603,6 +647,7 @@ export class TextView extends ItemView {
 
 	#layout(): void {
 		if (!this.scrollEl || !this.textEl) return
+		if (this.#contentWidth() < 80) return
 		this.textEl.style.width = `${this.#contentWidth()}px`
 		this.textEl.style.height = `${this.#contentHeight()}px`
 		this.textEl.style.columnCount = String(this.#columnCount())
@@ -619,6 +664,15 @@ export class TextView extends ItemView {
 	/** 渲染当前逻辑页（含高亮），等一帧后测量屏数并定位 */
 	#renderPage(): void {
 		if (!this.textEl) return
+		// 视图刚挂载时容器宽度还是 0，这时排版会算错每屏字符数，等下一帧再试
+		if (this.#contentWidth() < 80) {
+			if (this.layoutRetry < 40) {
+				this.layoutRetry += 1
+				window.requestAnimationFrame(() => this.#renderPage())
+			}
+			return
+		}
+		this.layoutRetry = 0
 		const text = this.pages[this.page] ?? ''
 		const pageStart = this.pageStarts[this.page] ?? 0
 		const pageEnd = pageStart + text.length
@@ -650,6 +704,7 @@ export class TextView extends ItemView {
 		if (cursor < text.length) this.textEl.appendChild(document.createTextNode(text.slice(cursor)))
 
 		this.#layout()
+		this.rendering = true
 		this.scrollEl.scrollLeft = 0
 		this.scrollEl.scrollTop = 0
 
@@ -662,10 +717,15 @@ export class TextView extends ItemView {
 				const target = this.pendingOffset
 				this.pendingOffset = null
 				this.screen = this.#offsetToScreen(target)
+				this.alignToColumnTop = false
 			}
 			this.screen = Math.max(0, Math.min(this.screen, this.screenCount - 1))
 			this.#applyScreen()
+			this.rendering = false
 			this.#flashPendingMark()
+			// 视图刚打开时可能是小尺寸排版，等真实宽度出现后自愈一次
+			const laid = Number.parseFloat(this.textEl.style.width || '0')
+			if (Math.abs(this.#contentWidth() - laid) > 4) this.#scheduleRelayout()
 		})
 	}
 
@@ -675,13 +735,15 @@ export class TextView extends ItemView {
 		const step = this.#step()
 		const max = Math.max(0, this.textEl.scrollWidth - this.scrollEl.clientWidth)
 		this.scrollEl.scrollLeft = Math.min(this.screen * step, max)
-		this.#syncToc()
 		this.prevBtn.disabled = this.screen <= 0 && this.page <= 0
 		this.nextBtn.disabled = this.screen >= this.screenCount - 1 && this.page >= this.pages.length - 1
 		// 刚改完 scrollLeft 时命中测试还是旧位置，等一帧再算进度与位置
 		window.requestAnimationFrame(() => {
-			this.#updateProgress()
-			this.#touchLocation()
+			// 用屏号换算字符偏移：即使刚被重排过 scrollLeft 也不影响进度与位置记忆
+			const offset = this.#offsetAtX(this.screen * this.#step())
+			this.#updateProgress(offset)
+			this.#syncToc(offset)
+			this.#touchLocation(offset)
 		})
 	}
 
@@ -690,37 +752,26 @@ export class TextView extends ItemView {
 		return (this.pageStarts[last] ?? 0) + (this.pages[last]?.length ?? 0)
 	}
 
-	/**
-	 * 当前屏第一个字符的全文偏移。
-	 * 多列 + overflow 容器里 caretRangeFromPoint 不可靠（总是命中第一列），
-	 * 改为二分测量「第 n 个字符的横坐标」，找第一个落在视口左缘之后的字符。
-	 */
-	#currentOffset(): number {
+	/** 排版横坐标处第一个字符的全文偏移（二分测量，不依赖 scrollLeft） */
+	#offsetAtX(targetX: number): number {
 		const pageStart = this.pageStarts[this.page] ?? 0
-		if (!this.textEl || !this.scrollEl) return pageStart
+		if (!this.textEl) return pageStart
 		const total = this.pages[this.page]?.length ?? 0
-		if (!total) return pageStart
-		const target = this.scrollEl.scrollLeft
-		if (target <= 0) return pageStart
-		const base = this.textEl.getBoundingClientRect().left
-		const xAt = (local: number): number => {
-			const pos = this.#findTextPos(local)
-			if (!pos) return Number.POSITIVE_INFINITY
-			const range = document.createRange()
-			range.setStart(pos.node, pos.offset)
-			range.collapse(true)
-			const rect = range.getBoundingClientRect()
-			if (!Number.isFinite(rect.left)) return Number.POSITIVE_INFINITY
-			return rect.left - base
-		}
+		if (!total || targetX <= 0) return pageStart
 		let lo = 0
 		let hi = total - 1
 		while (lo < hi) {
 			const mid = (lo + hi) >> 1
-			if (xAt(mid) < target - 0.5) lo = mid + 1
+			const hit = this.#charRect(mid)
+			if (!hit || hit.x < targetX - 0.5) lo = mid + 1
 			else hi = mid
 		}
 		return pageStart + lo
+	}
+
+	/** 当前屏第一个字符的全文偏移 */
+	#currentOffset(): number {
+		return this.#offsetAtX(this.scrollEl ? this.scrollEl.scrollLeft : 0)
 	}
 
 	#domOffset(node: Node, offset: number): number {
@@ -738,30 +789,58 @@ export class TextView extends ItemView {
 		let total = 0
 		for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
 			const len = n.textContent?.length ?? 0
-			if (target <= total + len) return { node: n, offset: Math.max(0, Math.min(len, target - total)) }
+			// 用 < 而不是 <=：目标正好落在节点末尾时应该归到下一个节点，
+			// 否则 offset 等于长度，后续测量字符矩形时循环一次都不会执行
+			if (target < total + len) {
+				return { node: n, offset: Math.max(0, Math.min(len - 1, target - total)) }
+			}
 			total += len
 		}
 		return null
 	}
 
-	/** 逻辑页内的字符偏移 → 第几屏（调用时 scrollLeft 必须为 0） */
-	#offsetToScreen(globalOffset: number): number {
-		const local = Math.max(0, globalOffset - (this.pageStarts[this.page] ?? 0))
-		const pos = this.#findTextPos(local)
-		const step = this.#step()
-		if (!pos || step <= 0) return 0
-		const range = document.createRange()
-		range.setStart(pos.node, pos.offset)
-		range.collapse(true)
-		const rect = range.getBoundingClientRect()
-		const base = this.textEl.getBoundingClientRect().left
-		if (!Number.isFinite(rect.left)) return 0
-		return Math.max(0, Math.round((rect.left - base) / step))
+	/** 单列宽度 */
+	#columnWidth(): number {
+		const n = this.#columnCount()
+		return (this.#contentWidth() - this.#columnGap() * (n - 1)) / n
 	}
 
-	#updateProgress(): void {
+	/** 逻辑页内的字符偏移 → 第几屏（调用时 scrollLeft 必须为 0） */
+	/** 测量某个字符的位置（相对排版起点）。折叠 range 遇到换行符会返回全 0 矩形，这里改测一个字符 */
+	#charRect(local: number): { x: number; top: number } | null {
+		const pos = this.#findTextPos(Math.max(0, local))
+		if (!pos) return null
+		const base = this.textEl.getBoundingClientRect()
+		const text = pos.node.textContent ?? ''
+		// 换行符自身没有尺寸，往后找最多 24 个非换行字符来定位
+		for (let i = pos.offset; i < text.length && i < pos.offset + 24; i++) {
+			const ch = text[i]
+			if (ch === '\n' || ch === '\r') continue
+			const range = document.createRange()
+			range.setStart(pos.node, i)
+			range.setEnd(pos.node, i + 1)
+			const rect = range.getBoundingClientRect()
+			if (rect.width > 0 && rect.height > 0) return { x: rect.left - base.left, top: rect.top - base.top }
+		}
+		return null
+	}
+
+	#offsetToScreen(globalOffset: number): number {
+		const local = Math.max(0, globalOffset - (this.pageStarts[this.page] ?? 0))
+		const step = this.#step()
+		const colW = this.#columnWidth()
+		if (step <= 0 || colW <= 0) return 0
+		const hit = this.#charRect(local)
+		if (!hit) return 0
+		const colIndex = Math.floor(hit.x / (colW + this.#columnGap()) + 0.001)
+		// 目录跳转时希望章节标题出现在页面顶部：标题落在列的下半部分就推到下一列
+		const targetCol = this.alignToColumnTop && hit.top > this.#contentHeight() * 0.45 ? colIndex + 1 : colIndex
+		return Math.max(0, Math.floor(targetCol / this.#columnCount() + 0.001))
+	}
+
+	#updateProgress(offsetArg?: number): void {
 		const total = this.#totalChars()
-		const offset = this.#currentOffset()
+		const offset = offsetArg ?? this.#currentOffset()
 		const pct = total > 0 ? (offset / total) * 100 : 0
 		this.progressLabel.setText(`${pct.toFixed(1)}%`)
 		this.slider.min = '0'
@@ -773,9 +852,9 @@ export class TextView extends ItemView {
 		this.metaEl.title = `本页第 ${this.screen + 1} 屏 / 共 ${this.screenCount} 屏 · 全书第 ${this.page + 1}/${this.pages.length} 页`
 	}
 
-	#touchLocation(): void {
+	#touchLocation(offsetArg?: number): void {
 		if (!this.data) return
-		const offset = this.#currentOffset()
+		const offset = offsetArg ?? this.#currentOffset()
 		const total = this.#totalChars()
 		this.data.lastLocation = {
 			cfi: `txt:${offset}`,
@@ -787,7 +866,8 @@ export class TextView extends ItemView {
 	}
 
 	/** 跳到指定字符偏移（目录、进度条、回跳链接） */
-	#jumpToOffset(offset: number, flashId?: string): void {
+	#jumpToOffset(offset: number, flashId?: string, alignTop = true): void {
+		this.alignToColumnTop = alignTop
 		const page = this.#pageOfOffset(offset)
 		this.flashAnnId = flashId ?? null
 		this.gotoLastScreen = false
@@ -801,6 +881,7 @@ export class TextView extends ItemView {
 		const prevLeft = this.scrollEl.scrollLeft
 		this.scrollEl.scrollLeft = 0
 		this.screen = this.#offsetToScreen(offset)
+		this.alignToColumnTop = false
 		this.scrollEl.scrollLeft = prevLeft
 		this.screenCount = this.#computeScreenCount()
 		this.screen = Math.max(0, Math.min(this.screen, this.screenCount - 1))
@@ -873,13 +954,14 @@ export class TextView extends ItemView {
 	/** 窗口尺寸/版式变化后重新分栏，并停在原来的文字位置 */
 	relayout(): void {
 		if (!this.textEl || !this.scrollEl || !this.pages.length) return
-		// 还没完成首次定位时不要打断
-		if (this.pendingOffset !== null) return
-		const offset = this.#currentOffset()
+		// 首次定位还没完成时不要打断，否则会被重排回页首
+		if (this.rendering || this.pendingOffset !== null) return
+		const offset = this.#offsetAtX(this.screen * this.#step())
 		this.#layout()
 		this.scrollEl.scrollLeft = 0
 		window.requestAnimationFrame(() => {
 			this.screenCount = this.#computeScreenCount()
+			this.alignToColumnTop = false
 			this.screen = Math.max(0, Math.min(this.#offsetToScreen(offset), this.screenCount - 1))
 			this.#applyScreen()
 		})
@@ -1355,7 +1437,7 @@ export class TextView extends ItemView {
 		const range = parseTextCfi(cfi)
 		if (!range) return
 		const ann = this.data?.annotations.find(a => a.cfi === cfi)
-		this.#jumpToOffset(range.start, ann?.id)
+		this.#jumpToOffset(range.start, ann?.id, false)
 	}
 
 	/** 书架手动编辑信息后同步标题 */
