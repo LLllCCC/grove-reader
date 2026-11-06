@@ -1975,3 +1975,11 @@
 .grove-appear-toggle input {
 	margin: 0;
 }
+
+.grove-shelf-tools-actions {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	margin-left: auto;
+	flex: none;
+}

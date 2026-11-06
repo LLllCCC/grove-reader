@@ -295,9 +295,6 @@ function listHue(id: string): number {
 export class BookshelfView extends ItemView {
 	private gridEl!: HTMLElement
 	private listsEl!: HTMLElement
-	/** 视图头部动作只注册一次，避免 onOpen 重入时重复 */
-	private headerActionsAdded = false
-	private folderActionEl: HTMLElement | null = null
 	/** 'all' = 全部，'none' = 未分类，其余为书单 id */
 	private listFilter = 'all'
 	private toolsEl!: HTMLElement
@@ -342,9 +339,6 @@ export class BookshelfView extends ItemView {
 		this.registerDomEvent(root, 'scroll', () => this.#hideTooltip(), true)
 		this.registerDomEvent(window, 'resize', () => this.#hideTooltip())
 
-		// 扫描文件夹与刷新/统计移到视图头部（右上角悬浮栏），内容区不再占一行
-		this.#addHeaderActions()
-
 		this.listsEl = root.createDiv('grove-shelf-lists')
 		this.#renderTools(root)
 		this.continueEl = root.createDiv('grove-shelf-continue grove-hidden')
@@ -353,40 +347,6 @@ export class BookshelfView extends ItemView {
 
 		this.#registerVaultEvents()
 		await this.refresh()
-	}
-
-	/** 把扫描文件夹、刷新、统计放到视图头部（右上角的悬浮操作栏） */
-	#addHeaderActions(): void {
-		if (this.headerActionsAdded) return
-		this.headerActionsAdded = true
-		this.addAction('folder-plus', '添加扫描文件夹', () => void this.#addFolder())
-		this.folderActionEl = this.addAction('folder', '扫描文件夹', e => this.#showScanFolderMenu(e))
-		this.addAction('refresh-cw', '重新扫描', () => void this.refresh({ rescan: true }))
-		this.addAction('bar-chart-2', '阅读统计', () => new ReadingStatsModal(this.app, this.plugin).open())
-		this.#updateFolderActionTitle()
-	}
-
-	#updateFolderActionTitle(): void {
-		if (!this.folderActionEl) return
-		const folders = this.plugin.settings.scanFolders ?? []
-		const label = folders.length ? `扫描文件夹：${folders.join('、')}` : '扫描文件夹：未设置'
-		this.folderActionEl.setAttr('aria-label', label)
-		this.folderActionEl.setAttr('title', label)
-	}
-
-	#showScanFolderMenu(event: MouseEvent): void {
-		const menu = new Menu()
-		menu.addItem(item =>
-			item.setTitle('添加文件夹…').setIcon('folder-plus').onClick(() => void this.#addFolder()))
-		const folders = this.plugin.settings.scanFolders ?? []
-		if (folders.length) {
-			menu.addSeparator()
-			for (const folder of folders) {
-				menu.addItem(item =>
-					item.setTitle(`移除：${folder}`).setIcon('trash-2').onClick(() => void this.#removeFolder(folder)))
-			}
-		}
-		menu.showAtPosition({ x: event.clientX, y: event.clientY })
 	}
 
 	/** 库内新增/删除/改名书籍时自动重扫，不必手动点刷新 */
@@ -433,6 +393,17 @@ export class BookshelfView extends ItemView {
 			void this.plugin.saveSettings()
 			void this.refresh()
 		})
+
+		// 书架右上角三个动作：添加文件夹 / 重新扫描 / 阅读统计
+		const actions = this.toolsEl.createDiv('grove-shelf-tools-actions')
+		const action = (icon: string, label: string, onClick: () => void): void => {
+			const btn = actions.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': label, title: label } })
+			setIcon(btn, icon)
+			btn.addEventListener('click', onClick)
+		}
+		action('folder-plus', '添加扫描文件夹', () => void this.#addFolder())
+		action('refresh-cw', '重新扫描', () => void this.refresh({ rescan: true }))
+		action('bar-chart-2', '阅读统计', () => new ReadingStatsModal(this.app, this.plugin).open())
 	}
 
 	async onClose(): Promise<void> {
@@ -453,7 +424,6 @@ export class BookshelfView extends ItemView {
 		this.cardEls.clear()
 		this.gridEl.empty()
 		this.emptyEl = this.gridEl.createDiv('grove-shelf-empty grove-hidden')
-		this.#updateFolderActionTitle()
 		this.continueEl.empty()
 		this.continueHasItems = false
 		this.continueTitleEls.clear()
