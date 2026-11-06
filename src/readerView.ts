@@ -14,6 +14,21 @@ import { Overlayer } from '../lib/foliate-js/overlayer.js'
 import { basenameOf, contrastFg, formatAuthor, formatLanguageMap, isDarkColor, randomId, stripNumericTitlePrefix, truncate } from './util'
 import '../lib/foliate-js/view.js'
 
+/** 按 cfi 里的数字路径比较先后：纯字符串比较会把 /4,/104 排到 /4/56 之前 */
+function cfiPathNumbers(cfi: string): number[] {
+	return (cfi.match(/\d+/g) ?? []).map(Number)
+}
+
+function compareCfi(a: string, b: string): number {
+	const ka = cfiPathNumbers(a)
+	const kb = cfiPathNumbers(b)
+	const n = Math.min(ka.length, kb.length)
+	for (let i = 0; i < n; i++) {
+		if (ka[i] !== kb[i]) return ka[i] - kb[i]
+	}
+	return ka.length - kb.length
+}
+
 export const VIEW_TYPE_GROVE_READER = 'grove-reader-view'
 
 interface FoliateTOCItem {
@@ -25,6 +40,11 @@ interface FoliateTOCItem {
 interface FoliateBook {
 	metadata?: { title?: unknown; author?: unknown }
 	toc?: FoliateTOCItem[]
+	sections?: Array<{ id?: string; href?: string }>
+	/** href → { index: spine 索引, anchor: 文档内锚点 CFI } */
+	resolveHref?: (href: string) => { index: number; anchor?: unknown } | null
+	/** cfi → { index, label }，label 是 foliate 自己挑的最近目录项 */
+	resolveNavigation?: (cfi: string) => { index: number; label?: string } | null
 }
 
 interface FoliateRenderer {
@@ -107,6 +127,9 @@ export class ReaderView extends ItemView {
 	private lastSavedCfi: string | null = null
 	private sliderActive = false
 	private popup: HTMLElement | null = null
+	private popupCloser: ((e: MouseEvent) => void) | null = null
+	/** spine 索引 → 该节里最具体的目录项（同文件下「第X章」优先于「第X部分」） */
+	private tocBySection = new Map<number, { label: string; depth: number }>()
 
 	private readerEl!: HTMLElement
 	private readerInnerEl!: HTMLElement
@@ -858,10 +881,12 @@ export class ReaderView extends ItemView {
 		this.#hidePopup()
 	}
 
-	#showPopup(doc: Document, range: Range): void {
+	#showPopup(_doc: Document, range: Range): void {
 		this.#hidePopup()
 		const dark = document.body.classList.contains('theme-dark')
-		const popup = doc.createElement('div')
+		// 弹条必须挂在主窗口：留在 iframe 里时 position:fixed 会被 iframe 边界裁剪，
+		// 侧栏一开一关就会「只露一半」甚至整个消失
+		const popup = document.createElement('div')
 		popup.className = 'grove-sel-popup'
 		popup.style.cssText = [
 			'position:fixed',
@@ -878,7 +903,7 @@ export class ReaderView extends ItemView {
 		popup.addEventListener('mousedown', e => e.preventDefault())
 
 		for (const c of HIGHLIGHT_COLORS) {
-			const dot = doc.createElement('button')
+			const dot = document.createElement('button')
 			dot.title = `高亮（${c.name}）`
 			dot.style.cssText = `width:18px;height:18px;border-radius:50%;border:1px solid rgba(0,0,0,.25);cursor:pointer;background:${c.css};padding:0;flex:none;`
 			dot.addEventListener('click', e => {
@@ -888,7 +913,7 @@ export class ReaderView extends ItemView {
 			popup.appendChild(dot)
 		}
 
-		const commentBtn = doc.createElement('button')
+		const commentBtn = document.createElement('button')
 		commentBtn.textContent = '评论'
 		commentBtn.style.cssText = `border:none;cursor:pointer;padding:3px 8px;border-radius:6px;font-size:12px;background:${dark ? '#3a3a42' : '#ececf0'};color:${dark ? '#dcddde' : '#1f1f23'};`
 		commentBtn.addEventListener('click', e => {
@@ -897,7 +922,7 @@ export class ReaderView extends ItemView {
 		})
 		popup.appendChild(commentBtn)
 
-		const copyBtn = doc.createElement('button')
+		const copyBtn = document.createElement('button')
 		copyBtn.textContent = '复制'
 		copyBtn.style.cssText = commentBtn.style.cssText
 		copyBtn.addEventListener('click', e => {
@@ -907,21 +932,39 @@ export class ReaderView extends ItemView {
 		})
 		popup.appendChild(copyBtn)
 
-		doc.body.appendChild(popup)
+		document.body.appendChild(popup)
 		this.popup = popup
 
-		const rect = range.getBoundingClientRect()
-		const vw = doc.defaultView?.innerWidth ?? rect.left + 320
-		const vh = doc.defaultView?.innerHeight ?? rect.bottom + 320
-		let left = rect.left + rect.width / 2 - POPUP_WIDTH / 2
-		left = Math.max(8, Math.min(left, vw - POPUP_WIDTH - 8))
-		let top = rect.bottom + 8
-		if (top + 50 > vh) top = Math.max(8, rect.top - 50)
+		// 用选区「最后一个矩形」定位：跨栏/跨页时包围盒会横跨整页，位置会飘到中间
+		const rects = Array.from(range.getClientRects()).filter(r => r.width > 0 || r.height > 0)
+		const last = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect()
+		const host = this.readerEl.getBoundingClientRect()
+		const anchorX = host.left + last.left + last.width / 2
+		const anchorBottom = host.top + last.bottom
+		const anchorTop = host.top + last.top
+		const size = popup.getBoundingClientRect()
+		let left = anchorX - size.width / 2
+		left = Math.max(8, Math.min(left, window.innerWidth - size.width - 8))
+		let top = anchorBottom + 8
+		if (top + size.height > window.innerHeight - 8) top = Math.max(8, anchorTop - size.height - 8)
 		popup.style.left = `${Math.round(left)}px`
 		popup.style.top = `${Math.round(top)}px`
+
+		// 点主窗口别处就收起；iframe 内的点击由 captureSelection 重新定位
+		const closer = (ev: MouseEvent): void => {
+			if (this.popup && !this.popup.contains(ev.target as Node)) this.#hidePopup()
+		}
+		this.popupCloser = closer
+		window.setTimeout(() => {
+			if (this.popupCloser) document.addEventListener('mousedown', this.popupCloser, true)
+		}, 0)
 	}
 
 	#hidePopup(): void {
+		if (this.popupCloser) {
+			document.removeEventListener('mousedown', this.popupCloser, true)
+			this.popupCloser = null
+		}
 		this.popup?.remove()
 		this.popup = null
 	}
@@ -1017,9 +1060,11 @@ export class ReaderView extends ItemView {
 	#hostCoords(range: Range): { x: number; y: number } {
 		const host = this.readerEl.getBoundingClientRect()
 		try {
-			const r = range.getBoundingClientRect()
+			// 取选区最后一个矩形，跨栏时才不会飘到页面中间
+			const rects = Array.from(range.getClientRects()).filter(r => r.width > 0 || r.height > 0)
+			const r = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect()
 			return {
-				x: Math.round(host.left + r.left + Math.min(r.width, 200) / 2),
+				x: Math.round(host.left + r.left + r.width / 2),
 				y: Math.round(host.top + r.bottom + 6),
 			}
 		} catch {
@@ -1153,11 +1198,28 @@ export class ReaderView extends ItemView {
 	#buildToc(toc: FoliateTOCItem[]): void {
 		this.tocSelect.empty()
 		this.tocSelect.createEl('option', { value: '', text: '目录' })
+		this.tocBySection.clear()
 		const add = (items: FoliateTOCItem[], depth: number): void => {
 			for (const item of items ?? []) {
 				if (!item?.href) continue
 				const label = `${'\u00a0\u00a0'.repeat(depth)}${item.label ?? '（无标题）'}`
 				this.tocSelect.createEl('option', { value: item.href, text: truncate(label, 60) })
+				// 「第一部分」和「第1章」常常指向同一个 html（靠 #anchor 区分），
+				// 只按 spine 索引匹配会把章吞掉，这里同索引里保留层级最深的那项
+				if (this.foliate?.book?.resolveHref) {
+					try {
+						const resolved = this.foliate.book.resolveHref(item.href)
+						if (typeof resolved?.index === 'number') {
+							const prev = this.tocBySection.get(resolved.index)
+							const title = (item.label ?? '').trim()
+							if (title && (!prev || depth >= prev.depth)) {
+								this.tocBySection.set(resolved.index, { label: title, depth })
+							}
+						}
+					} catch {
+						// 解析失败就退回 foliate 给的 label
+					}
+				}
 				if (item.subitems?.length) add(item.subitems, depth + 1)
 			}
 		}
@@ -1165,19 +1227,30 @@ export class ReaderView extends ItemView {
 		this.tocSelect.disabled = this.tocSelect.options.length <= 1
 	}
 
+	/** 批注所属章节：优先用目录里最具体的那一项，历史数据也一并纠正 */
+	#chapterOf(a: Annotation): string {
+		const si = this.#sectionIndexOf(a)
+		if (si !== null) {
+			const hit = this.tocBySection.get(si)
+			if (hit) return hit.label
+		}
+		return (a.chapter ?? '').trim() || '未命名章节'
+	}
+
 	#renderSidebar(): void {
 		const all = [...(this.data?.annotations ?? [])].sort((x, y) => {
 			const ix = x.sectionIndex ?? Number.MAX_SAFE_INTEGER
 			const iy = y.sectionIndex ?? Number.MAX_SAFE_INTEGER
 			if (ix !== iy) return ix - iy
-			return x.cfi < y.cfi ? -1 : x.cfi > y.cfi ? 1 : 0
+			// cfi 不能按字符串比：",/104" 里的逗号比数字小，会把靠后的批注排到前面
+			return compareCfi(x.cfi, y.cfi)
 		})
 		const q = this.sidebarQuery.toLowerCase()
 		const filtering = !!q || !!this.sidebarColor
 		const filtered = all.filter(a => {
 			if (this.sidebarColor && a.color !== this.sidebarColor) return false
 			if (!q) return true
-			return `${a.text}\n${a.note ?? ''}\n${a.chapter ?? ''}`.toLowerCase().includes(q)
+			return `${a.text}\n${a.note ?? ''}\n${this.#chapterOf(a)}`.toLowerCase().includes(q)
 		})
 
 		this.annCountEl.setText(filtering ? `${filtered.length} / ${all.length} 个批注` : `${all.length} 个批注`)
@@ -1207,7 +1280,7 @@ export class ReaderView extends ItemView {
 		const collapsedSet: Set<string> = this.annCollapsed ?? new Set<string>()
 		const groups = new Map<string, Annotation[]>()
 		for (const a of filtered) {
-			const key = (a.chapter ?? '').trim() || '未命名章节'
+			const key = this.#chapterOf(a)
 			const arr = groups.get(key)
 			if (arr) arr.push(a)
 			else groups.set(key, [a])
@@ -1255,7 +1328,7 @@ export class ReaderView extends ItemView {
 			check.addEventListener('change', () => this.#toggleSelected(a.id))
 		}
 		head.createSpan('grove-ann-dot').style.backgroundColor = colorCss(a.color)
-		head.createSpan('grove-ann-chapter').setText(a.chapter || '')
+		head.createSpan('grove-ann-chapter').setText(this.#chapterOf(a))
 		const text = item.createDiv('grove-ann-text')
 		text.setText(truncate(a.text.trim(), 160))
 		text.addEventListener('click', () => void this.#jumpToCfi(a.cfi))
@@ -1283,11 +1356,11 @@ export class ReaderView extends ItemView {
 	/** 正文点击批注后：展开侧栏、清掉挡住该批注的筛选/折叠，滚动定位并闪烁提示 */
 	#revealInSidebar(a: Annotation): void {
 		this.sidebarEl.classList.remove('grove-hidden')
-		const chapter = (a.chapter ?? '').trim() || '未命名章节'
+		const chapter = this.#chapterOf(a)
 		const q = this.sidebarQuery.toLowerCase()
 		const filteredOut =
 			(this.sidebarColor && a.color !== this.sidebarColor) ||
-			(!!q && !`${a.text}\n${a.note ?? ''}\n${a.chapter ?? ''}`.toLowerCase().includes(q))
+			(!!q && !`${a.text}\n${a.note ?? ''}\n${this.#chapterOf(a)}`.toLowerCase().includes(q))
 		const collapsed = this.annCollapsed?.has(chapter) ?? false
 		if (filteredOut) {
 			this.sidebarQuery = ''
