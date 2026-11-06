@@ -2,6 +2,7 @@ import { App, Notice, PluginSettingTab, Setting, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import { FolderPromptModal, FolderSuggest, ConfirmModal, OpLogModal, TemplateEditModal } from './modals'
 import { APP_NAME, BACKUP_FOLDER_NAME, DEFAULT_SHELF_DISPLAY } from './types'
+import type { GroveSettings } from './types'
 import { isAbsolutePath } from './util'
 import { LOGO_OPTIONS } from './logos'
 
@@ -212,6 +213,32 @@ export class GroveSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings()
 					}
 				}))
+
+		// —— TXT 分页 ——
+		containerEl.createEl('h3', { text: 'TXT 阅读' })
+		new Setting(containerEl)
+			.setName('TXT 页面版式')
+			.setDesc('单页＝一屏一页；双页＝左右两栏像翻书；自动＝窗口够宽时双页、变窄自动回到单页（与 EPUB 缩放时自动分栏的规律一致）')
+			.addDropdown(dropdown =>
+				dropdown
+					.addOptions({ auto: '自动', single: '单页', double: '双页' })
+					.setValue(this.plugin.settings.txtLayout ?? 'auto')
+					.onChange(async value => {
+						this.plugin.settings.txtLayout = value as GroveSettings['txtLayout']
+						await this.plugin.saveSettings()
+						this.plugin.refreshTextViewLayout()
+					}))
+		new Setting(containerEl)
+			.setName('TXT 键盘翻页方向')
+			.setDesc('鼠标滚轮始终上下滚动即翻页；这里决定方向键用 ←/→ 还是 ↑/↓')
+			.addDropdown(dropdown =>
+				dropdown
+					.addOptions({ horizontal: '← / →', vertical: '↑ / ↓' })
+					.setValue(this.plugin.settings.txtTurnAxis ?? 'horizontal')
+					.onChange(async value => {
+						this.plugin.settings.txtTurnAxis = value as GroveSettings['txtTurnAxis']
+						await this.plugin.saveSettings()
+					}))
 
 		// —— 笔记 ——
 		containerEl.createEl('h3', { text: '笔记' })

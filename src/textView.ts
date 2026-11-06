@@ -106,6 +106,17 @@ export class TextView extends ItemView {
 	private selectCountEl!: HTMLElement
 	private annItemEls = new Map<string, HTMLElement>()
 	private tocSelect!: HTMLSelectElement
+	/** 当前逻辑页内的第几屏（一屏＝一列或两列） */
+	private screen = 0
+	private screenCount = 1
+	/** 渲染后要定位到的字符偏移（目录跳转 / 恢复阅读位置） */
+	private pendingOffset: number | null = null
+	/** 下一页到上一个逻辑页时，直接落到最后一屏 */
+	private gotoLastScreen = false
+	/** 需要在渲染后闪烁提示的批注 id */
+	private flashAnnId: string | null = null
+	private resizeObserver: ResizeObserver | null = null
+	private relayoutTimer: number | null = null
 
 	constructor(leaf: WorkspaceLeaf, private plugin: GroveReaderPlugin) {
 		super(leaf)
@@ -163,6 +174,8 @@ export class TextView extends ItemView {
 		this.#buildDom()
 		this.#applyAppearance()
 		this.registerEvent(this.app.workspace.on('css-change', () => this.#applyAppearance()))
+		this.resizeObserver = new ResizeObserver(() => this.#scheduleRelayout())
+		this.resizeObserver.observe(this.scrollEl)
 		if (this.bookPath) await this.#load()
 		else this.#showEmpty('没有指定要打开的 TXT 文件')
 	}
@@ -170,6 +183,12 @@ export class TextView extends ItemView {
 	async onClose(): Promise<void> {
 		this.#flushSave()
 		this.#hidePopup()
+		this.resizeObserver?.disconnect()
+		this.resizeObserver = null
+		if (this.relayoutTimer != null) {
+			window.clearTimeout(this.relayoutTimer)
+			this.relayoutTimer = null
+		}
 		this.contentEl.empty()
 	}
 
@@ -187,7 +206,7 @@ export class TextView extends ItemView {
 		this.tocSelect.addEventListener('change', () => {
 			const value = this.tocSelect.value
 			if (!value) return
-			this.#goPage(this.#pageOfOffset(Number(value)))
+			this.#jumpToOffset(Number(value))
 		})
 
 		const progress = toolbar.createDiv('grove-progress')
@@ -198,12 +217,15 @@ export class TextView extends ItemView {
 		this.progressLabel = progress.createSpan('grove-progress-label')
 		this.progressLabel.setText('—')
 		this.slider.addEventListener('input', () => {
-			const n = Number.parseInt(this.slider.value, 10)
-			if (!Number.isFinite(n)) return
-			this.page = Math.max(0, Math.min(this.pages.length - 1, n - 1))
-			this.progressLabel.setText(`${this.page + 1} / ${this.pages.length}`)
+			const offset = Number(this.slider.value)
+			if (!Number.isFinite(offset)) return
+			const total = this.#totalChars()
+			this.progressLabel.setText(total > 0 ? `${Math.round((offset / total) * 100)}%` : '0%')
 		})
-		this.slider.addEventListener('change', () => this.#showPage())
+		this.slider.addEventListener('change', () => {
+			const offset = Number(this.slider.value)
+			if (Number.isFinite(offset)) this.#jumpToOffset(offset)
+		})
 
 		toolbar.createDiv('grove-sep')
 
@@ -282,7 +304,7 @@ export class TextView extends ItemView {
 		const body = root.createDiv('grove-body')
 		this.readerEl = body.createDiv('grove-reader')
 		this.scrollEl = this.readerEl.createDiv('grove-reader-inner grove-text-scroll')
-		this.textEl = this.scrollEl.createEl('pre', { cls: 'grove-text-content' })
+		this.textEl = this.scrollEl.createDiv({ cls: 'grove-text-content' })
 		this.registerDomEvent(this.scrollEl, 'wheel', e => this.#onWheel(e), { passive: false })
 
 		// 划选 → 弹条；点击已有高亮 → 批注菜单
@@ -311,12 +333,16 @@ export class TextView extends ItemView {
 		this.#buildSidebar(body)
 
 		this.registerDomEvent(this.contentEl, 'keydown', (e: KeyboardEvent) => {
-			if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
 			const t = e.target
 			if (t instanceof HTMLElement && t.closest('input, textarea, select, [contenteditable="true"]')) return
 			if (window.getSelection()?.toString()) return
+			const axis = this.plugin.settings.txtTurnAxis ?? 'horizontal'
+			const prevKey = axis === 'vertical' ? 'ArrowUp' : 'ArrowLeft'
+			const nextKey = axis === 'vertical' ? 'ArrowDown' : 'ArrowRight'
+			if (e.key !== prevKey && e.key !== nextKey) return
 			e.preventDefault()
-			this.#goPage(e.key === 'ArrowLeft' ? this.page - 1 : this.page + 1)
+			if (e.key === nextKey) this.nextPage()
+			else this.prevPage()
 		})
 	}
 
@@ -378,6 +404,9 @@ export class TextView extends ItemView {
 
 	#showEmpty(message: string): void {
 		if (!this.textEl) return
+		this.textEl.style.width = ''
+		this.textEl.style.height = ''
+		this.textEl.style.columnCount = ''
 		this.textEl.setText(message)
 		this.metaEl.setText('')
 		this.progressLabel.setText('—')
@@ -433,7 +462,7 @@ export class TextView extends ItemView {
 		let target: number | null = null
 		const jump = this.pendingCfi ? parseTextCfi(this.pendingCfi) : null
 		if (jump) target = jump.start
-		else if (fraction !== undefined) target = Math.round(fraction * (this.pages.length - 1))
+		else if (fraction !== undefined) target = Math.round(fraction * this.#totalChars())
 		else if (this.data?.lastLocation?.cfi) {
 			const last = parseTextCfi(this.data.lastLocation.cfi)
 			if (last) target = last.start
@@ -441,6 +470,11 @@ export class TextView extends ItemView {
 		this.pendingCfi = null
 		this.page = target !== null ? this.#pageOfOffset(target) : 0
 		this.page = Math.max(0, Math.min(this.pages.length - 1, this.page))
+		this.screen = 0
+		this.screenCount = 1
+		this.gotoLastScreen = false
+		// 交给 #renderPage 在排版完成后精确定位到那一屏
+		this.pendingOffset = target
 
 		const encName = this.detected ? this.detected.toUpperCase() : ''
 		// 识别结果压进编码下拉的悬停提示；只有编码异常时才在工具栏显示小标签
@@ -449,12 +483,9 @@ export class TextView extends ItemView {
 		this.metaEl.title = `编码 ${encName} · ${this.pages.length} 页${this.warning ? ` · ${this.warning}` : ''}`
 		this.encodingSelect.title = this.metaEl.title
 		this.encodingSelect.value = this.encoding
-		this.slider.min = '1'
-		this.slider.max = String(Math.max(1, this.pages.length))
-		this.slider.disabled = this.pages.length <= 1
 		this.#buildToc()
 		this.#renderSidebar()
-		this.#showPage()
+		this.#renderPage()
 		this.sidebarEl.classList.toggle('grove-hidden', !this.plugin.settings.openSidebarWithBook)
 	}
 
@@ -533,7 +564,60 @@ export class TextView extends ItemView {
 	// 渲染当前页（含已有高亮）
 	// ------------------------------------------------------------------
 
-	#showPage(): void {
+	// ------------------------------------------------------------------
+	// 分栏分页：一屏＝一列（单页）或两列（双页），翻页整屏切换
+	// ------------------------------------------------------------------
+
+	/** 视口内可排版宽度（扣除左右内边距） */
+	#contentWidth(): number {
+		const style = getComputedStyle(this.scrollEl)
+		const pad = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+		// 视图刚打开时容器可能还是 0 宽，先给一个兜底值，resize 后会自动重排
+		const width = this.scrollEl.clientWidth || this.scrollEl.getBoundingClientRect().width
+		return Math.max(240, width - pad)
+	}
+
+	#contentHeight(): number {
+		const style = getComputedStyle(this.scrollEl)
+		const pad = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+		return Math.max(120, this.scrollEl.clientHeight - pad)
+	}
+
+	#columnGap(): number {
+		return 56
+	}
+
+	/** 当前版式下每屏几列：单页 1，双页 2，自动按可用宽度切换 */
+	#columnCount(): number {
+		const mode = this.plugin.settings.txtLayout ?? 'auto'
+		if (mode === 'single') return 1
+		const width = this.#contentWidth()
+		if (mode === 'double') return width >= 560 ? 2 : 1
+		return width >= 820 ? 2 : 1
+	}
+
+	/** 翻一屏的位移：一屏宽 + 一个列间距 */
+	#step(): number {
+		return this.#contentWidth() + this.#columnGap()
+	}
+
+	#layout(): void {
+		if (!this.scrollEl || !this.textEl) return
+		this.textEl.style.width = `${this.#contentWidth()}px`
+		this.textEl.style.height = `${this.#contentHeight()}px`
+		this.textEl.style.columnCount = String(this.#columnCount())
+		this.textEl.style.columnGap = `${this.#columnGap()}px`
+	}
+
+	#computeScreenCount(): number {
+		const step = this.#step()
+		const total = this.textEl.scrollWidth
+		if (!Number.isFinite(total) || total <= 0 || step <= 0) return 1
+		return Math.max(1, Math.ceil(total / step))
+	}
+
+	/** 渲染当前逻辑页（含高亮），等一帧后测量屏数并定位 */
+	#renderPage(): void {
 		if (!this.textEl) return
 		const text = this.pages[this.page] ?? ''
 		const pageStart = this.pageStarts[this.page] ?? 0
@@ -565,46 +649,248 @@ export class TextView extends ItemView {
 		}
 		if (cursor < text.length) this.textEl.appendChild(document.createTextNode(text.slice(cursor)))
 
+		this.#layout()
+		this.scrollEl.scrollLeft = 0
 		this.scrollEl.scrollTop = 0
-		this.slider.value = String(this.page + 1)
-		this.progressLabel.setText(`${this.page + 1} / ${this.pages.length}`)
-		this.prevBtn.disabled = this.page <= 0
-		this.nextBtn.disabled = this.page >= this.pages.length - 1
+
+		window.requestAnimationFrame(() => {
+			this.screenCount = this.#computeScreenCount()
+			if (this.gotoLastScreen) {
+				this.gotoLastScreen = false
+				this.screen = this.screenCount - 1
+			} else if (this.pendingOffset !== null) {
+				const target = this.pendingOffset
+				this.pendingOffset = null
+				this.screen = this.#offsetToScreen(target)
+			}
+			this.screen = Math.max(0, Math.min(this.screen, this.screenCount - 1))
+			this.#applyScreen()
+			this.#flashPendingMark()
+		})
+	}
+
+	/** 把视口移动到当前屏 */
+	#applyScreen(): void {
+		if (!this.scrollEl || !this.textEl) return
+		const step = this.#step()
+		const max = Math.max(0, this.textEl.scrollWidth - this.scrollEl.clientWidth)
+		this.scrollEl.scrollLeft = Math.min(this.screen * step, max)
 		this.#syncToc()
-		this.#touchLocation()
+		this.prevBtn.disabled = this.screen <= 0 && this.page <= 0
+		this.nextBtn.disabled = this.screen >= this.screenCount - 1 && this.page >= this.pages.length - 1
+		// 刚改完 scrollLeft 时命中测试还是旧位置，等一帧再算进度与位置
+		window.requestAnimationFrame(() => {
+			this.#updateProgress()
+			this.#touchLocation()
+		})
+	}
+
+	#totalChars(): number {
+		const last = this.pages.length - 1
+		return (this.pageStarts[last] ?? 0) + (this.pages[last]?.length ?? 0)
+	}
+
+	/**
+	 * 当前屏第一个字符的全文偏移。
+	 * 多列 + overflow 容器里 caretRangeFromPoint 不可靠（总是命中第一列），
+	 * 改为二分测量「第 n 个字符的横坐标」，找第一个落在视口左缘之后的字符。
+	 */
+	#currentOffset(): number {
+		const pageStart = this.pageStarts[this.page] ?? 0
+		if (!this.textEl || !this.scrollEl) return pageStart
+		const total = this.pages[this.page]?.length ?? 0
+		if (!total) return pageStart
+		const target = this.scrollEl.scrollLeft
+		if (target <= 0) return pageStart
+		const base = this.textEl.getBoundingClientRect().left
+		const xAt = (local: number): number => {
+			const pos = this.#findTextPos(local)
+			if (!pos) return Number.POSITIVE_INFINITY
+			const range = document.createRange()
+			range.setStart(pos.node, pos.offset)
+			range.collapse(true)
+			const rect = range.getBoundingClientRect()
+			if (!Number.isFinite(rect.left)) return Number.POSITIVE_INFINITY
+			return rect.left - base
+		}
+		let lo = 0
+		let hi = total - 1
+		while (lo < hi) {
+			const mid = (lo + hi) >> 1
+			if (xAt(mid) < target - 0.5) lo = mid + 1
+			else hi = mid
+		}
+		return pageStart + lo
+	}
+
+	#domOffset(node: Node, offset: number): number {
+		const walker = document.createTreeWalker(this.textEl, NodeFilter.SHOW_TEXT)
+		let total = 0
+		for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+			if (n === node) return total + offset
+			total += (n.textContent ?? '').length
+		}
+		return total
+	}
+
+	#findTextPos(target: number): { node: Text; offset: number } | null {
+		const walker = document.createTreeWalker(this.textEl, NodeFilter.SHOW_TEXT)
+		let total = 0
+		for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
+			const len = n.textContent?.length ?? 0
+			if (target <= total + len) return { node: n, offset: Math.max(0, Math.min(len, target - total)) }
+			total += len
+		}
+		return null
+	}
+
+	/** 逻辑页内的字符偏移 → 第几屏（调用时 scrollLeft 必须为 0） */
+	#offsetToScreen(globalOffset: number): number {
+		const local = Math.max(0, globalOffset - (this.pageStarts[this.page] ?? 0))
+		const pos = this.#findTextPos(local)
+		const step = this.#step()
+		if (!pos || step <= 0) return 0
+		const range = document.createRange()
+		range.setStart(pos.node, pos.offset)
+		range.collapse(true)
+		const rect = range.getBoundingClientRect()
+		const base = this.textEl.getBoundingClientRect().left
+		if (!Number.isFinite(rect.left)) return 0
+		return Math.max(0, Math.round((rect.left - base) / step))
+	}
+
+	#updateProgress(): void {
+		const total = this.#totalChars()
+		const offset = this.#currentOffset()
+		const pct = total > 0 ? (offset / total) * 100 : 0
+		this.progressLabel.setText(`${pct.toFixed(1)}%`)
+		this.slider.min = '0'
+		this.slider.max = String(Math.max(1, total))
+		this.slider.value = String(offset)
+		// 本页第几屏：翻页立即有反馈；全书页码放在悬停提示里
+		this.metaEl.removeClass('grove-hidden')
+		this.metaEl.setText(`${this.screen + 1}/${this.screenCount}${this.warning ? ' ⚠' : ''}`)
+		this.metaEl.title = `本页第 ${this.screen + 1} 屏 / 共 ${this.screenCount} 屏 · 全书第 ${this.page + 1}/${this.pages.length} 页`
 	}
 
 	#touchLocation(): void {
 		if (!this.data) return
+		const offset = this.#currentOffset()
+		const total = this.#totalChars()
 		this.data.lastLocation = {
-			cfi: `txt:${this.pageStarts[this.page] ?? 0}`,
+			cfi: `txt:${offset}`,
 			index: this.page,
-			fraction: this.pages.length > 1 ? this.page / (this.pages.length - 1) : 0,
+			fraction: total > 0 ? offset / total : 0,
 			updatedAt: Date.now(),
 		}
 		this.#scheduleSave()
 	}
 
-	#goPage(page: number): void {
-		this.page = Math.max(0, Math.min(this.pages.length - 1, page))
-		this.#showPage()
+	/** 跳到指定字符偏移（目录、进度条、回跳链接） */
+	#jumpToOffset(offset: number, flashId?: string): void {
+		const page = this.#pageOfOffset(offset)
+		this.flashAnnId = flashId ?? null
+		this.gotoLastScreen = false
+		if (page !== this.page) {
+			this.page = page
+			this.screen = 0
+			this.pendingOffset = offset
+			this.#renderPage()
+			return
+		}
+		const prevLeft = this.scrollEl.scrollLeft
+		this.scrollEl.scrollLeft = 0
+		this.screen = this.#offsetToScreen(offset)
+		this.scrollEl.scrollLeft = prevLeft
+		this.screenCount = this.#computeScreenCount()
+		this.screen = Math.max(0, Math.min(this.screen, this.screenCount - 1))
+		this.#applyScreen()
+		this.#flashPendingMark()
 	}
 
-	#onWheel(e: WheelEvent): void {
-		if (!this.plugin.settings.appearance.wheelPageTurn || e.ctrlKey || e.metaKey) return
-		const atBottom = this.scrollEl.scrollTop + this.scrollEl.clientHeight >= this.scrollEl.scrollHeight - 2
-		const atTop = this.scrollEl.scrollTop <= 0
-		const now = Date.now()
-		if (now - this.lastWheel < 450) return
-		if (e.deltaY > 0 && atBottom && this.page < this.pages.length - 1) {
-			e.preventDefault()
-			this.lastWheel = now
-			this.#goPage(this.page + 1)
-		} else if (e.deltaY < 0 && atTop && this.page > 0) {
-			e.preventDefault()
-			this.lastWheel = now
-			this.#goPage(this.page - 1)
+	#flashPendingMark(): void {
+		const id = this.flashAnnId
+		this.flashAnnId = null
+		if (!id) return
+		const mark = this.textEl.querySelector(`mark[data-ann-id="${id}"]`) as HTMLElement | null
+		if (!mark) return
+		mark.addClass('is-flash')
+		window.setTimeout(() => mark.removeClass('is-flash'), 1400)
+	}
+
+	#goPage(page: number): void {
+		this.page = Math.max(0, Math.min(this.pages.length - 1, page))
+		this.screen = 0
+		this.gotoLastScreen = false
+		this.pendingOffset = null
+		this.#renderPage()
+	}
+
+	// ------------------------------------------------------------------
+	// 翻页
+	// ------------------------------------------------------------------
+
+	nextPage(): void {
+		if (this.screen < this.screenCount - 1) {
+			this.screen += 1
+			this.#applyScreen()
+			return
 		}
+		if (this.page >= this.pages.length - 1) return
+		this.page += 1
+		this.screen = 0
+		this.gotoLastScreen = false
+		this.pendingOffset = null
+		this.#renderPage()
+	}
+
+	prevPage(): void {
+		if (this.screen > 0) {
+			this.screen -= 1
+			this.#applyScreen()
+			return
+		}
+		if (this.page <= 0) return
+		this.page -= 1
+		this.screen = 0
+		this.gotoLastScreen = true
+		this.pendingOffset = null
+		this.#renderPage()
+	}
+
+	/** 鼠标滚轮固定翻页（分页模式下滚轮不再滚动正文） */
+	#onWheel(e: WheelEvent): void {
+		if (e.ctrlKey || e.metaKey || e.altKey) return
+		if (Math.abs(e.deltaY) < 1) return
+		e.preventDefault()
+		const now = Date.now()
+		if (now - this.lastWheel < 180) return
+		this.lastWheel = now
+		if (e.deltaY > 0) this.nextPage()
+		else this.prevPage()
+	}
+
+	/** 窗口尺寸/版式变化后重新分栏，并停在原来的文字位置 */
+	relayout(): void {
+		if (!this.textEl || !this.scrollEl || !this.pages.length) return
+		// 还没完成首次定位时不要打断
+		if (this.pendingOffset !== null) return
+		const offset = this.#currentOffset()
+		this.#layout()
+		this.scrollEl.scrollLeft = 0
+		window.requestAnimationFrame(() => {
+			this.screenCount = this.#computeScreenCount()
+			this.screen = Math.max(0, Math.min(this.#offsetToScreen(offset), this.screenCount - 1))
+			this.#applyScreen()
+		})
+	}
+
+	#scheduleRelayout(): void {
+		if (this.relayoutTimer != null) window.clearTimeout(this.relayoutTimer)
+		this.relayoutTimer = window.setTimeout(() => {
+			this.relayoutTimer = null
+			this.relayout()
+		}, 160)
 	}
 
 	// ------------------------------------------------------------------
@@ -803,7 +1089,7 @@ export class TextView extends ItemView {
 		}
 		this.#clearPending()
 		window.getSelection()?.removeAllRanges()
-		this.#showPage()
+		this.#renderPage()
 		this.#scheduleSave(true)
 		this.#renderSidebar()
 	}
@@ -831,7 +1117,7 @@ export class TextView extends ItemView {
 				updatedAt: now,
 			}
 			this.data.annotations.push(a)
-			this.#showPage()
+			this.#renderPage()
 			this.#scheduleSave(true)
 		}
 		this.#clearPending()
@@ -844,7 +1130,7 @@ export class TextView extends ItemView {
 			a.note = note
 			a.updatedAt = Date.now()
 			this.#scheduleSave(true)
-			this.#showPage()
+			this.#renderPage()
 			this.#renderSidebar()
 		}).open()
 	}
@@ -853,7 +1139,7 @@ export class TextView extends ItemView {
 		a.color = color
 		a.updatedAt = Date.now()
 		this.#scheduleSave(true)
-		this.#showPage()
+		this.#renderPage()
 		this.#renderSidebar()
 	}
 
@@ -871,7 +1157,7 @@ export class TextView extends ItemView {
 		const i = arr.indexOf(a)
 		if (i >= 0) arr.splice(i, 1)
 		this.#scheduleSave(true)
-		this.#showPage()
+		this.#renderPage()
 		this.#renderSidebar()
 		new Notice('Grove Reader：批注已删除（历史备份仍保留在插件数据目录中）')
 	}
@@ -902,7 +1188,7 @@ export class TextView extends ItemView {
 		this.selectedIds.clear()
 		this.#setSelectMode(false)
 		this.#scheduleSave(true)
-		this.#showPage()
+		this.#renderPage()
 		this.#renderSidebar()
 		new Notice(`Grove Reader：已删除 ${count} 条批注（历史备份仍保留）`)
 	}
@@ -1056,14 +1342,6 @@ export class TextView extends ItemView {
 	// 供命令面板调用的公开方法（与 ReaderView / PdfView 同名）
 	// ------------------------------------------------------------------
 
-	nextPage(): void {
-		this.#goPage(this.page + 1)
-	}
-
-	prevPage(): void {
-		this.#goPage(this.page - 1)
-	}
-
 	highlight(color: string): void {
 		void this.#createHighlight(color)
 	}
@@ -1072,30 +1350,20 @@ export class TextView extends ItemView {
 		void this.#commentOnSelection()
 	}
 
-	/** 跳转到某条批注：翻到所在页并滚动到高亮处 */
-	jumpTo(cfi: string): void {		const range = parseTextCfi(cfi)
+	/** 跳转到某条批注：切到它所在的屏并让高亮闪一下 */
+	jumpTo(cfi: string): void {
+		const range = parseTextCfi(cfi)
 		if (!range) return
-		const page = this.#pageOfOffset(range.start)
-		this.page = page
-		this.#showPage()
-		window.setTimeout(() => {
-			const ann = this.data?.annotations.find(a => a.cfi === cfi)
-			if (!ann) return
-			const target = this.textEl.querySelector(
-				`mark[data-ann-id="${ann.id}"]`,
-			) as HTMLElement | null
-			if (!target) return
-			this.scrollEl.scrollTop = Math.max(0, target.offsetTop - this.scrollEl.clientHeight / 3)
-			target.addClass('is-flash')
-			window.setTimeout(() => target.removeClass('is-flash'), 1400)
-		}, 40)
+		const ann = this.data?.annotations.find(a => a.cfi === cfi)
+		this.#jumpToOffset(range.start, ann?.id)
 	}
 
 	/** 书架手动编辑信息后同步标题 */
 	syncMeta(title: string, author: string): void {
 		if (title) {
 			this.bookTitle = title
-			;(this.leaf as unknown as { updateHeader?: () => void }).updateHeader?.()		}
+			;(this.leaf as unknown as { updateHeader?: () => void }).updateHeader?.()
+		}
 		if (!this.data) return
 		this.data.title = title || this.data.title
 		if (author) this.data.author = author
@@ -1203,6 +1471,8 @@ export class TextView extends ItemView {
 		Object.assign(this.plugin.settings.appearance, patch)
 		this.#applyAppearance()
 		this.plugin.persistSettingsSoon()
+		// 字号/行距/留白变化会改变每屏能放多少字，需要重新分栏
+		this.#scheduleRelayout()
 		if (rerender) this.#renderAppearancePanel()
 	}
 
@@ -1230,11 +1500,13 @@ export class TextView extends ItemView {
 		this.textEl.style.fontFamily = font
 		this.textEl.style.fontSize = `${((16 * a.fontSize) / 100).toFixed(1)}px`
 		this.textEl.style.lineHeight = String(a.lineHeight)
-		this.textEl.style.maxWidth = `${a.maxInlineSize}px`
-		this.textEl.style.paddingTop = `${a.pageMargin}px`
-		this.textEl.style.paddingBottom = `${a.pageMargin}px`
-		this.textEl.style.paddingLeft = '28px'
-		this.textEl.style.paddingRight = '28px'
+		// 分栏分页下版心就是可视宽度，留白放在视口上；宽高由 #layout() 计算
+		this.scrollEl.style.paddingTop = `${a.pageMargin}px`
+		this.scrollEl.style.paddingBottom = `${a.pageMargin}px`
+		this.scrollEl.style.paddingLeft = '32px'
+		this.scrollEl.style.paddingRight = '32px'
+		this.textEl.style.padding = '0'
+		this.textEl.style.maxWidth = 'none'
 		this.readerEl.style.setProperty(
 			'--text-selection',
 			isDarkColor(bg) ? 'rgba(120,160,255,0.35)' : 'rgba(64,120,255,0.25)',

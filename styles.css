@@ -2014,18 +2014,20 @@
 }
 
 .grove-text-scroll {
-	overflow: auto;
+	overflow: hidden;
+	box-sizing: border-box;
 }
 
 .grove-text-content {
-	min-height: 100%;
-	margin: 0 auto;
+	margin: 0;
 	box-sizing: border-box;
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
 	font-family: var(--font-text);
 	line-height: 1.75;
 	user-select: text;
+	/* column-fill: auto 让文字先填满一列再排下一列，是整屏分页的前提 */
+	column-fill: auto;
 }
 
 .grove-text-content::selection {

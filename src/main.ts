@@ -1506,6 +1506,13 @@ export default class GroveReaderPlugin extends Plugin {
 		await this.saveData(this.settings)
 		if (this.store) this.store.maxBackups = this.settings.maxBackups
 	}
+
+	/** 设置里改了 TXT 版式后，让已打开的 TXT 视图重新分栏 */
+	refreshTextViewLayout(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_TEXT)) {
+			if (leaf.view instanceof TextView) leaf.view.relayout()
+		}
+	}
 }
 
 /** 递归复制目录（fs.promises 版，不阻塞 UI 线程），返回复制的文件数 */

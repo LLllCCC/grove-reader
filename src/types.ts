@@ -260,6 +260,10 @@ export interface GroveSettings {
 	/** 「备份批注数据到库内」写入的库内文件夹（相对路径）；改路径后旧备份自动转移 */
 	backupFolder: string
 	appearance: ReaderAppearance
+	/** TXT 分页版式：auto＝按窗口宽度自动，single＝单页，double＝双页 */
+	txtLayout: 'auto' | 'single' | 'double'
+	/** TXT 键盘翻页方向：horizontal＝←/→，vertical＝↑/↓；滚轮始终翻页 */
+	txtTurnAxis: 'horizontal' | 'vertical'
 }
 
 export const DEFAULT_SETTINGS: GroveSettings = {
@@ -282,4 +286,6 @@ export const DEFAULT_SETTINGS: GroveSettings = {
 	autoUpdateNote: true,
 	backupFolder: BACKUP_FOLDER_NAME,
 	appearance: { ...DEFAULT_APPEARANCE },
+	txtLayout: 'auto',
+	txtTurnAxis: 'horizontal',
 }
