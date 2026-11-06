@@ -995,8 +995,11 @@ export class ReaderView extends ItemView {
 		const size = popup.getBoundingClientRect()
 		let left = anchorX - size.width / 2
 		left = Math.max(8, Math.min(left, window.innerWidth - size.width - 8))
-		let top = anchorBottom + 10
-		if (top + size.height > window.innerHeight - 8) top = Math.max(8, anchorTop - size.height - 10)
+		// 优先落在选区上方：放下面会压住刚选中的文字，看不到自己选了什么。
+		// 上方空间不够（选区贴着页顶）才放下面，两边都不够就贴底。
+		let top = anchorTop - size.height - 8
+		if (top < 8) top = Math.min(anchorBottom + 8, window.innerHeight - size.height - 8)
+		top = Math.max(8, top)
 		popup.style.left = `${Math.round(left)}px`
 		popup.style.top = `${Math.round(top)}px`
 
