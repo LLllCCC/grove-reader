@@ -2044,46 +2044,38 @@
 	background: var(--text-selection, rgba(120, 160, 255, 0.35));
 }
 
-/* TXT 章节标题：编号一行、标题名一行，卷 > 节，字号对齐 EPUB 的分部/分章页 */
+/* TXT 章节标题：编号与标题名两行同字号、紧行距，对齐 EPUB 的分部页 / 分章页 */
 .grove-txt-h {
 	display: block;
 	max-width: 100%;
 	font-weight: 700;
-	letter-spacing: 0.02em;
+	letter-spacing: 0.01em;
 	box-sizing: border-box;
 	white-space: normal;
 }
 
-/* 卷：字号接近 EPUB「第一部分」 */
+/* 卷 */
 .grove-txt-h1 {
-	font-size: 1.85em;
-	line-height: 1.5;
-	margin: 0.75em 0 0.45em;
+	margin: 0.55em 0 0.4em;
 }
 
-.grove-txt-h1.grove-txt-h-kicker {
-	margin-bottom: 0.1em;
-}
-
+.grove-txt-h1.grove-txt-h-kicker,
 .grove-txt-h1.grove-txt-h-main {
-	font-size: 1.55em;
-	line-height: 1.35;
+	font-size: 1.85em;
+	line-height: 1.22;
+	margin: 0;
 }
 
-/* 节：比卷小一档 */
+/* 节 */
 .grove-txt-h2 {
-	font-size: 1.3em;
-	line-height: 1.45;
-	margin: 0.6em 0 0.3em;
+	margin: 0.4em 0 0.28em;
 }
 
-.grove-txt-h2.grove-txt-h-kicker {
-	margin-bottom: 0.08em;
-}
-
+.grove-txt-h2.grove-txt-h-kicker,
 .grove-txt-h2.grove-txt-h-main {
-	font-size: 1.14em;
-	line-height: 1.35;
+	font-size: 1.3em;
+	line-height: 1.26;
+	margin: 0;
 }
 
 /* ---- TXT 目录按钮与目录面板 ---- */
