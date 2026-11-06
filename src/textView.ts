@@ -53,7 +53,8 @@ export class TextView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return this.title || 'TXT'
+		if (this.title && this.title !== 'TXT') return this.title
+		return this.bookPath ? cleanBookTitle(basenameOf(this.bookPath)) : 'TXT'
 	}
 
 	getIcon(): string {
