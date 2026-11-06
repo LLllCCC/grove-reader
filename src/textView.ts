@@ -326,14 +326,14 @@ export class TextView extends ItemView {
 		const pageBtns = this.readerEl.createDiv('grove-page-btns')
 		this.prevBtn = pageBtns.createEl('button', {
 			cls: 'clickable-icon grove-page-btn',
-			attr: { 'aria-label': '上一页（←）' },
+			attr: { 'aria-label': '上一页' },
 		})
 		setIcon(this.prevBtn, 'chevron-left')
 		this.prevBtn.disabled = true
 		this.prevBtn.addEventListener('click', () => this.prevPage())
 		this.nextBtn = pageBtns.createEl('button', {
 			cls: 'clickable-icon grove-page-btn',
-			attr: { 'aria-label': '下一页（→）' },
+			attr: { 'aria-label': '下一页' },
 		})
 		setIcon(this.nextBtn, 'chevron-right')
 		this.nextBtn.disabled = true
@@ -731,8 +731,8 @@ export class TextView extends ItemView {
 	}
 
 	/** 本页范围内出现的章节标题区间 */
-	#headingsInPage(pageStart: number, pageEnd: number): Array<{ start: number; end: number; level: 1 | 2 }> {
-		const out: Array<{ start: number; end: number; level: 1 | 2 }> = []
+	#headingsInPage(pageStart: number, pageEnd: number): Array<{ start: number; end: number; level: 1 | 2; colon?: number }> {
+		const out: Array<{ start: number; end: number; level: 1 | 2; colon?: number }> = []
 		if (!this.chapters.length) return out
 		let i = Math.max(0, this.#sectionIndexOf(pageStart))
 		for (; i < this.chapters.length; i++) {
@@ -740,7 +740,10 @@ export class TextView extends ItemView {
 			if (c.offset >= pageEnd) break
 			const end = c.offset + c.title.length
 			if (end <= pageStart) continue
-			out.push({ start: c.offset, end, level: c.level })
+			// 「第一卷：魔性不改」拆成两行：编号一行、标题名一行（与 EPUB 的分行标题一致）
+			const colonIdx = c.title.search(/[:：]/)
+			const colon = colonIdx > 0 && colonIdx < c.title.length - 1 ? c.offset + colonIdx + 1 : undefined
+			out.push({ start: c.offset, end, level: c.level, colon })
 		}
 		return out
 	}
@@ -775,6 +778,7 @@ export class TextView extends ItemView {
 		for (const h of headings) {
 			bounds.add(Math.max(0, Math.min(text.length, h.start - pageStart)))
 			bounds.add(Math.max(0, Math.min(text.length, h.end - pageStart)))
+			if (h.colon !== undefined) bounds.add(Math.max(0, Math.min(text.length, h.colon - pageStart)))
 		}
 		for (const { range } of hits) {
 			bounds.add(Math.max(0, Math.min(text.length, range.start - pageStart)))
@@ -806,8 +810,9 @@ export class TextView extends ItemView {
 				leaf = mark
 			}
 			if (heading) {
+				const isTitleLine = heading.colon !== undefined && gStart >= heading.colon
 				const span = document.createElement('span')
-				span.className = `grove-txt-h grove-txt-h${heading.level}`
+				span.className = `grove-txt-h grove-txt-h${heading.level} ${isTitleLine ? 'grove-txt-h-main' : 'grove-txt-h-kicker'}`
 				span.appendChild(leaf)
 				leaf = span
 			}

@@ -285,10 +285,10 @@ export class ReaderView extends ItemView {
 
 		// 右下角悬浮翻页按钮
 		const pageBtns = this.readerEl.createDiv('grove-page-btns')
-		const prevBtn = pageBtns.createEl('button', { cls: 'clickable-icon grove-page-btn', attr: { 'aria-label': '上一页（←）' } })
+		const prevBtn = pageBtns.createEl('button', { cls: 'clickable-icon grove-page-btn', attr: { 'aria-label': '上一页' } })
 		setIcon(prevBtn, 'chevron-left')
 		prevBtn.addEventListener('click', () => this.foliate?.goLeft())
-		const nextBtn = pageBtns.createEl('button', { cls: 'clickable-icon grove-page-btn', attr: { 'aria-label': '下一页（→）' } })
+		const nextBtn = pageBtns.createEl('button', { cls: 'clickable-icon grove-page-btn', attr: { 'aria-label': '下一页' } })
 		setIcon(nextBtn, 'chevron-right')
 		nextBtn.addEventListener('click', () => this.foliate?.goRight())
 

@@ -2044,9 +2044,9 @@
 	background: var(--text-selection, rgba(120, 160, 255, 0.35));
 }
 
-/* TXT 里的章节标题：卷 > 节，靠字号与上下留白拉开层次 */
+/* TXT 章节标题：编号一行、标题名一行，卷 > 节，字号对齐 EPUB 的分部/分章页 */
 .grove-txt-h {
-	display: inline-block;
+	display: block;
 	max-width: 100%;
 	font-weight: 700;
 	letter-spacing: 0.02em;
@@ -2054,61 +2054,36 @@
 	white-space: normal;
 }
 
+/* 卷：字号接近 EPUB「第一部分」 */
 .grove-txt-h1 {
-	font-size: 1.38em;
-	line-height: 1.7;
-	margin: 0.6em 0 0.35em;
-	padding-bottom: 0.18em;
-	border-bottom: 1px solid var(--background-modifier-border);
+	font-size: 1.85em;
+	line-height: 1.5;
+	margin: 0.75em 0 0.45em;
 }
 
+.grove-txt-h1.grove-txt-h-kicker {
+	margin-bottom: 0.1em;
+}
+
+.grove-txt-h1.grove-txt-h-main {
+	font-size: 1.55em;
+	line-height: 1.35;
+}
+
+/* 节：比卷小一档 */
 .grove-txt-h2 {
+	font-size: 1.3em;
+	line-height: 1.45;
+	margin: 0.6em 0 0.3em;
+}
+
+.grove-txt-h2.grove-txt-h-kicker {
+	margin-bottom: 0.08em;
+}
+
+.grove-txt-h2.grove-txt-h-main {
 	font-size: 1.14em;
-	line-height: 1.6;
-	margin: 0.45em 0 0.25em;
-}
-
-/* TXT 里的章节标题：卷 > 节，靠字号与上下留白拉开层次 */
-.grove-txt-h {
-	display: inline-block;
-	max-width: 100%;
-	font-weight: 700;
-	letter-spacing: 0.02em;
-	box-sizing: border-box;
-	white-space: normal;
-}
-
-.grove-txt-h1 {
-	font-size: 1.38em;
-	line-height: 1.7;
-	margin: 0.6em 0 0.35em;
-	padding-bottom: 0.18em;
-	border-bottom: 1px solid var(--background-modifier-border);
-}
-
-.grove-txt-h2 {
-	font-size: 1.14em;
-	line-height: 1.6;
-	margin: 0.45em 0 0.25em;
-}
-
-/* TXT 正文里的高亮（批注）：背景与文字色由内联样式给出，这里只管交互反馈 */
-.grove-text-content mark.grove-txt-mark {
-	padding: 0;
-	border-radius: 2px;
-	cursor: pointer;
-	box-decoration-break: clone;
-	-webkit-box-decoration-break: clone;
-	transition: outline-color 0.15s ease;
-	outline: 2px solid transparent;
-}
-
-.grove-text-content mark.grove-txt-mark:hover {
-	outline-color: color-mix(in srgb, var(--interactive-accent) 55%, transparent);
-}
-
-.grove-text-content mark.grove-txt-mark.is-flash {
-	outline-color: var(--interactive-accent);
+	line-height: 1.35;
 }
 
 /* ---- TXT 目录按钮与目录面板 ---- */
