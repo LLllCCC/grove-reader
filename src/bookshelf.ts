@@ -18,6 +18,64 @@ export const VIEW_TYPE_GROVE_BOOKSHELF = 'grove-bookshelf-view'
 const MAX_CACHED_COVERS = 96
 const MAX_CACHED_COVER_CHARS = 24_000_000
 
+const IMAGE_REQUEST_UA =
+	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
+/**
+ * 下载图片直链。豆瓣等图床会校验 Referer，裸请求直接返回 418/403，
+ * 这里按「直连 → 同源 → 站点首页」的顺序带 Referer 重试。
+ */
+async function downloadImageFromUrl(url: string): Promise<{ buffer: ArrayBuffer; mime: string }> {
+	let origin = ''
+	let host = ''
+	try {
+		const parsed = new URL(url)
+		origin = `${parsed.origin}/`
+		host = parsed.hostname
+	} catch {
+		// 交给后面的请求报错
+	}
+	const referers: Array<string | undefined> = [
+		undefined,
+		origin,
+		/doubanio\.com$|douban\.com$/i.test(host) ? 'https://book.douban.com/' : undefined,
+	]
+	const seen = new Set<string>()
+	let lastStatus = 0
+	for (const referer of referers) {
+		const key = referer ?? ''
+		if (seen.has(key)) continue
+		seen.add(key)
+		const headers: Record<string, string> = { 'User-Agent': IMAGE_REQUEST_UA }
+		if (referer) headers.Referer = referer
+		let res: Awaited<ReturnType<typeof requestUrl>>
+		try {
+			res = await Promise.race([
+				requestUrl({ url, method: 'GET', headers }),
+				new Promise<never>((_, reject) =>
+					window.setTimeout(() => reject(new Error('下载超时（20 秒）')), 20_000),
+				),
+			])
+		} catch (e) {
+			if (e instanceof Error && e.message.includes('超时')) throw e
+			continue
+		}
+		if (res.status >= 200 && res.status < 300) {
+			const mime = (res.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase()
+			if (!mime.startsWith('image/')) throw new Error('这个链接返回的不是图片')
+			if (res.arrayBuffer.byteLength > 12 * 1024 * 1024) throw new Error('图片超过 12 MB，请换一张小一些的')
+			return { buffer: res.arrayBuffer, mime }
+		}
+		lastStatus = res.status
+	}
+	if (lastStatus === 418 || lastStatus === 403 || lastStatus === 401) {
+		throw new Error(
+			`对方站点拒绝了下载（HTTP ${lastStatus}，防盗链）。可以右键图片「图片另存为」，再用「更换封面」选择本地文件。`,
+		)
+	}
+	throw new Error(`下载失败：HTTP ${lastStatus || '未知'}`)
+}
+
 // ------------------------------------------------------------------
 // 书架缓存：metadata + 封面，存于插件数据目录，避免每次进书架重复解析
 // ------------------------------------------------------------------
@@ -780,17 +838,10 @@ export class BookshelfView extends ItemView {
 
 	async #changeCoverByUrl(path: string, card: HTMLElement): Promise<void> {
 		new CoverUrlModal(this.app, async url => {
-			const res = await Promise.race([
-				requestUrl({ url, method: 'GET' }),
-				new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error('下载超时（20 秒）')), 20_000)),
-			])
-			if (res.status < 200 || res.status >= 300) throw new Error(`下载失败：HTTP ${res.status}`)
-			const mime = (res.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase()
-			if (!mime.startsWith('image/')) throw new Error('这个链接返回的不是图片')
-			if (res.arrayBuffer.byteLength > 12 * 1024 * 1024) throw new Error('图片超过 12 MB，请换一张小一些的')
+			const { buffer, mime } = await downloadImageFromUrl(url)
 			const name = await this.plugin.shelfCache.saveCustomCoverFromBuffer(
 				this.plugin.store.bookId(path),
-				res.arrayBuffer,
+				buffer,
 				mime,
 			)
 			if (!name) throw new Error('封面保存失败，请检查磁盘权限')

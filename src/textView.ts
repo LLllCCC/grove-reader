@@ -52,8 +52,9 @@ function parseTextCfi(cfi: string): { start: number; end: number } | null {
 	const m = TXT_CFI_RE.exec((cfi ?? '').trim())
 	if (!m) return null
 	const start = Number(m[1])
+	// 单点定位（txt:1234，阅读进度）允许 end === start；批注一律是 start-end 区间
 	const end = m[2] ? Number(m[2]) : start
-	if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null
+	if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null
 	return { start, end }
 }
 
@@ -87,7 +88,6 @@ export class TextView extends ItemView {
 	private readerEl!: HTMLElement
 	private scrollEl!: HTMLElement
 	private textEl!: HTMLElement
-	private bookTitleEl!: HTMLElement
 	private metaEl!: HTMLElement
 	private slider!: HTMLInputElement
 	private progressLabel!: HTMLElement
@@ -226,7 +226,6 @@ export class TextView extends ItemView {
 		toolbar.createDiv('grove-flex-spacer')
 
 		const encodingWrap = toolbar.createDiv('grove-text-encoding')
-		encodingWrap.createSpan({ text: '编码' })
 		this.encodingSelect = encodingWrap.createEl('select', { cls: 'dropdown' })
 		for (const [value, label] of [
 			['auto', '自动'],
@@ -267,6 +266,9 @@ export class TextView extends ItemView {
 		})
 		setIcon(sideBtn, 'list')
 		sideBtn.addEventListener('click', () => this.sidebarEl.classList.toggle('grove-hidden'))
+
+		// 编码识别结果：短标签放末尾，鼠标悬停看完整信息
+		this.metaEl = toolbar.createDiv('grove-text-meta')
 
 		this.appearPanelEl = root.createDiv('grove-appear-panel grove-hidden')
 		this.registerDomEvent(this.contentEl, 'click', e => {
@@ -377,7 +379,6 @@ export class TextView extends ItemView {
 	#showEmpty(message: string): void {
 		if (!this.textEl) return
 		this.textEl.setText(message)
-		this.bookTitleEl.setText(this.bookTitle || 'TXT')
 		this.metaEl.setText('')
 		this.progressLabel.setText('—')
 		this.slider.disabled = true
@@ -401,6 +402,12 @@ export class TextView extends ItemView {
 			this.data = this.plugin.store.load(path)
 			this.bookTitle =
 				this.data.title || this.plugin.shelfCache.get(path)?.title || cleanBookTitle(basenameOf(path))
+			// 笔记标题取 data.title：首次打开时把书名/作者写进数据
+			if (!this.data.title) {
+				this.data.title = this.bookTitle
+				this.data.author = this.data.author || this.plugin.shelfCache.get(path)?.author || ''
+				this.#scheduleSave(true)
+			}
 			this.#decodeAndRender()
 		} catch (e) {
 			this.#showEmpty(`读取失败：${e instanceof Error ? e.message : String(e)}`)
@@ -435,11 +442,12 @@ export class TextView extends ItemView {
 		this.page = target !== null ? this.#pageOfOffset(target) : 0
 		this.page = Math.max(0, Math.min(this.pages.length - 1, this.page))
 
-		this.bookTitleEl.setText(this.bookTitle)
-		this.bookTitleEl.title = this.bookTitle
-		this.metaEl.setText(
-			`编码 ${this.detected.toUpperCase()} · ${this.pages.length} 页${this.warning ? ` · ${this.warning}` : ''}`,
-		)
+		const encName = this.detected ? this.detected.toUpperCase() : ''
+		// 识别结果压进编码下拉的悬停提示；只有编码异常时才在工具栏显示小标签
+		this.metaEl.setText(this.warning ? '编码异常' : '')
+		this.metaEl.toggleClass('grove-hidden', !this.warning)
+		this.metaEl.title = `编码 ${encName} · ${this.pages.length} 页${this.warning ? ` · ${this.warning}` : ''}`
+		this.encodingSelect.title = this.metaEl.title
 		this.encodingSelect.value = this.encoding
 		this.slider.min = '1'
 		this.slider.max = String(Math.max(1, this.pages.length))
@@ -650,7 +658,8 @@ export class TextView extends ItemView {
 			return
 		}
 		const localStart = prefix.toString().length
-		const raw = range.toString().replace(/\r/g, '')
+		// 注意：不要规范化 \r，页面文本与原文逐字符对齐，去掉 \r 会让高亮区间整体错位
+		const raw = range.toString()
 		const trimmed = raw.trim()
 		if (!trimmed) {
 			this.#clearPending()
@@ -1086,7 +1095,6 @@ export class TextView extends ItemView {
 	syncMeta(title: string, author: string): void {
 		if (title) {
 			this.bookTitle = title
-			this.bookTitleEl?.setText(title)
 			;(this.leaf as unknown as { updateHeader?: () => void }).updateHeader?.()		}
 		if (!this.data) return
 		this.data.title = title || this.data.title
