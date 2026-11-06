@@ -2018,6 +2018,16 @@
 	box-sizing: border-box;
 }
 
+.grove-text-track {
+	height: 100%;
+	min-width: 100%;
+}
+
+.grove-text-track {
+	height: 100%;
+	min-width: 100%;
+}
+
 .grove-text-content {
 	margin: 0;
 	box-sizing: border-box;
@@ -2032,6 +2042,54 @@
 
 .grove-text-content::selection {
 	background: var(--text-selection, rgba(120, 160, 255, 0.35));
+}
+
+/* TXT 里的章节标题：卷 > 节，靠字号与上下留白拉开层次 */
+.grove-txt-h {
+	display: inline-block;
+	max-width: 100%;
+	font-weight: 700;
+	letter-spacing: 0.02em;
+	box-sizing: border-box;
+	white-space: normal;
+}
+
+.grove-txt-h1 {
+	font-size: 1.38em;
+	line-height: 1.7;
+	margin: 0.6em 0 0.35em;
+	padding-bottom: 0.18em;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.grove-txt-h2 {
+	font-size: 1.14em;
+	line-height: 1.6;
+	margin: 0.45em 0 0.25em;
+}
+
+/* TXT 里的章节标题：卷 > 节，靠字号与上下留白拉开层次 */
+.grove-txt-h {
+	display: inline-block;
+	max-width: 100%;
+	font-weight: 700;
+	letter-spacing: 0.02em;
+	box-sizing: border-box;
+	white-space: normal;
+}
+
+.grove-txt-h1 {
+	font-size: 1.38em;
+	line-height: 1.7;
+	margin: 0.6em 0 0.35em;
+	padding-bottom: 0.18em;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.grove-txt-h2 {
+	font-size: 1.14em;
+	line-height: 1.6;
+	margin: 0.45em 0 0.25em;
 }
 
 /* TXT 正文里的高亮（批注）：背景与文字色由内联样式给出，这里只管交互反馈 */
@@ -2051,4 +2109,150 @@
 
 .grove-text-content mark.grove-txt-mark.is-flash {
 	outline-color: var(--interactive-accent);
+}
+
+/* ---- TXT 目录按钮与目录面板 ---- */
+
+.grove-toc-btn {
+	max-width: 240px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	padding: 4px 10px;
+	border-radius: 6px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+}
+
+.grove-toc-btn:hover {
+	background: var(--background-modifier-hover);
+}
+
+.grove-toc-modal .grove-toc-search {
+	width: 100%;
+	margin-bottom: 8px;
+}
+
+.grove-toc-list {
+	max-height: min(62vh, 620px);
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	padding-right: 4px;
+}
+
+.grove-toc-item {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	padding: 5px 8px;
+	border-radius: 5px;
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+}
+
+.grove-toc-item:hover {
+	background: var(--background-modifier-hover);
+}
+
+.grove-toc-item.is-volume {
+	font-weight: 700;
+	margin-top: 8px;
+	font-size: var(--font-ui-medium);
+}
+
+.grove-toc-item.is-active {
+	background: var(--background-modifier-active-hover);
+	color: var(--text-accent);
+}
+
+.grove-toc-item-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.grove-toc-empty,
+.grove-toc-more {
+	padding: 10px 8px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+/* ---- TXT 目录按钮与目录面板 ---- */
+
+.grove-toc-btn {
+	max-width: 240px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	padding: 4px 10px;
+	border-radius: 6px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+}
+
+.grove-toc-btn:hover {
+	background: var(--background-modifier-hover);
+}
+
+.grove-toc-modal .grove-toc-search {
+	width: 100%;
+	margin-bottom: 8px;
+}
+
+.grove-toc-list {
+	max-height: min(62vh, 620px);
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	padding-right: 4px;
+}
+
+.grove-toc-item {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	padding: 5px 8px;
+	border-radius: 5px;
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+}
+
+.grove-toc-item:hover {
+	background: var(--background-modifier-hover);
+}
+
+.grove-toc-item.is-volume {
+	font-weight: 700;
+	margin-top: 8px;
+	font-size: var(--font-ui-medium);
+}
+
+.grove-toc-item.is-active {
+	background: var(--background-modifier-active-hover);
+	color: var(--text-accent);
+}
+
+.grove-toc-item-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.grove-toc-empty,
+.grove-toc-more {
+	padding: 10px 8px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
 }

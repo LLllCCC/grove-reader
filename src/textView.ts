@@ -1,4 +1,4 @@
-import { ItemView, Menu, MenuItem, Notice, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
+import { App, ItemView, Menu, MenuItem, Modal, Notice, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import {
 	Annotation,
@@ -46,6 +46,8 @@ interface TextSelection {
 interface ChapterMark {
 	title: string
 	offset: number
+	/** 1 = 卷/部/篇，2 = 章/节/回 */
+	level: 1 | 2
 }
 
 function parseTextCfi(cfi: string): { start: number; end: number } | null {
@@ -87,6 +89,7 @@ export class TextView extends ItemView {
 
 	private readerEl!: HTMLElement
 	private scrollEl!: HTMLElement
+	private trackEl!: HTMLElement
 	private textEl!: HTMLElement
 	private metaEl!: HTMLElement
 	private slider!: HTMLInputElement
@@ -105,7 +108,8 @@ export class TextView extends ItemView {
 	private selectBarEl!: HTMLElement
 	private selectCountEl!: HTMLElement
 	private annItemEls = new Map<string, HTMLElement>()
-	private tocSelect!: HTMLSelectElement
+	private tocBtn!: HTMLButtonElement
+	private currentChapterOffset = -1
 	/** 当前逻辑页内的第几屏（一屏＝一列或两列） */
 	private screen = 0
 	private screenCount = 1
@@ -206,13 +210,9 @@ export class TextView extends ItemView {
 		const toolbar = root.createDiv('grove-toolbar')
 
 		const tocWrap = toolbar.createDiv('grove-toc')
-		this.tocSelect = tocWrap.createEl('select', { cls: 'dropdown grove-toc-select' })
-		this.tocSelect.createEl('option', { value: '', text: '目录' })
-		this.tocSelect.addEventListener('change', () => {
-			const value = this.tocSelect.value
-			if (!value) return
-			this.#jumpToOffset(Number(value))
-		})
+		// 本书章节上千条，原生下拉框难用，改成「按钮 + 可搜索目录面板」
+		this.tocBtn = tocWrap.createEl('button', { cls: 'grove-toc-btn', text: '目录' })
+		this.tocBtn.addEventListener('click', () => this.#openToc())
 
 		const progress = toolbar.createDiv('grove-progress')
 		this.slider = progress.createEl('input', {
@@ -309,7 +309,9 @@ export class TextView extends ItemView {
 		const body = root.createDiv('grove-body')
 		this.readerEl = body.createDiv('grove-reader')
 		this.scrollEl = this.readerEl.createDiv('grove-reader-inner grove-text-scroll')
-		this.textEl = this.scrollEl.createDiv({ cls: 'grove-text-content' })
+		// track 负责撑出足够的可滚动宽度，保证最后一屏也能左对齐，不露出上一列半截字
+		this.trackEl = this.scrollEl.createDiv({ cls: 'grove-text-track' })
+		this.textEl = this.trackEl.createDiv({ cls: 'grove-text-content' })
 		this.registerDomEvent(this.scrollEl, 'wheel', e => this.#onWheel(e), { passive: false })
 
 		// 划选 → 弹条；点击已有高亮 → 批注菜单
@@ -495,13 +497,9 @@ export class TextView extends ItemView {
 		let offset = 0
 		for (const line of text.split('\n')) {
 			const trimmed = line.trim()
-			if (
-				trimmed.length > 0 &&
-				trimmed.length <= 48 &&
-				CHAPTER_RE.test(trimmed) &&
-				(out.length === 0 || offset - out[out.length - 1].offset > 200)
-			) {
-				out.push({ title: trimmed, offset })
+			if (trimmed.length > 0 && trimmed.length <= 48 && CHAPTER_RE.test(trimmed)) {
+				const level: 1 | 2 = /^第[0-9零一二三四五六七八九十百千万两〇○]{1,12}[卷部篇]/.test(trimmed) ? 1 : 2
+				out.push({ title: trimmed, offset, level })
 				if (out.length >= 3000) break
 			}
 			offset += line.length + 1
@@ -548,19 +546,23 @@ export class TextView extends ItemView {
 	}
 
 	#buildToc(): void {
-		if (!this.tocSelect) return
-		this.tocSelect.empty()
-		this.tocSelect.createEl('option', {
-			value: '',
-			text: this.chapters.length ? `目录（${this.chapters.length} 章）` : '目录（未识别章节）',
-		})
-		for (const c of this.chapters) {
-			this.tocSelect.createEl('option', { value: String(c.offset), text: truncate(c.title, 40) })
+		if (!this.tocBtn) return
+		this.currentChapterOffset = -1
+		this.tocBtn.setText(this.chapters.length ? `目录（${this.chapters.length}）` : '目录')
+		this.tocBtn.title = this.chapters.length ? '打开目录（可搜索）' : '没有识别到章节'
+	}
+
+	/** 打开可搜索目录面板 */
+	#openToc(): void {
+		if (!this.chapters.length) {
+			new Notice(`Grove Reader：这本 TXT 没有识别到章节标题`)
+			return
 		}
+		new TextTocModal(this.app, this.chapters, this.currentChapterOffset, offset => this.#jumpToOffset(offset)).open()
 	}
 
 	#syncToc(offsetArg?: number): void {
-		if (!this.tocSelect || !this.chapters.length) return
+		if (!this.tocBtn || !this.chapters.length) return
 		// 用当前屏的起始字符，而不是逻辑页起点：一页 3 万字里可能跨好几节
 		const start = offsetArg ?? this.#currentOffset()
 		const pageLen = this.pages[this.page]?.length ?? 0
@@ -569,7 +571,9 @@ export class TextView extends ItemView {
 		// 这一屏里刚好开始了下一章（目录跳转后标题通常就在屏内），优先显示它
 		const next = idx + 1
 		if (next < this.chapters.length && this.chapters[next].offset < start + span) idx = next
-		this.tocSelect.value = idx >= 0 ? String(this.chapters[idx].offset) : ''
+		this.currentChapterOffset = idx >= 0 ? this.chapters[idx].offset : -1
+		this.tocBtn.setText(idx >= 0 ? truncate(this.chapters[idx].title, 28) : `目录（${this.chapters.length}）`)
+		this.tocBtn.title = idx >= 0 ? `${this.chapters[idx].title} · 点击打开目录` : '点击打开目录'
 	}
 
 	#chapterAt(offset: number): string | undefined {
@@ -657,6 +661,26 @@ export class TextView extends ItemView {
 		return this.#contentWidth() + this.#columnGap()
 	}
 
+	/**
+	 * 下一帧执行，并带定时器兜底与异常保护。
+	 * 只用 rAF 时，一旦回调抛错或浏览器暂停 rAF，rendering 锁会永远卡住，
+	 * 之后所有翻页/跳转都定位失败（表现为进度和位置不再更新）。
+	 */
+	#afterFrame(fn: () => void): void {
+		let done = false
+		const run = (): void => {
+			if (done) return
+			done = true
+			try {
+				fn()
+			} catch (e) {
+				console.error('[Grove Reader] 分页刷新失败', e)
+			}
+		}
+		window.requestAnimationFrame(run)
+		window.setTimeout(run, 80)
+	}
+
 	#layout(): void {
 		if (!this.scrollEl || !this.textEl) return
 		if (this.#targetWidth() < 80) return
@@ -666,14 +690,36 @@ export class TextView extends ItemView {
 		this.textEl.style.columnGap = `${this.#columnGap()}px`
 	}
 
+	/** 让可滚动距离正好等于 (屏数-1)*step，末屏才能左对齐 */
+	#syncTrackWidth(): void {
+		if (!this.trackEl || !this.textEl) return
+		const step = this.#step()
+		const count = this.#computeScreenCount()
+		const client = this.scrollEl.clientWidth
+		const need = (count - 1) * step + client
+		this.trackEl.style.width = `${Math.max(this.#contentWidth(), need)}px`
+	}
+
 	#computeScreenCount(): number {
 		const step = this.#step()
 		const total = this.textEl.scrollWidth
 		if (!Number.isFinite(total) || total <= 0 || step <= 0) return 1
-		// 按可滚动范围算：保证最后一屏 scrollLeft 不超过 max，
-		// 否则会被夹回去，左边露出上一列的半截字（最后一屏右侧留白是正常的）
-		const max = Math.max(0, total - this.scrollEl.clientWidth)
-		return Math.max(1, Math.floor(max / step + 0.02) + 1)
+		return Math.max(1, Math.ceil(total / step - 0.02))
+	}
+
+	/** 本页范围内出现的章节标题区间 */
+	#headingsInPage(pageStart: number, pageEnd: number): Array<{ start: number; end: number; level: 1 | 2 }> {
+		const out: Array<{ start: number; end: number; level: 1 | 2 }> = []
+		if (!this.chapters.length) return out
+		let i = Math.max(0, this.#sectionIndexOf(pageStart))
+		for (; i < this.chapters.length; i++) {
+			const c = this.chapters[i]
+			if (c.offset >= pageEnd) break
+			const end = c.offset + c.title.length
+			if (end <= pageStart) continue
+			out.push({ start: c.offset, end, level: c.level })
+		}
+		return out
 	}
 
 	/** 渲染当前逻辑页（含高亮），等一帧后测量屏数并定位 */
@@ -683,7 +729,7 @@ export class TextView extends ItemView {
 		if (this.#targetWidth() < 80) {
 			if (this.layoutRetry < 40) {
 				this.layoutRetry += 1
-				window.requestAnimationFrame(() => this.#renderPage())
+				window.setTimeout(() => this.#renderPage(), 40)
 			}
 			return
 		}
@@ -699,45 +745,76 @@ export class TextView extends ItemView {
 			.sort((x, y) => x.range.start - y.range.start)
 
 		this.textEl.empty()
-		let cursor = 0
-		for (const { a, range } of hits) {
-			const from = Math.max(0, range.start - pageStart)
-			const to = Math.min(text.length, range.end - pageStart)
-			if (to <= cursor) continue
-			const start = Math.max(from, cursor)
-			if (start > cursor) this.textEl.appendChild(document.createTextNode(text.slice(cursor, start)))
-			const mark = document.createElement('mark')
-			mark.className = 'grove-txt-mark'
-			mark.dataset.annId = a.id
-			mark.style.backgroundColor = colorCss(a.color)
-			mark.style.color = contrastFg(colorCss(a.color))
-			mark.title = truncate(a.note || a.text, 120)
-			mark.setText(text.slice(start, to))
-			this.textEl.appendChild(mark)
-			cursor = to
+		// 章节标题（本页出现的）与高亮分别切区间，按边界逐段输出：
+		// 标题用 span 放大加粗，高亮用 mark，两者可嵌套
+		const headings = this.#headingsInPage(pageStart, pageEnd)
+		const bounds = new Set<number>([0, text.length])
+		for (const h of headings) {
+			bounds.add(Math.max(0, Math.min(text.length, h.start - pageStart)))
+			bounds.add(Math.max(0, Math.min(text.length, h.end - pageStart)))
 		}
-		if (cursor < text.length) this.textEl.appendChild(document.createTextNode(text.slice(cursor)))
+		for (const { range } of hits) {
+			bounds.add(Math.max(0, Math.min(text.length, range.start - pageStart)))
+			bounds.add(Math.max(0, Math.min(text.length, range.end - pageStart)))
+		}
+		const points = [...bounds].sort((a, b) => a - b)
+		for (let i = 0; i < points.length - 1; i++) {
+			const from = points[i]
+			const to = points[i + 1]
+			if (to <= from) continue
+			const seg = text.slice(from, to)
+			const gStart = pageStart + from
+			const gEnd = pageStart + to
+			const heading = headings.find(h => h.start < gEnd && h.end > gStart)
+			const hit = hits.find(x => x.range.start < gEnd && x.range.end > gStart)
+			if (!heading && !hit) {
+				this.textEl.appendChild(document.createTextNode(seg))
+				continue
+			}
+			let leaf: Node = document.createTextNode(seg)
+			if (hit) {
+				const mark = document.createElement('mark')
+				mark.className = 'grove-txt-mark'
+				mark.dataset.annId = hit.a.id
+				mark.style.backgroundColor = colorCss(hit.a.color)
+				mark.style.color = contrastFg(colorCss(hit.a.color))
+				mark.title = truncate(hit.a.note || hit.a.text, 120)
+				mark.appendChild(leaf)
+				leaf = mark
+			}
+			if (heading) {
+				const span = document.createElement('span')
+				span.className = `grove-txt-h grove-txt-h${heading.level}`
+				span.appendChild(leaf)
+				leaf = span
+			}
+			this.textEl.appendChild(leaf)
+		}
 
 		this.#layout()
 		this.rendering = true
 		this.scrollEl.scrollLeft = 0
 		this.scrollEl.scrollTop = 0
 
-		window.requestAnimationFrame(() => {
-			this.screenCount = this.#computeScreenCount()
-			if (this.gotoLastScreen) {
-				this.gotoLastScreen = false
-				this.screen = this.screenCount - 1
-			} else if (this.pendingOffset !== null) {
-				const target = this.pendingOffset
-				this.pendingOffset = null
-				this.screen = this.#offsetToScreen(target)
-				this.alignToColumnTop = false
+		this.#afterFrame(() => {
+			try {
+				this.screenCount = this.#computeScreenCount()
+				this.#syncTrackWidth()
+				if (this.gotoLastScreen) {
+					this.gotoLastScreen = false
+					this.screen = this.screenCount - 1
+				} else if (this.pendingOffset !== null) {
+					const target = this.pendingOffset
+					this.pendingOffset = null
+					this.screen = this.#offsetToScreen(target)
+					this.alignToColumnTop = false
+				}
+				this.screen = Math.max(0, Math.min(this.screen, this.screenCount - 1))
+				this.#applyScreen()
+				this.#flashPendingMark()
+			} finally {
+				this.rendering = false
 			}
-			this.screen = Math.max(0, Math.min(this.screen, this.screenCount - 1))
-			this.#applyScreen()
-			this.rendering = false
-			this.#flashPendingMark()
 			// 视图刚打开时可能是小尺寸排版，等真实宽度出现后自愈一次
 			const laid = Number.parseFloat(this.textEl.style.width || '0')
 			if (Math.abs(this.#targetWidth() - laid) > 4) this.#scheduleRelayout()
@@ -748,12 +825,11 @@ export class TextView extends ItemView {
 	#applyScreen(): void {
 		if (!this.scrollEl || !this.textEl) return
 		const step = this.#step()
-		const max = Math.max(0, this.textEl.scrollWidth - this.scrollEl.clientWidth)
-		this.scrollEl.scrollLeft = Math.min(this.screen * step, max)
+		this.scrollEl.scrollLeft = this.screen * step
 		this.prevBtn.disabled = this.screen <= 0 && this.page <= 0
 		this.nextBtn.disabled = this.screen >= this.screenCount - 1 && this.page >= this.pages.length - 1
 		// 刚改完 scrollLeft 时命中测试还是旧位置，等一帧再算进度与位置
-		window.requestAnimationFrame(() => {
+		this.#afterFrame(() => {
 			// 用屏号换算字符偏移：即使刚被重排过 scrollLeft 也不影响进度与位置记忆
 			const offset = this.#offsetAtX(this.screen * this.#step())
 			this.#updateProgress(offset)
@@ -974,8 +1050,9 @@ export class TextView extends ItemView {
 		const offset = this.#offsetAtX(this.screen * this.#step())
 		this.#layout()
 		this.scrollEl.scrollLeft = 0
-		window.requestAnimationFrame(() => {
+		this.#afterFrame(() => {
 			this.screenCount = this.#computeScreenCount()
+			this.#syncTrackWidth()
 			this.alignToColumnTop = false
 			this.screen = Math.max(0, Math.min(this.#offsetToScreen(offset), this.screenCount - 1))
 			this.#applyScreen()
@@ -1608,5 +1685,78 @@ export class TextView extends ItemView {
 			'--text-selection',
 			isDarkColor(bg) ? 'rgba(120,160,255,0.35)' : 'rgba(64,120,255,0.25)',
 		)
+	}
+}
+
+/** 目录面板：章节可能上千条，用可搜索列表代替原生下拉框 */
+class TextTocModal extends Modal {
+	constructor(
+		app: App,
+		private chapters: ChapterMark[],
+		private currentOffset: number,
+		private onPick: (offset: number) => void,
+	) {
+		super(app)
+	}
+
+	onOpen(): void {
+		this.titleEl.setText(`目录（${this.chapters.length} 章）`)
+		this.contentEl.empty()
+		this.contentEl.addClass('grove-toc-modal')
+
+		const search = this.contentEl.createEl('input', {
+			cls: 'grove-toc-search',
+			attr: { type: 'search', placeholder: '搜索章节名…' },
+		})
+		const list = this.contentEl.createDiv('grove-toc-list')
+
+		const render = (keyword: string): void => {
+			list.empty()
+			const kw = keyword.trim().toLowerCase()
+			const items = kw ? this.chapters.filter(c => c.title.toLowerCase().includes(kw)) : this.chapters
+			if (!items.length) {
+				list.createDiv('grove-toc-empty').setText('没有匹配的章节')
+				return
+			}
+			const limit = 600
+			let activeEl: HTMLElement | null = null
+			for (const c of items.slice(0, limit)) {
+				const item = list.createDiv('grove-toc-item')
+				if (c.level === 1) item.addClass('is-volume')
+				if (c.offset === this.currentOffset) {
+					item.addClass('is-active')
+					activeEl = item
+				}
+				item.createSpan('grove-toc-item-title').setText(c.title)
+				item.addEventListener('click', () => {
+					this.onPick(c.offset)
+					this.close()
+				})
+			}
+			if (items.length > limit) {
+				list.createDiv('grove-toc-more').setText(`只显示前 ${limit} 条，输入关键词继续筛选（共 ${items.length} 条）`)
+			}
+			if (activeEl) {
+				const el = activeEl as HTMLElement
+				window.setTimeout(() => el.scrollIntoView({ block: 'center' }), 30)
+			}
+		}
+
+		search.addEventListener('input', () => render(search.value))
+		search.addEventListener('keydown', e => {
+			if (e.key !== 'Enter') return
+			const kw = search.value.trim().toLowerCase()
+			const first = kw ? this.chapters.find(c => c.title.toLowerCase().includes(kw)) : this.chapters[0]
+			if (first) {
+				this.onPick(first.offset)
+				this.close()
+			}
+		})
+		render('')
+		window.setTimeout(() => search.focus(), 50)
+	}
+
+	onClose(): void {
+		this.contentEl.empty()
 	}
 }
