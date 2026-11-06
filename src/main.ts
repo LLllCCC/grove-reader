@@ -24,6 +24,7 @@ import {
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
 import { PdfView, VIEW_TYPE_GROVE_PDF } from './pdfView'
+import { TextView, VIEW_TYPE_GROVE_TEXT } from './textView'
 import { BookPickerModal, ConfirmModal, DangerConfirmModal, FolderPromptModal, HealthReportModal, OpLogModal, ReadingStatsModal, PromptModal, SearchModal, TemplatePickerModal, TrashModal } from './modals'
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
@@ -105,11 +106,21 @@ export default class GroveReaderPlugin extends Plugin {
 		this.registerView(VIEW_TYPE_GROVE_READER, leaf => new ReaderView(leaf, this))
 		this.registerView(VIEW_TYPE_GROVE_BOOKSHELF, leaf => new BookshelfView(leaf, this))
 		this.registerView(VIEW_TYPE_GROVE_PDF, leaf => new PdfView(leaf, this))
+		this.registerView(VIEW_TYPE_GROVE_TEXT, leaf => new TextView(leaf, this))
 		// 注册扩展名：电子书文件会显示在文件列表中，点击直接用阅读器打开
 		// 注意：pdf 不注册——保持 Obsidian 原生双击行为，PDF 经书架/协议进入插件
 		this.registerExtensions(SUPPORTED_BOOK_EXTS, VIEW_TYPE_GROVE_READER)
 		this.registerObsidianProtocolHandler('grove', params =>
 			void this.openByBookId(params['book'] ?? '', params['cfi'] ?? ''))
+		// 文件列表里的 TXT 也提供「用 Grove Reader 打开」，自动识别 GBK/GB18030
+		this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
+			if (file instanceof TFile && file.extension.toLowerCase() === 'txt') {
+				menu.addItem(item =>
+					item.setTitle('用 Grove Reader 打开（自动识别编码）')
+						.setIcon('book-open')
+						.onClick(() => void this.#openTextBook(file.path)))
+			}
+		}))
 		this.ribbonEl = this.addRibbonIcon(this.currentLogoIcon(), `${APP_NAME}：书架`, () => void this.openBookshelf())
 
 		this.registerCommands()
@@ -585,6 +596,10 @@ export default class GroveReaderPlugin extends Plugin {
 			await this.#openPdfBook(bookPath, cfi)
 			return
 		}
+		if (ext === 'txt') {
+			await this.#openTextBook(bookPath)
+			return
+		}
 		if (!isReaderExt(ext)) {
 			await this.#openWithNativeViewer(bookPath)
 			return
@@ -602,6 +617,24 @@ export default class GroveReaderPlugin extends Plugin {
 			type: VIEW_TYPE_GROVE_READER,
 			active: true,
 			state: { bookPath, cfi },
+		})
+		this.app.workspace.revealLeaf(leaf)
+	}
+
+	/** 在 Grove Reader 内打开 TXT（自动识别 UTF-8 / GB18030 / Big5） */
+	async #openTextBook(bookPath: string): Promise<void> {
+		const existing = this.app.workspace
+			.getLeavesOfType(VIEW_TYPE_GROVE_TEXT)
+			.find(leaf => leaf.view instanceof TextView && leaf.view.bookPath === bookPath)
+		if (existing && existing.view instanceof TextView) {
+			this.app.workspace.revealLeaf(existing)
+			return
+		}
+		const leaf = this.app.workspace.getLeaf('tab')
+		await leaf.setViewState({
+			type: VIEW_TYPE_GROVE_TEXT,
+			active: true,
+			state: { bookPath },
 		})
 		this.app.workspace.revealLeaf(leaf)
 	}

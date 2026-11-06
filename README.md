@@ -1,6 +1,6 @@
 # Grove Reader
 
-Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / cbz 与 PDF）。目标：在 Obsidian 内完成「阅读 → 划线批注 → 生成 Markdown 笔记 → 一键回跳原文」的闭环。插件在设置里提供一组字标（彩叶 / 森林 / 灰绿 / 印章），可切换标签页与功能区图标。
+Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / cbz、PDF 与 TXT）。目标：在 Obsidian 内完成「阅读 → 划线批注 → 生成 Markdown 笔记 → 一键回跳原文」的闭环。插件在设置里提供一组字标（彩叶 / 森林 / 灰绿 / 印章），可切换标签页与功能区图标。
 
 电子书渲染引擎为 [foliate-js](https://github.com/johnfactotum/foliate-js)（MIT，已内置于 `lib/foliate-js`）；PDF 阅读与批注基于 pdfjs-dist 独立实现（划选高亮按页存储）。
 
@@ -8,13 +8,14 @@ Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / c
 
 1. 把 `main.js`、`manifest.json`、`styles.css` 复制到 `<库>/.obsidian/plugins/grove-reader/`。
 2. Obsidian 设置 → 第三方插件 → 启用 **Grove Reader**。
-3. 把 EPUB（也支持 mobi / azw3 / fb2 / cbz）放进库里任意位置，点左侧栏书本图标或执行命令「打开书籍…」。
+3. 把 EPUB（也支持 mobi / azw3 / fb2 / cbz / txt）放进库里任意位置，点左侧栏书本图标或执行命令「打开书籍…」。
 
 ## 使用
 
 | 操作 | 方式 |
 | --- | --- |
 | 打开书 | 功能区书本图标 / 命令「打开书籍…」 |
+| TXT 阅读 | 书架扫描 `.txt`，点击用 Grove TXT 视图打开；自动识别 UTF-8 / GB18030(GBK) / Big5 / UTF-16，可手动切换编码；按约 3 万字分页 |
 | 翻页 | 工具栏箭头、←/→（键盘选字时不翻页）、鼠标滚轮（Aa 面板可关）、进度条拖动 |
 | 高亮 | 正文划选文字 → 弹出条选颜色；或划选后用工具栏色点 / 命令 |
 | 评论 | 弹出条「评论」，或划选后点工具栏评论按钮；点击已有高亮也可编辑 |

@@ -469,7 +469,7 @@ export class BookshelfView extends ItemView {
 			}
 			this.#showEmpty(visiblePaths.length && this.listFilter !== 'all'
 				? '这个书单里还没有书。在书籍卡片上右键 →「移入书单…」，或直接把书拖到书单标签上。'
-				: '扫描文件夹里没有找到书籍文件（支持 epub / mobi / azw3 / fb2 / cbz，PDF 会一并收纳）。')
+				: '扫描文件夹里没有找到书籍文件（支持 epub / mobi / azw3 / fb2 / cbz / txt，PDF 会一并收纳）。')
 			return
 		}
 
@@ -1162,6 +1162,24 @@ export class BookshelfView extends ItemView {
 				coverName = existing.cover
 			}
 			this.#updateCard(card, { title, author, coverName })
+			return
+		}
+
+		// TXT：不做 EPUB/PDF 解析，直接用文件名做标题；点开走 Grove TXT 视图
+		if (ext === 'txt') {
+			const title = existing?.title || cleanBookTitle(basenameOf(path))
+			const author = existing?.author ?? ''
+			cache.set(path, {
+				...existing,
+				title,
+				author,
+				cover: existing?.cover,
+				mtime,
+				size,
+				addedAt,
+				failed: true,
+			})
+			this.#updateCard(card, { title, author, coverName: existing?.cover })
 			return
 		}
 

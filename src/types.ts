@@ -23,14 +23,15 @@ export const FORMAT_LABELS: Record<string, string> = {
 	fbz: 'FB2',
 	cbz: 'CBZ',
 	pdf: 'PDF',
+	txt: 'TXT',
 }
 
 /**
- * 书架额外收纳、但不在插件内阅读的扩展名（目前是 PDF）。
- * 这些文件由 Obsidian 原生视图或系统程序打开；
- * 不能加进 registerExtensions，否则会接管/破坏原生打开行为。
+ * 书架额外收纳、但不在插件内按电子书解析的扩展名（目前是 PDF、TXT）。
+ * PDF 由 Obsidian 原生视图或系统程序打开；TXT 由 Grove Reader 的纯文本视图打开。
+ * 不能把 txt 加进 registerExtensions，否则会接管全局 .txt 打开行为。
  */
-export const SHELF_EXTRA_EXTS = ['pdf']
+export const SHELF_EXTRA_EXTS = ['pdf', 'txt']
 
 export function isShelfExt(ext: string): boolean {
 	const e = ext.toLowerCase()

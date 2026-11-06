@@ -143,7 +143,7 @@ export class GroveSettingTab extends PluginSettingTab {
 		containerEl.createEl('h3', { text: '扫描文件夹' })
 		new Setting(containerEl)
 			.setName('扫描文件夹')
-			.setDesc('书架从这些文件夹扫描书籍；支持库内文件夹或本机绝对路径（子文件夹会一并扫描）。PDF 也会被收纳进书架，点击用 Obsidian 自带查看器打开')
+			.setDesc('书架从这些文件夹扫描书籍；支持库内文件夹或本机绝对路径（子文件夹会一并扫描）。PDF、TXT 也会被收纳进书架，点击用 Obsidian 原生视图或 Grove TXT 视图打开')
 			.addButton(button =>
 				button
 					.setButtonText('添加文件夹')
