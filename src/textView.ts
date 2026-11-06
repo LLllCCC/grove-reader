@@ -512,28 +512,49 @@ export class TextView extends ItemView {
 	 * 章节过长时按 3 万字硬切；相邻标题相距不足 200 字时只保留前一个，避免出现大半页空白。
 	 */
 	#buildPages(text: string): void {
-		const points: number[] = []
+		// 卷标题（第X卷/部/篇）单独占一页，像 EPUB 里每个「部分」是独立文档；
+		// 章/节按边界分页，只是切点。全程只读原文，不做任何改写。
+		const points: Array<{ offset: number; level: 1 | 2 }> = []
 		for (const c of this.chapters) {
 			if (c.offset <= 0 || c.offset >= text.length) continue
-			const last = points.length ? points[points.length - 1] : 0
+			if (c.level === 1) {
+				points.push({ offset: c.offset, level: 1 })
+				continue
+			}
+			const last = points.length ? points[points.length - 1].offset : 0
 			if (c.offset - last < 200) continue
-			points.push(c.offset)
+			points.push({ offset: c.offset, level: 2 })
 		}
 		const hard = 30_000
 		const maxPages = 6000
 		const pages: string[] = []
 		const starts: number[] = []
 		let start = 0
-		for (const cut of [...points, text.length]) {
-			while (cut - start > hard) {
+		const cuts: Array<{ offset: number; level: 1 | 2 }> = [...points, { offset: text.length, level: 2 }]
+		for (const cut of cuts) {
+			const at = cut.offset
+			while (at - start > hard) {
 				pages.push(text.slice(start, start + hard))
 				starts.push(start)
 				start += hard
 			}
-			if (cut > start) {
-				pages.push(text.slice(start, cut))
+			if (cut.level === 1 && at > start) {
+				pages.push(text.slice(start, at))
 				starts.push(start)
-				start = cut
+				// 卷标题 + 紧随其后的空行，单独一页
+				let end = at
+				while (end < text.length && text[end] !== '\n') end++
+				while (end < text.length && (text[end] === '\n' || text[end] === '\r')) end++
+				pages.push(text.slice(at, end))
+				starts.push(at)
+				start = end
+				if (pages.length >= maxPages) break
+				continue
+			}
+			if (at > start) {
+				pages.push(text.slice(start, at))
+				starts.push(start)
+				start = at
 			}
 			if (pages.length >= maxPages) break
 		}
