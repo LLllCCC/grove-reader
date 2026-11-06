@@ -1010,10 +1010,10 @@ export class ReaderView extends ItemView {
 		const size = popup.getBoundingClientRect()
 		let left = lastLeft - 4
 		left = Math.max(8, Math.min(left, window.innerWidth - size.width - 8))
-		// 贴在最后一行下方（像 WorkBuddy 的划词条），紧贴且不会盖住选中的字；
-		// 下方空间不够才翻到上方
-		let top = lastBottom + 6
-		if (top + size.height > window.innerHeight - 8) top = Math.max(8, lastTop - size.height - 6)
+		// 贴在选区上方：用包围盒顶边（多行时即首行）算，间距 6px；
+		// 上方放不下（选区贴着页顶）才落到下方
+		let top = anchorTop - size.height - 6
+		if (top < 8) top = Math.min(lastBottom + 6, window.innerHeight - size.height - 8)
 		top = Math.max(8, top)
 		popup.style.left = `${Math.round(left)}px`
 		popup.style.top = `${Math.round(top)}px`
