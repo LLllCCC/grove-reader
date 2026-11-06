@@ -2274,3 +2274,253 @@
 }
 
 /* ---- 批注操作菜单（TXT / EPUB 共用外观） ---- */
+
+/* ---- 跳转后的「返回原位置」浮条 ---- */
+
+.grove-jump-return {
+	position: absolute;
+	left: 20px;
+	bottom: 20px;
+	z-index: 50;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 8px 6px 10px;
+	border-radius: 8px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	max-width: min(380px, calc(100% - 40px));
+}
+
+.grove-jump-return-icon {
+	display: flex;
+	flex: none;
+	color: var(--text-muted);
+}
+
+.grove-jump-return-icon .svg-icon {
+	width: 14px;
+	height: 14px;
+}
+
+.grove-jump-return-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.grove-jump-return-btn {
+	flex: none;
+	padding: 3px 9px;
+	border: none;
+	border-radius: 5px;
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	cursor: pointer;
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-jump-return-btn:hover {
+	background: var(--interactive-accent-hover);
+}
+
+.grove-jump-return-close {
+	flex: none;
+	display: flex;
+	padding: 2px;
+	border: none;
+	background: none;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.grove-jump-return-close:hover {
+	color: var(--text-normal);
+}
+
+/* ---- 跳转后的「返回原位置」浮条 ---- */
+
+.grove-jump-return {
+	position: absolute;
+	left: 20px;
+	bottom: 20px;
+	z-index: 50;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 8px 6px 10px;
+	border-radius: 8px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	max-width: min(380px, calc(100% - 40px));
+}
+
+.grove-jump-return-icon {
+	display: flex;
+	flex: none;
+	color: var(--text-muted);
+}
+
+.grove-jump-return-icon .svg-icon {
+	width: 14px;
+	height: 14px;
+}
+
+.grove-jump-return-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.grove-jump-return-btn {
+	flex: none;
+	padding: 3px 9px;
+	border: none;
+	border-radius: 5px;
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	cursor: pointer;
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-jump-return-btn:hover {
+	background: var(--interactive-accent-hover);
+}
+
+.grove-jump-return-close {
+	flex: none;
+	display: flex;
+	padding: 2px;
+	border: none;
+	background: none;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.grove-jump-return-close:hover {
+	color: var(--text-normal);
+}
+
+/* ---- 批注栏收起按钮与展开把手 ---- */
+
+.grove-sidebar-collapse {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	margin-left: auto;
+	padding: 3px;
+	border: none;
+	background: none;
+	color: var(--text-muted);
+	cursor: pointer;
+	border-radius: 4px;
+}
+
+.grove-sidebar-collapse:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.grove-sidebar-collapse .svg-icon {
+	width: 15px;
+	height: 15px;
+}
+
+.grove-sidebar-handle {
+	position: absolute;
+	right: 0;
+	top: 50%;
+	transform: translateY(-50%);
+	z-index: 40;
+}
+
+.grove-sidebar-handle-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 56px;
+	padding: 0;
+	border: 1px solid var(--background-modifier-border);
+	border-right: none;
+	border-radius: 6px 0 0 6px;
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.grove-sidebar-handle-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.grove-sidebar-handle-btn .svg-icon {
+	width: 14px;
+	height: 14px;
+}
+
+/* ---- 批注栏收起按钮与展开把手 ---- */
+
+.grove-sidebar-collapse {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	margin-left: auto;
+	padding: 3px;
+	border: none;
+	background: none;
+	color: var(--text-muted);
+	cursor: pointer;
+	border-radius: 4px;
+}
+
+.grove-sidebar-collapse:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.grove-sidebar-collapse .svg-icon {
+	width: 15px;
+	height: 15px;
+}
+
+.grove-sidebar-handle {
+	position: absolute;
+	right: 0;
+	top: 50%;
+	transform: translateY(-50%);
+	z-index: 40;
+}
+
+.grove-sidebar-handle-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 56px;
+	padding: 0;
+	border: 1px solid var(--background-modifier-border);
+	border-right: none;
+	border-radius: 6px 0 0 6px;
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.grove-sidebar-handle-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.grove-sidebar-handle-btn .svg-icon {
+	width: 14px;
+	height: 14px;
+}

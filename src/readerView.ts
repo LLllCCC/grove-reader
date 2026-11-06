@@ -61,7 +61,7 @@ interface FoliateView extends HTMLElement {
 	goToFraction(fraction: number): Promise<void>
 	addAnnotation(annotation: { value: string } & Record<string, unknown>): Promise<{ index: number; label?: string } | undefined>
 	deleteAnnotation(annotation: { value: string } & Record<string, unknown>): Promise<unknown>
-	resolveNavigation(target: string): { index?: number } | undefined
+	resolveNavigation(target: string): { index?: number; label?: string } | undefined
 	getCFI(index: number, range: Range): string
 	search(options: { query: string }): AsyncGenerator<FoliateSearchYield, void, unknown>
 	clearSearch(): void
@@ -128,6 +128,8 @@ export class ReaderView extends ItemView {
 	private sliderActive = false
 	private popup: HTMLElement | null = null
 	private popupCloser: ((e: MouseEvent) => void) | null = null
+	/** 跳转后的「返回原位置」浮条 */
+	private jumpReturnEl: HTMLElement | null = null
 	/** spine 索引 → 该节里最具体的目录项（同文件下「第X章」优先于「第X部分」） */
 	private tocBySection = new Map<number, { label: string; depth: number }>()
 
@@ -136,6 +138,7 @@ export class ReaderView extends ItemView {
 	private sidebarEl!: HTMLElement
 	private annListEl!: HTMLElement
 	private annCountEl!: HTMLElement
+	private sidebarHandleEl!: HTMLElement
 	private tocSelect!: HTMLSelectElement
 	private slider!: HTMLInputElement
 	private progressLabel!: HTMLElement
@@ -291,7 +294,7 @@ export class ReaderView extends ItemView {
 
 		const sideBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '批注列表' } })
 		setIcon(sideBtn, 'list')
-		sideBtn.addEventListener('click', () => this.sidebarEl.classList.toggle('grove-hidden'))
+		sideBtn.addEventListener('click', () => this.#setSidebarCollapsed(!this.sidebarEl.classList.contains('grove-hidden')))
 
 		// 外观面板（绝对定位于工具栏下方）
 		this.appearPanelEl = root.createDiv('grove-appear-panel grove-hidden')
@@ -319,6 +322,15 @@ export class ReaderView extends ItemView {
 		const sideHead = this.sidebarEl.createDiv('grove-sidebar-head')
 		this.annCountEl = sideHead.createSpan('grove-ann-count')
 		this.annCountEl.setText('0 个批注')
+		// 收起整条批注栏；收起后阅读区右缘会出现一个把手可以再展开
+		const collapseBtn = sideHead.createEl('button', { cls: 'grove-sidebar-collapse', attr: { 'aria-label': '收起批注栏' } })
+		setIcon(collapseBtn, 'chevrons-right')
+		collapseBtn.addEventListener('click', () => this.#setSidebarCollapsed(true))
+
+		this.sidebarHandleEl = this.readerEl.createDiv('grove-sidebar-handle')
+		const expandBtn = this.sidebarHandleEl.createEl('button', { cls: 'grove-sidebar-handle-btn', attr: { 'aria-label': '展开批注栏' } })
+		setIcon(expandBtn, 'chevrons-left')
+		expandBtn.addEventListener('click', () => this.#setSidebarCollapsed(false))
 
 		const fullTextSearch = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })
 		this.fullTextSearchEl = fullTextSearch
@@ -466,6 +478,7 @@ export class ReaderView extends ItemView {
 			this.#resetSidebarFilters()
 			this.#renderSidebar()
 			this.sidebarEl.classList.toggle('grove-hidden', !this.plugin.settings.openSidebarWithBook)
+			this.#syncSidebarHandle()
 		} catch (e) {
 			console.error('[Grove Reader] 打开书籍失败', e)
 			this.#showEmpty(`打开失败：${e instanceof Error ? e.message : String(e)}`)
@@ -476,6 +489,7 @@ export class ReaderView extends ItemView {
 	#teardownBook(): void {
 		this.#clearFullTextSearch()
 		this.#hidePopup()
+		this.#hideJumpReturn()
 		if (this.saveTimer != null) {
 			window.clearTimeout(this.saveTimer)
 			this.saveTimer = null
@@ -626,6 +640,18 @@ export class ReaderView extends ItemView {
 		if (a.paragraphSpacing > 0) {
 			rules.push(`p { margin-top: ${a.paragraphSpacing}em !important; margin-bottom: ${a.paragraphSpacing}em !important; }`)
 		}
+		// 引文（原书的 blockquote）用楷体并加一条左侧竖线：
+		// 原书 CSS 只写了 font-family:kaiti，字重字号与正文接近，几乎看不出区别
+		rules.push(
+			`blockquote { border-left: 3px solid color-mix(in srgb, ${fg} 30%, transparent); padding-left: 0.9em; margin-left: 0 !important; margin-right: 0 !important; }`,
+			`blockquote p, blockquote div { font-family: "KaiTi", "楷体", "STKaiti", "Kaiti SC", "Kaiti TC", serif !important; }`,
+		)
+		// 引文（原书的 blockquote）用楷体并加一条左侧竖线：
+		// 原书 CSS 只写了 font-family:kaiti，字重字号与正文接近，几乎看不出区别
+		rules.push(
+			`blockquote { border-left: 3px solid color-mix(in srgb, ${fg} 30%, transparent); padding-left: 0.9em; margin-left: 0 !important; margin-right: 0 !important; }`,
+			`blockquote p, blockquote div { font-family: "KaiTi", "楷体", "STKaiti", "Kaiti SC", "Kaiti TC", serif !important; }`,
+		)
 		rules.push('pre, code { white-space: pre-wrap; }')
 		return rules.join('\n')
 	}
@@ -1414,8 +1440,9 @@ export class ReaderView extends ItemView {
 	// 跳转与持久化
 	// ------------------------------------------------------------------
 
-	async #jumpToCfi(cfi: string): Promise<void> {
+	async #jumpToCfi(cfi: string, remember = true): Promise<void> {
 		if (!this.foliate) return
+		const before = remember ? (this.data?.lastLocation?.cfi ?? null) : null
 		try {
 			await this.foliate.select(cfi)
 		} catch {
@@ -1425,6 +1452,51 @@ export class ReaderView extends ItemView {
 				console.error('[Grove Reader] 跳转失败', err)
 			}
 		}
+		if (before && before !== cfi) this.#showJumpReturn(before)
+	}
+
+	/** 跳转后在左下角留一条「返回原位置」，可以一直挂着，也能关掉 */
+	#showJumpReturn(fromCfi: string): void {
+		this.#hideJumpReturn()
+		let fromLabel = ''
+		try {
+			const nav = this.foliate?.resolveNavigation?.(fromCfi)
+			fromLabel = nav?.label?.trim() || (typeof nav?.index === 'number' ? (this.tocBySection.get(nav.index)?.label ?? '') : '')
+		} catch {
+			fromLabel = ''
+		}
+		const bar = this.readerEl.createDiv('grove-jump-return')
+		const icon = bar.createSpan('grove-jump-return-icon')
+		setIcon(icon, 'corner-up-left')
+		bar.createSpan('grove-jump-return-text').setText(fromLabel ? `从「${fromLabel}」跳过来` : '已跳转')
+		const back = bar.createEl('button', { cls: 'grove-jump-return-btn', text: '返回' })
+		back.addEventListener('click', () => {
+			this.#hideJumpReturn()
+			void this.#jumpToCfi(fromCfi, false)
+		})
+		const close = bar.createEl('button', { cls: 'grove-jump-return-close' })
+		setIcon(close, 'x')
+		close.title = '关闭'
+		close.addEventListener('click', () => this.#hideJumpReturn())
+		this.jumpReturnEl = bar
+	}
+
+	/** 收/展整条批注栏（收起时只留阅读区右缘的把手） */
+	#setSidebarCollapsed(collapsed: boolean): void {
+		if (!this.sidebarEl) return
+		this.sidebarEl.toggleClass('grove-hidden', collapsed)
+		this.#syncSidebarHandle()
+	}
+
+	/** 侧栏隐藏时在阅读区右缘露出展开把手 */
+	#syncSidebarHandle(): void {
+		if (!this.sidebarEl || !this.sidebarHandleEl) return
+		this.sidebarHandleEl.toggleClass('grove-hidden', !this.sidebarEl.classList.contains('grove-hidden'))
+	}
+
+	#hideJumpReturn(): void {
+		this.jumpReturnEl?.remove()
+		this.jumpReturnEl = null
 	}
 
 	jumpTo(cfi: string): void {
