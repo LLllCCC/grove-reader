@@ -977,28 +977,33 @@ export class ReaderView extends ItemView {
 		const rects = Array.from(range.getClientRects()).filter(
 			r => r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < viewH && r.right > 0 && r.left < viewW,
 		)
-		let anchor: DOMRect | null = null
+		// 垂直方向要用选区的「第一行」顶部，否则多行选区时弹条会插到中间盖住前面的行；
+		// 水平方向仍用「最后一行」居中，贴近用户松手的位置
+		let firstLine: DOMRect | null = null
+		let lastLine: DOMRect | null = null
 		for (const r of rects) {
-			if (!anchor || r.bottom > anchor.bottom) anchor = r
+			if (!firstLine || r.top < firstLine.top) firstLine = r
+			if (!lastLine || r.bottom > lastLine.bottom) lastLine = r
 		}
-		if (!anchor && point) {
+		if (!firstLine && point) {
 			// 拿不到矩形（极少见）才退回鼠标位置
 			anchorX = host.left + point.x
 			anchorBottom = host.top + point.y
 			anchorTop = host.top + point.y
 		} else {
-			const box = anchor ?? range.getBoundingClientRect()
-			anchorX = host.left + box.left + box.width / 2
-			anchorBottom = host.top + box.bottom
-			anchorTop = host.top + box.top
+			const topBox = firstLine ?? range.getBoundingClientRect()
+			const bottomBox = lastLine ?? topBox
+			anchorX = host.left + bottomBox.left + bottomBox.width / 2
+			anchorTop = host.top + topBox.top
+			anchorBottom = host.top + bottomBox.bottom
 		}
 		const size = popup.getBoundingClientRect()
 		let left = anchorX - size.width / 2
 		left = Math.max(8, Math.min(left, window.innerWidth - size.width - 8))
 		// 优先落在选区上方：放下面会压住刚选中的文字，看不到自己选了什么。
 		// 上方空间不够（选区贴着页顶）才放下面，两边都不够就贴底。
-		let top = anchorTop - size.height - 8
-		if (top < 8) top = Math.min(anchorBottom + 8, window.innerHeight - size.height - 8)
+		let top = anchorTop - size.height - 6
+		if (top < 8) top = Math.min(anchorBottom + 6, window.innerHeight - size.height - 8)
 		top = Math.max(8, top)
 		popup.style.left = `${Math.round(left)}px`
 		popup.style.top = `${Math.round(top)}px`
