@@ -985,18 +985,20 @@ export class ReaderView extends ItemView {
 			if (!firstLine || r.top < firstLine.top) firstLine = r
 			if (!lastLine || r.bottom > lastLine.bottom) lastLine = r
 		}
-		if (!firstLine && point) {
-			// 拿不到矩形（极少见）才退回鼠标位置
+		// 垂直用「选区包围盒的顶边」：它对单行、多行、跨栏都准确，
+		// 逐行取 min(top) 反而可能拿到上一行，弹条就会离文字空出一整行。
+		// 水平仍用可见末行的中心，贴近松手位置。
+		const box = range.getBoundingClientRect()
+		const topY = box.top >= 0 ? box.top : (firstLine?.top ?? 0)
+		anchorTop = host.top + topY
+		if (lastLine) {
+			anchorX = host.left + lastLine.left + lastLine.width / 2
+		} else if (point) {
 			anchorX = host.left + point.x
-			anchorBottom = host.top + point.y
-			anchorTop = host.top + point.y
 		} else {
-			const topBox = firstLine ?? range.getBoundingClientRect()
-			const bottomBox = lastLine ?? topBox
-			anchorX = host.left + bottomBox.left + bottomBox.width / 2
-			anchorTop = host.top + topBox.top
-			anchorBottom = host.top + bottomBox.bottom
+			anchorX = host.left + host.width / 2
 		}
+		anchorBottom = host.top + box.bottom
 		const size = popup.getBoundingClientRect()
 		let left = anchorX - size.width / 2
 		left = Math.max(8, Math.min(left, window.innerWidth - size.width - 8))
