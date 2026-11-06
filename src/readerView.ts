@@ -971,6 +971,11 @@ export class ReaderView extends ItemView {
 		let anchorX: number
 		let anchorBottom: number
 		let anchorTop: number
+		// 坐标基准必须是 iframe 本身，而不是外层阅读区：
+		// foliate 的 iframe 相对 .grove-reader 有 padding（实测左 33px / 上 48px），
+		// 用 readerEl 当原点会让弹条整体偏移一格，看起来就是"离字很远"
+		const frameEl = _doc.defaultView?.frameElement as HTMLElement | null
+		const base = frameEl?.getBoundingClientRect() ?? this.readerEl.getBoundingClientRect()
 		// 只取「当前视口里」的矩形：选区可能跨好几屏，视口外的行会把锚点推到几千像素外
 		const viewH = _doc.defaultView?.innerHeight ?? window.innerHeight
 		const viewW = _doc.defaultView?.innerWidth ?? window.innerWidth
@@ -990,24 +995,25 @@ export class ReaderView extends ItemView {
 		// 水平仍用可见末行的中心，贴近松手位置。
 		const box = range.getBoundingClientRect()
 		const topY = box.top >= 0 ? box.top : (firstLine?.top ?? 0)
-		anchorTop = host.top + topY
+		anchorTop = base.top + topY
 		if (lastLine) {
-			anchorX = host.left + lastLine.left + lastLine.width / 2
+			anchorX = base.left + lastLine.left + lastLine.width / 2
 		} else if (point) {
-			anchorX = host.left + point.x
+			anchorX = base.left + point.x
 		} else {
-			anchorX = host.left + host.width / 2
+			anchorX = base.left + base.width / 2
 		}
-		anchorBottom = host.top + box.bottom
+		// 以「最后一行」为锚：用户拖选时视线停在松手处，工具条贴在那里最自然
+		const lastTop = lastLine ? base.top + lastLine.top : anchorTop
+		const lastLeft = lastLine ? base.left + lastLine.left : base.left + box.left
+		const lastBottom = base.top + box.bottom
 		const size = popup.getBoundingClientRect()
-		// 左对齐到选区左边缘而不是居中：窄栏里居中会让工具条明显偏到一边，
-		// 视觉上就像"离字很远"
-		let left = (lastLine ? host.left + lastLine.left : anchorX - size.width / 2) - 4
+		let left = lastLeft - 4
 		left = Math.max(8, Math.min(left, window.innerWidth - size.width - 8))
-		// 优先落在选区上方：放下面会压住刚选中的文字，看不到自己选了什么。
-		// 上方空间不够（选区贴着页顶）才放下面，两边都不够就贴底。
-		let top = anchorTop - size.height - 2
-		if (top < 8) top = Math.min(anchorBottom + 2, window.innerHeight - size.height - 8)
+		// 贴在最后一行下方（像 WorkBuddy 的划词条），紧贴且不会盖住选中的字；
+		// 下方空间不够才翻到上方
+		let top = lastBottom + 6
+		if (top + size.height > window.innerHeight - 8) top = Math.max(8, lastTop - size.height - 6)
 		top = Math.max(8, top)
 		popup.style.left = `${Math.round(left)}px`
 		popup.style.top = `${Math.round(top)}px`
@@ -1198,7 +1204,9 @@ export class ReaderView extends ItemView {
 	}
 
 	#hostCoords(range: Range): { x: number; y: number } {
-		const host = this.readerEl.getBoundingClientRect()
+		// 同样以 iframe 为基准，否则批注菜单也会整体偏一格
+		const frame = range.startContainer.ownerDocument?.defaultView?.frameElement as HTMLElement | null
+		const host = frame?.getBoundingClientRect() ?? this.readerEl.getBoundingClientRect()
 		try {
 			// 取选区最后一个矩形，跨栏时才不会飘到页面中间
 			const rects = Array.from(range.getClientRects()).filter(r => r.width > 0 || r.height > 0)
