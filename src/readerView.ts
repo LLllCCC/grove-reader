@@ -1000,12 +1000,14 @@ export class ReaderView extends ItemView {
 		}
 		anchorBottom = host.top + box.bottom
 		const size = popup.getBoundingClientRect()
-		let left = anchorX - size.width / 2
+		// 左对齐到选区左边缘而不是居中：窄栏里居中会让工具条明显偏到一边，
+		// 视觉上就像"离字很远"
+		let left = (lastLine ? host.left + lastLine.left : anchorX - size.width / 2) - 4
 		left = Math.max(8, Math.min(left, window.innerWidth - size.width - 8))
 		// 优先落在选区上方：放下面会压住刚选中的文字，看不到自己选了什么。
 		// 上方空间不够（选区贴着页顶）才放下面，两边都不够就贴底。
-		let top = anchorTop - size.height - 6
-		if (top < 8) top = Math.min(anchorBottom + 6, window.innerHeight - size.height - 8)
+		let top = anchorTop - size.height - 2
+		if (top < 8) top = Math.min(anchorBottom + 2, window.innerHeight - size.height - 8)
 		top = Math.max(8, top)
 		popup.style.left = `${Math.round(left)}px`
 		popup.style.top = `${Math.round(top)}px`
