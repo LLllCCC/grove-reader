@@ -1,4 +1,4 @@
-import { App, ItemView, Menu, MenuItem, Modal, Notice, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
+import { App, ItemView, Modal, Notice, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import {
 	Annotation,
@@ -10,6 +10,7 @@ import {
 	colorCss,
 } from './types'
 import { CommentModal, ConfirmModal } from './modals'
+import { closeAnnMenu, showAnnMenu } from './annMenu'
 import { basenameOf, cleanBookTitle, contrastFg, isDarkColor, randomId, truncate } from './util'
 import { decodeTextBuffer, TextViewState, VIEW_TYPE_GROVE_TEXT } from './textCodec'
 
@@ -192,6 +193,7 @@ export class TextView extends ItemView {
 	async onClose(): Promise<void> {
 		this.#flushSave()
 		this.#hidePopup()
+		closeAnnMenu()
 		this.resizeObserver?.disconnect()
 		this.resizeObserver = null
 		if (this.relayoutTimer != null) {
@@ -1235,24 +1237,15 @@ export class TextView extends ItemView {
 	}
 
 	#showAnnotationMenu(a: Annotation, e: MouseEvent): void {
-		const menu = new Menu()
-		menu.addItem(item => item.setTitle('编辑评论').setIcon('message-square').onClick(() => this.#editComment(a)))
-		menu.addItem(item => {
-			// setSubmenu 运行时存在但未包含在官方类型定义中
-			const sub = (item.setTitle('改为其他颜色').setIcon('palette') as unknown as { setSubmenu(): Menu }).setSubmenu()
-			for (const c of HIGHLIGHT_COLORS) {
-				sub.addItem((ci: MenuItem) => ci.setTitle(c.name).onClick(() => this.#changeColor(a, c.key)))
-			}
+		// 用共享的批注菜单：颜色以色圆 + 名称并排显示，和后续统一到 EPUB 的菜单一致
+		showAnnMenu(e, a.color, {
+			onEditComment: () => this.#editComment(a),
+			onChangeColor: color => this.#changeColor(a, color),
+			onCopyText: () => {
+				void navigator.clipboard.writeText(a.text).then(() => new Notice('Grove Reader：已复制'))
+			},
+			onDelete: () => this.#confirmDelete(a),
 		})
-		menu.addItem(item =>
-			item
-				.setTitle('复制原文')
-				.setIcon('copy')
-				.onClick(() => void navigator.clipboard.writeText(a.text).then(() => new Notice('Grove Reader：已复制'))),
-		)
-		menu.addSeparator()
-		menu.addItem(item => item.setTitle('删除批注').setIcon('trash-2').onClick(() => this.#confirmDelete(a)))
-		menu.showAtMouseEvent(e)
 	}
 
 	async #createHighlight(color: string): Promise<void> {
