@@ -7,7 +7,7 @@ import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, NOTE_BEGIN, NOT
 import { StatsStore, todayKey } from '../src/stats'
 import { BookData } from '../src/types'
 import { compareCfi, formatDuration, relativeTime } from '../src/util'
-import { applySync, parseNoteEntries, planSync } from '../src/noteSync'
+import { applySync, normalizeExcerpt, parseNoteEntries, planSync } from '../src/noteSync'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-data-'))
 const store = new BookStore(tmp, 2)
@@ -269,5 +269,18 @@ const noCommentBlock = note0.replace('%%\n原评论\n%%', '')
 const plan3 = planSync(syncBook, noCommentBlock)
 assert.equal(plan3.skipped.length, 1, '无法判断的评论应跳过')
 assert.equal(plan3.changes.filter(c => c.field === 'note').length, 0)
+
+// 21. 摘录里的空段落：模板用 `>` 空行分隔，回读时丢失空行不应算改动
+const blankBook: BookData = {
+	version: 1,
+	bookPath: 'Books/Blank.epub',
+	title: '空行测试',
+	author: '',
+	annotations: [
+		{ id: 'cc33', cfi: 'txt:1-9', text: '第一段\n\n第二段', color: 'yellow', createdAt: 1, updatedAt: 1, sectionIndex: 0, chapter: '第一章' },
+	],
+}
+assert.equal(normalizeExcerpt('a\n\nb'), 'a\nb')
+assert.equal(planSync(blankBook, buildNote(blankBook, 'blank', null)).changes.length, 0, '空行差异不应算改动')
 
 console.log('SMOKE OK')

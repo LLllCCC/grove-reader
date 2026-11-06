@@ -1,4 +1,4 @@
-import { FileSystemAdapter, Notice, Plugin, TFile, addIcon, normalizePath, setIcon } from 'obsidian'
+import { FileSystemAdapter, Notice, Plugin, TFile, TFolder, addIcon, normalizePath, setIcon } from 'obsidian'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import pathModule from 'node:path'
@@ -959,6 +959,29 @@ export default class GroveReaderPlugin extends Plugin {
 	// 笔记生成
 	// ------------------------------------------------------------------
 
+	/**
+	 * 找一本书对应的笔记文件。
+	 * data.notePath 可能因为改过笔记文件夹而失效，此时按「当前文件夹 + 文件名」
+	 * 再按 frontmatter 的 grove-book 认领，避免用户被迫重新生成一遍。
+	 */
+	#noteFileFor(data: BookData): TFile | null {
+		const direct = data.notePath ? this.app.vault.getAbstractFileByPath(data.notePath) : null
+		if (direct instanceof TFile) return direct
+		const folder = normalizePath(this.settings.notesFolder?.trim() || '阅读笔记')
+		const bookName = data.title || data.bookPath.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || ''
+		const guess = this.app.vault.getAbstractFileByPath(normalizePath(`${folder}/${sanitizeFileName(bookName)} - 阅读笔记.md`))
+		if (guess instanceof TFile) return guess
+		const dir = this.app.vault.getAbstractFileByPath(folder)
+		if (!(dir instanceof TFolder)) return null
+		const bookId = bookIdFor(data.bookPath)
+		for (const child of dir.children) {
+			if (!(child instanceof TFile) || child.extension !== 'md') continue
+			const fm = this.app.metadataCache.getFileCache(child)?.frontmatter
+			if (fm && fm['grove-book'] === bookId) return child
+		}
+		return null
+	}
+
 	/** 从阅读笔记回写批注：先算差异、弹窗勾选，再写数据（不改笔记本身） */
 	async openNoteSync(view: ReaderView | PdfView | TextView): Promise<void> {
 		const data = view.snapshot()
@@ -966,14 +989,18 @@ export default class GroveReaderPlugin extends Plugin {
 			new Notice('Grove Reader：当前没有已打开的书籍')
 			return
 		}
-		if (!data.notePath) {
-			new Notice('Grove Reader：这本书还没有阅读笔记，先生成一份再回写')
+		const file = this.#noteFileFor(data)
+		if (!file) {
+			new Notice(
+				data.notePath
+					? 'Grove Reader：没找到这本书的阅读笔记（可能被移动或改名），请重新生成阅读笔记'
+					: 'Grove Reader：这本书还没有阅读笔记，先生成一份再回写',
+			)
 			return
 		}
-		const file = this.app.vault.getAbstractFileByPath(data.notePath)
-		if (!(file instanceof TFile)) {
-			new Notice('Grove Reader：笔记文件已不在原位置，请重新生成阅读笔记')
-			return
+		if (data.notePath !== file.path) {
+			data.notePath = file.path
+			this.store.save(data)
 		}
 		const markdown = await this.app.vault.read(file)
 		const plan = planSync(data, markdown)
@@ -1131,6 +1158,8 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	private noteRefreshTimer: number | null = null
+	/** 已经提示过「笔记有未回写改动」的文件，避免每次改批注都弹一次 */
+	private pendingNoteEdits = new Set<string>()
 
 	/** 批注/元数据变更后防抖刷新已存在的笔记（不新建、不弹 Notice、不跳转） */
 	scheduleNoteRefresh(view: ReaderView | PdfView | TextView): void {
@@ -1144,12 +1173,26 @@ export default class GroveReaderPlugin extends Plugin {
 
 	async #autoRefreshNote(view: ReaderView | PdfView | TextView): Promise<void> {
 		const data = view.snapshot()
-		if (!data?.notePath) return
-		let file = this.app.vault.getAbstractFileByPath(data.notePath)
-		if (!(file instanceof TFile)) return
+		if (!data) return
+		const file = this.#noteFileFor(data)
+		if (!file) return
+		if (data.notePath !== file.path) {
+			data.notePath = file.path
+			this.store.save(data)
+		}
 		try {
 			const synced = await this.#syncNoteFileName(data, file)
 			const existing = await this.app.vault.read(synced)
+			// 笔记里有还没回写的改动时不要覆盖：用户在笔记里改的评论/摘录比自动刷新重要
+			const pending = planSync(data, existing)
+			if (pending.entries > 0 && pending.changes.length > 0) {
+				if (!this.pendingNoteEdits.has(synced.path)) {
+					this.pendingNoteEdits.add(synced.path)
+					new Notice('Grove Reader：笔记里有未回写的改动，已跳过自动更新（用「从笔记同步批注…」写回）')
+				}
+				return
+			}
+			this.pendingNoteEdits.delete(synced.path)
 			const markdown = await this.#composeNoteMarkdown(data, existing, false)
 			if (markdown !== existing) await this.app.vault.modify(synced, markdown)
 		} catch (e) {

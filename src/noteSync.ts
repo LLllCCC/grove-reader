@@ -100,6 +100,16 @@ function readBlock(id: string, lines: string[], line: number): NoteEntry {
 	return { id, text: quote.join('\n'), note: note.join('\n').trim(), hasNoteBlock, line }
 }
 
+/** 模板用 `>` 空行分隔段落，回读时拿不到原始空行；比较前先抹平空行差异 */
+export function normalizeExcerpt(text: string): string {
+	return text
+		.replace(/\r\n?/g, '\n')
+		.split('\n')
+		.map(l => l.trim())
+		.filter(Boolean)
+		.join('\n')
+}
+
 /** 比对笔记与批注数据；只产出「有明确改动」的项，缺条目只记录不删数据 */
 export function planSync(data: BookData, markdown: string): SyncPlan {
 	const entries = parseNoteEntries(markdown)
@@ -119,7 +129,7 @@ export function planSync(data: BookData, markdown: string): SyncPlan {
 		byId.delete(a.id)
 
 		const newText = entry.text.trim()
-		if (newText && newText !== (a.text ?? '').trim()) {
+		if (newText && normalizeExcerpt(newText) !== normalizeExcerpt(a.text ?? '')) {
 			changes.push({ id: a.id, field: 'text', from: a.text ?? '', to: newText })
 		}
 		const storedNote = (a.note ?? '').trim()
