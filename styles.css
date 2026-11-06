@@ -2098,9 +2098,40 @@
 	background: var(--background-modifier-hover);
 }
 
-.grove-toc-modal .grove-toc-search {
+/* 目录浮层：贴在工具栏按钮下方，像原生下拉一样挨着左上角 */
+.grove-toc-popover {
+	position: fixed;
+	z-index: 2147483002;
+	width: 340px;
+	max-width: calc(100vw - 24px);
+	padding: 8px;
+	border-radius: 8px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.grove-toc-popover .grove-toc-search {
 	width: 100%;
-	margin-bottom: 8px;
+	margin: 0;
+}
+
+/* 下拉式浮层不用占满半屏，够看清上下几十章即可 */
+.grove-toc-popover .grove-toc-list {
+	max-height: min(48vh, 400px);
+}
+
+/* 下拉式浮层不用占满半屏，够看清上下几十章即可 */
+.grove-toc-popover .grove-toc-list {
+	max-height: min(48vh, 400px);
+}
+
+/* 目录浮层打开时，工具栏保持展开，别因为鼠标移开而滑走 */
+.grove-reader.is-toc-open .grove-toolbar {
+	transform: translateY(0);
 }
 
 .grove-toc-list {
@@ -2153,77 +2184,6 @@
 
 /* ---- TXT 目录按钮与目录面板 ---- */
 
-.grove-toc-btn {
-	max-width: 240px;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	padding: 4px 10px;
-	border-radius: 6px;
-	border: 1px solid var(--background-modifier-border);
-	background: var(--background-primary);
-	color: var(--text-normal);
-	font-size: var(--font-ui-smaller);
-	cursor: pointer;
-}
-
-.grove-toc-btn:hover {
-	background: var(--background-modifier-hover);
-}
-
-.grove-toc-modal .grove-toc-search {
-	width: 100%;
-	margin-bottom: 8px;
-}
-
-.grove-toc-list {
-	max-height: min(62vh, 620px);
-	overflow-y: auto;
-	display: flex;
-	flex-direction: column;
-	gap: 1px;
-	padding-right: 4px;
-}
-
-.grove-toc-item {
-	display: flex;
-	align-items: baseline;
-	gap: 6px;
-	padding: 5px 8px;
-	border-radius: 5px;
-	cursor: pointer;
-	font-size: var(--font-ui-small);
-	color: var(--text-normal);
-}
-
-.grove-toc-item:hover {
-	background: var(--background-modifier-hover);
-}
-
-.grove-toc-item.is-volume {
-	font-weight: 700;
-	margin-top: 8px;
-	font-size: var(--font-ui-medium);
-}
-
-.grove-toc-item.is-active {
-	background: var(--background-modifier-active-hover);
-	color: var(--text-accent);
-}
-
-.grove-toc-item-title {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.grove-toc-empty,
-.grove-toc-more {
-	padding: 10px 8px;
-	color: var(--text-muted);
-	font-size: var(--font-ui-smaller);
-}
-
 /* ---- 批注操作菜单（TXT / EPUB 共用外观） ---- */
 
 .grove-ann-menu {
@@ -2314,90 +2274,3 @@
 }
 
 /* ---- 批注操作菜单（TXT / EPUB 共用外观） ---- */
-
-.grove-ann-menu {
-	position: fixed;
-	z-index: 2147483001;
-	min-width: 232px;
-	padding: 7px;
-	border-radius: 8px;
-	background: var(--background-primary);
-	border: 1px solid var(--background-modifier-border);
-	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
-	font-size: var(--font-ui-small);
-	color: var(--text-normal);
-	user-select: none;
-}
-
-.grove-ann-menu-colors {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 2px;
-}
-
-.grove-ann-menu-color {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	padding: 5px 7px;
-	border-radius: 5px;
-	cursor: pointer;
-}
-
-.grove-ann-menu-color:hover {
-	background: var(--background-modifier-hover);
-}
-
-.grove-ann-menu-color.is-active {
-	background: var(--background-modifier-active-hover);
-}
-
-.grove-ann-menu-dot {
-	width: 14px;
-	height: 14px;
-	border-radius: 50%;
-	flex: none;
-	box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
-}
-
-.grove-ann-menu-color-name {
-	font-size: var(--font-ui-small);
-	line-height: 1;
-}
-
-.grove-ann-menu-sep {
-	height: 1px;
-	margin: 5px 3px;
-	background: var(--background-modifier-border);
-}
-
-.grove-ann-menu-item {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	padding: 6px 8px;
-	border-radius: 5px;
-	cursor: pointer;
-}
-
-.grove-ann-menu-item:hover {
-	background: var(--background-modifier-hover);
-}
-
-.grove-ann-menu-icon {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	width: 16px;
-	height: 16px;
-	color: var(--text-muted);
-}
-
-.grove-ann-menu-icon .svg-icon {
-	width: 15px;
-	height: 15px;
-}
-
-.grove-ann-menu-label {
-	flex: 1;
-}

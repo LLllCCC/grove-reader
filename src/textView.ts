@@ -1,4 +1,4 @@
-import { App, ItemView, Modal, Notice, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
+import { ItemView, Notice, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import {
 	Annotation,
@@ -111,6 +111,8 @@ export class TextView extends ItemView {
 	private annItemEls = new Map<string, HTMLElement>()
 	private tocBtn!: HTMLButtonElement
 	private currentChapterOffset = -1
+	private tocPop: HTMLElement | null = null
+	private tocOutside: ((e: MouseEvent) => void) | null = null
 	/** 当前逻辑页内的第几屏（一屏＝一列或两列） */
 	private screen = 0
 	private screenCount = 1
@@ -193,6 +195,7 @@ export class TextView extends ItemView {
 	async onClose(): Promise<void> {
 		this.#flushSave()
 		this.#hidePopup()
+		this.#closeToc()
 		closeAnnMenu()
 		this.resizeObserver?.disconnect()
 		this.resizeObserver = null
@@ -576,12 +579,112 @@ export class TextView extends ItemView {
 	}
 
 	/** 打开可搜索目录面板 */
+	/** 目录浮层：锚在工具栏按钮下方展开，像原生下拉那样贴着左上角，同时带搜索 */
 	#openToc(): void {
+		if (this.tocPop) {
+			this.#closeToc()
+			return
+		}
 		if (!this.chapters.length) {
 			new Notice(`Grove Reader：这本 TXT 没有识别到章节标题`)
 			return
 		}
-		new TextTocModal(this.app, this.chapters, this.currentChapterOffset, offset => this.#jumpToOffset(offset)).open()
+		const pop = document.createElement('div')
+		pop.className = 'grove-toc-popover'
+		pop.addEventListener('mousedown', e => e.stopPropagation())
+
+		const search = document.createElement('input')
+		search.className = 'grove-toc-search'
+		search.type = 'search'
+		search.placeholder = '搜索章节名…'
+		pop.appendChild(search)
+
+		const list = document.createElement('div')
+		list.className = 'grove-toc-list'
+		pop.appendChild(list)
+
+		const render = (keyword: string): void => {
+			list.empty()
+			const kw = keyword.trim().toLowerCase()
+			const items = kw ? this.chapters.filter(c => c.title.toLowerCase().includes(kw)) : this.chapters
+			if (!items.length) {
+				list.createDiv('grove-toc-empty').setText('没有匹配的章节')
+				return
+			}
+			const limit = 400
+			let activeEl: HTMLElement | null = null
+			for (const c of items.slice(0, limit)) {
+				const item = list.createDiv('grove-toc-item')
+				if (c.level === 1) item.addClass('is-volume')
+				if (c.offset === this.currentChapterOffset) {
+					item.addClass('is-active')
+					activeEl = item
+				}
+				item.createSpan('grove-toc-item-title').setText(c.title)
+				item.addEventListener('click', () => {
+					this.#closeToc()
+					this.#jumpToOffset(c.offset)
+				})
+			}
+			if (items.length > limit) {
+				list.createDiv('grove-toc-more').setText(`只显示前 ${limit} 条，输入关键词继续筛选（共 ${items.length} 条）`)
+			}
+			if (activeEl) {
+				const el = activeEl as HTMLElement
+				window.setTimeout(() => el.scrollIntoView({ block: 'center' }), 20)
+			}
+		}
+
+		search.addEventListener('input', () => render(search.value))
+		search.addEventListener('keydown', e => {
+			if (e.key === 'Escape') {
+				e.preventDefault()
+				this.#closeToc()
+				return
+			}
+			if (e.key !== 'Enter') return
+			const kw = search.value.trim().toLowerCase()
+			const first = kw ? this.chapters.find(c => c.title.toLowerCase().includes(kw)) : this.chapters[0]
+			if (first) {
+				this.#closeToc()
+				this.#jumpToOffset(first.offset)
+			}
+		})
+		render('')
+
+		document.body.appendChild(pop)
+		// 贴在按钮下方；下方放不下就翻到上方，左右夹在视口内
+		const btnRect = this.tocBtn.getBoundingClientRect()
+		const size = pop.getBoundingClientRect()
+		const left = Math.min(Math.max(8, btnRect.left), Math.max(8, window.innerWidth - size.width - 8))
+		let top = btnRect.bottom + 6
+		if (top + size.height > window.innerHeight - 8) top = Math.max(8, btnRect.top - size.height - 6)
+		pop.style.left = `${Math.round(left)}px`
+		pop.style.top = `${Math.round(top)}px`
+
+		this.tocPop = pop
+		// 浮层开着时让工具栏保持展开，不要因为鼠标移开而收起
+		this.readerEl.addClass('is-toc-open')
+		window.setTimeout(() => search.focus(), 30)
+		this.tocOutside = (e: MouseEvent): void => {
+			const target = e.target as Node | null
+			if (!target) return
+			if (this.tocPop?.contains(target) || this.tocBtn.contains(target)) return
+			this.#closeToc()
+		}
+		window.setTimeout(() => {
+			if (this.tocOutside) document.addEventListener('mousedown', this.tocOutside, true)
+		}, 0)
+	}
+
+	#closeToc(): void {
+		this.tocPop?.remove()
+		this.tocPop = null
+		this.readerEl?.removeClass('is-toc-open')
+		if (this.tocOutside) {
+			document.removeEventListener('mousedown', this.tocOutside, true)
+			this.tocOutside = null
+		}
 	}
 
 	#syncToc(offsetArg?: number): void {
@@ -1704,78 +1807,5 @@ export class TextView extends ItemView {
 			'--text-selection',
 			isDarkColor(bg) ? 'rgba(120,160,255,0.35)' : 'rgba(64,120,255,0.25)',
 		)
-	}
-}
-
-/** 目录面板：章节可能上千条，用可搜索列表代替原生下拉框 */
-class TextTocModal extends Modal {
-	constructor(
-		app: App,
-		private chapters: ChapterMark[],
-		private currentOffset: number,
-		private onPick: (offset: number) => void,
-	) {
-		super(app)
-	}
-
-	onOpen(): void {
-		this.titleEl.setText(`目录（${this.chapters.length} 章）`)
-		this.contentEl.empty()
-		this.contentEl.addClass('grove-toc-modal')
-
-		const search = this.contentEl.createEl('input', {
-			cls: 'grove-toc-search',
-			attr: { type: 'search', placeholder: '搜索章节名…' },
-		})
-		const list = this.contentEl.createDiv('grove-toc-list')
-
-		const render = (keyword: string): void => {
-			list.empty()
-			const kw = keyword.trim().toLowerCase()
-			const items = kw ? this.chapters.filter(c => c.title.toLowerCase().includes(kw)) : this.chapters
-			if (!items.length) {
-				list.createDiv('grove-toc-empty').setText('没有匹配的章节')
-				return
-			}
-			const limit = 600
-			let activeEl: HTMLElement | null = null
-			for (const c of items.slice(0, limit)) {
-				const item = list.createDiv('grove-toc-item')
-				if (c.level === 1) item.addClass('is-volume')
-				if (c.offset === this.currentOffset) {
-					item.addClass('is-active')
-					activeEl = item
-				}
-				item.createSpan('grove-toc-item-title').setText(c.title)
-				item.addEventListener('click', () => {
-					this.onPick(c.offset)
-					this.close()
-				})
-			}
-			if (items.length > limit) {
-				list.createDiv('grove-toc-more').setText(`只显示前 ${limit} 条，输入关键词继续筛选（共 ${items.length} 条）`)
-			}
-			if (activeEl) {
-				const el = activeEl as HTMLElement
-				window.setTimeout(() => el.scrollIntoView({ block: 'center' }), 30)
-			}
-		}
-
-		search.addEventListener('input', () => render(search.value))
-		search.addEventListener('keydown', e => {
-			if (e.key !== 'Enter') return
-			const kw = search.value.trim().toLowerCase()
-			const first = kw ? this.chapters.find(c => c.title.toLowerCase().includes(kw)) : this.chapters[0]
-			if (first) {
-				this.onPick(first.offset)
-				this.close()
-			}
-		})
-		render('')
-		window.setTimeout(() => search.focus(), 50)
-	}
-
-	onClose(): void {
-		this.contentEl.empty()
 	}
 }
