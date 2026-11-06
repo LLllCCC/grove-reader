@@ -965,21 +965,32 @@ export class ReaderView extends ItemView {
 		document.body.appendChild(popup)
 		this.popup = popup
 
-		// 优先跟着鼠标松开的位置走：跨栏/跨页时选区矩形会横跨整页，按矩形算容易飘
+		// 贴着选区「视觉上最靠下的那一行」：分栏时 getClientRects 的顺序不等于视觉顺序，
+		// 直接取最后一个会落到左栏；按 bottom 取最大才是真正的末行
 		const host = this.readerEl.getBoundingClientRect()
 		let anchorX: number
 		let anchorBottom: number
 		let anchorTop: number
-		if (point) {
+		// 只取「当前视口里」的矩形：选区可能跨好几屏，视口外的行会把锚点推到几千像素外
+		const viewH = _doc.defaultView?.innerHeight ?? window.innerHeight
+		const viewW = _doc.defaultView?.innerWidth ?? window.innerWidth
+		const rects = Array.from(range.getClientRects()).filter(
+			r => r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < viewH && r.right > 0 && r.left < viewW,
+		)
+		let anchor: DOMRect | null = null
+		for (const r of rects) {
+			if (!anchor || r.bottom > anchor.bottom) anchor = r
+		}
+		if (!anchor && point) {
+			// 拿不到矩形（极少见）才退回鼠标位置
 			anchorX = host.left + point.x
 			anchorBottom = host.top + point.y
 			anchorTop = host.top + point.y
 		} else {
-			const rects = Array.from(range.getClientRects()).filter(r => r.width > 0 || r.height > 0)
-			const last = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect()
-			anchorX = host.left + last.left + last.width / 2
-			anchorBottom = host.top + last.bottom
-			anchorTop = host.top + last.top
+			const box = anchor ?? range.getBoundingClientRect()
+			anchorX = host.left + box.left + box.width / 2
+			anchorBottom = host.top + box.bottom
+			anchorTop = host.top + box.top
 		}
 		const size = popup.getBoundingClientRect()
 		let left = anchorX - size.width / 2
