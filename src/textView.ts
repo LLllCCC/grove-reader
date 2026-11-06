@@ -326,14 +326,14 @@ export class TextView extends ItemView {
 		})
 		setIcon(this.prevBtn, 'chevron-left')
 		this.prevBtn.disabled = true
-		this.prevBtn.addEventListener('click', () => this.#goPage(this.page - 1))
+		this.prevBtn.addEventListener('click', () => this.prevPage())
 		this.nextBtn = pageBtns.createEl('button', {
 			cls: 'clickable-icon grove-page-btn',
 			attr: { 'aria-label': '下一页（→）' },
 		})
 		setIcon(this.nextBtn, 'chevron-right')
 		this.nextBtn.disabled = true
-		this.nextBtn.addEventListener('click', () => this.#goPage(this.page + 1))
+		this.nextBtn.addEventListener('click', () => this.nextPage())
 
 		this.#buildSidebar(body)
 
