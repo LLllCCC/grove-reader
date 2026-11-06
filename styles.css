@@ -2279,20 +2279,23 @@
 
 .grove-jump-return {
 	position: absolute;
-	left: 20px;
-	bottom: 20px;
+	left: 16px;
+	bottom: 16px;
 	z-index: 50;
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	padding: 6px 8px 6px 10px;
-	border-radius: 8px;
+	/* 高度与右下角圆形翻页按钮一致（36px），视觉上成对 */
+	height: 36px;
+	padding: 0 6px 0 12px;
+	box-sizing: border-box;
+	border-radius: 18px;
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
-	box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
 	font-size: var(--font-ui-smaller);
 	color: var(--text-muted);
-	max-width: min(380px, calc(100% - 40px));
+	max-width: min(420px, calc(100% - 120px));
 }
 
 .grove-jump-return-icon {
@@ -2314,9 +2317,10 @@
 
 .grove-jump-return-btn {
 	flex: none;
-	padding: 3px 9px;
+	height: 26px;
+	padding: 0 12px;
 	border: none;
-	border-radius: 5px;
+	border-radius: 13px;
 	background: var(--interactive-accent);
 	color: var(--text-on-accent);
 	cursor: pointer;
@@ -2330,7 +2334,12 @@
 .grove-jump-return-close {
 	flex: none;
 	display: flex;
-	padding: 2px;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	padding: 0;
 	border: none;
 	background: none;
 	color: var(--text-muted);
@@ -2345,20 +2354,23 @@
 
 .grove-jump-return {
 	position: absolute;
-	left: 20px;
-	bottom: 20px;
+	left: 16px;
+	bottom: 16px;
 	z-index: 50;
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	padding: 6px 8px 6px 10px;
-	border-radius: 8px;
+	/* 高度与右下角圆形翻页按钮一致（36px），视觉上成对 */
+	height: 36px;
+	padding: 0 6px 0 12px;
+	box-sizing: border-box;
+	border-radius: 18px;
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
-	box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
 	font-size: var(--font-ui-smaller);
 	color: var(--text-muted);
-	max-width: min(380px, calc(100% - 40px));
+	max-width: min(420px, calc(100% - 120px));
 }
 
 .grove-jump-return-icon {
@@ -2380,9 +2392,10 @@
 
 .grove-jump-return-btn {
 	flex: none;
-	padding: 3px 9px;
+	height: 26px;
+	padding: 0 12px;
 	border: none;
-	border-radius: 5px;
+	border-radius: 13px;
 	background: var(--interactive-accent);
 	color: var(--text-on-accent);
 	cursor: pointer;
@@ -2396,7 +2409,12 @@
 .grove-jump-return-close {
 	flex: none;
 	display: flex;
-	padding: 2px;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	padding: 0;
 	border: none;
 	background: none;
 	color: var(--text-muted);
@@ -2523,4 +2541,180 @@
 .grove-sidebar-handle-btn .svg-icon {
 	width: 14px;
 	height: 14px;
+}
+
+/* ---- 划词 AI 解释浮层 ---- */
+
+.grove-ai-panel {
+	position: fixed;
+	z-index: 2147483003;
+	width: 380px;
+	max-width: calc(100vw - 24px);
+	max-height: 62vh;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 12px 14px;
+	border-radius: 10px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3);
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+}
+
+.grove-ai-head {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.grove-ai-icon {
+	display: flex;
+	color: var(--interactive-accent);
+}
+
+.grove-ai-icon .svg-icon {
+	width: 15px;
+	height: 15px;
+}
+
+.grove-ai-title {
+	flex: 1;
+	font-weight: 700;
+}
+
+.grove-ai-close {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: none;
+	border-radius: 50%;
+	background: none;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.grove-ai-close:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.grove-ai-close .svg-icon {
+	width: 14px;
+	height: 14px;
+}
+
+.grove-ai-source {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	border-left: 2px solid var(--background-modifier-border);
+	padding-left: 8px;
+	line-height: 1.5;
+}
+
+.grove-ai-body {
+	overflow-y: auto;
+	line-height: 1.75;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.grove-ai-body.is-loading {
+	color: var(--text-muted);
+}
+
+.grove-ai-body.is-error {
+	color: var(--text-error);
+}
+
+/* ---- 划词 AI 解释浮层 ---- */
+
+.grove-ai-panel {
+	position: fixed;
+	z-index: 2147483003;
+	width: 380px;
+	max-width: calc(100vw - 24px);
+	max-height: 62vh;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 12px 14px;
+	border-radius: 10px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3);
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+}
+
+.grove-ai-head {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.grove-ai-icon {
+	display: flex;
+	color: var(--interactive-accent);
+}
+
+.grove-ai-icon .svg-icon {
+	width: 15px;
+	height: 15px;
+}
+
+.grove-ai-title {
+	flex: 1;
+	font-weight: 700;
+}
+
+.grove-ai-close {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: none;
+	border-radius: 50%;
+	background: none;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.grove-ai-close:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.grove-ai-close .svg-icon {
+	width: 14px;
+	height: 14px;
+}
+
+.grove-ai-source {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	border-left: 2px solid var(--background-modifier-border);
+	padding-left: 8px;
+	line-height: 1.5;
+}
+
+.grove-ai-body {
+	overflow-y: auto;
+	line-height: 1.75;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.grove-ai-body.is-loading {
+	color: var(--text-muted);
+}
+
+.grove-ai-body.is-error {
+	color: var(--text-error);
 }

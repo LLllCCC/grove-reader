@@ -240,6 +240,59 @@ export class GroveSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings()
 					}))
 
+		// —— AI 解释 ——
+		containerEl.createEl('h3', { text: 'AI 解释' })
+		containerEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: '划词后点「解释」按钮，让 AI 用中文说明这段文字的意思。走 OpenAI 兼容接口，默认填的是智谱 GLM-4-Flash（免费额度，注册即可用）。Key 只保存在本机插件配置里。',
+		})
+		new Setting(containerEl)
+			.setName('接口地址')
+			.setDesc('例如 https://open.bigmodel.cn/api/paas/v4（智谱）或 https://api.deepseek.com/v1（DeepSeek）')
+			.addText(text =>
+				text
+					.setPlaceholder('https://open.bigmodel.cn/api/paas/v4')
+					.setValue(this.plugin.settings.aiBaseUrl ?? '')
+					.onChange(async value => {
+						this.plugin.settings.aiBaseUrl = value.trim()
+						await this.plugin.saveSettings()
+					}))
+		new Setting(containerEl)
+			.setName('API Key')
+			.setDesc('留空则「解释」按钮会提示去配置。不要把它写进笔记或分享给别人')
+			.addText(text => {
+				text.inputEl.type = 'password'
+				text.setPlaceholder('sk-…')
+					.setValue(this.plugin.settings.aiApiKey ?? '')
+					.onChange(async value => {
+						this.plugin.settings.aiApiKey = value.trim()
+						await this.plugin.saveSettings()
+					})
+			})
+		new Setting(containerEl)
+			.setName('模型')
+			.setDesc('智谱免费版填 glm-4-flash；DeepSeek 填 deepseek-chat')
+			.addText(text =>
+				text
+					.setPlaceholder('glm-4-flash')
+					.setValue(this.plugin.settings.aiModel ?? '')
+					.onChange(async value => {
+						this.plugin.settings.aiModel = value.trim()
+						await this.plugin.saveSettings()
+					}))
+		new Setting(containerEl)
+			.setName('提示词')
+			.setDesc('留空用内置提示词；想让它更贴近你的阅读习惯可以自己写')
+			.addTextArea(text => {
+				text.setPlaceholder('你是一位中文阅读助手…')
+					.setValue(this.plugin.settings.aiPrompt ?? '')
+					.onChange(async value => {
+						this.plugin.settings.aiPrompt = value
+						await this.plugin.saveSettings()
+					})
+				text.inputEl.rows = 3
+			})
+
 		// —— 笔记 ——
 		containerEl.createEl('h3', { text: '笔记' })
 		new Setting(containerEl)

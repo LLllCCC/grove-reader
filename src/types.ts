@@ -264,6 +264,14 @@ export interface GroveSettings {
 	txtLayout: 'auto' | 'single' | 'double'
 	/** TXT 键盘翻页方向：horizontal＝←/→，vertical＝↑/↓；滚轮始终翻页 */
 	txtTurnAxis: 'horizontal' | 'vertical'
+	/** AI 解释：OpenAI 兼容接口地址（默认智谱 GLM，免费） */
+	aiBaseUrl: string
+	/** AI 解释：API Key（只存在本机 data.json） */
+	aiApiKey: string
+	/** AI 解释：模型名 */
+	aiModel: string
+	/** AI 解释：自定义提示词，留空用内置 */
+	aiPrompt: string
 }
 
 export const DEFAULT_SETTINGS: GroveSettings = {
@@ -288,4 +296,8 @@ export const DEFAULT_SETTINGS: GroveSettings = {
 	appearance: { ...DEFAULT_APPEARANCE },
 	txtLayout: 'auto',
 	txtTurnAxis: 'horizontal',
+	aiBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+	aiApiKey: '',
+	aiModel: 'glm-4-flash',
+	aiPrompt: '',
 }

@@ -10,6 +10,7 @@ import {
 	colorCss,
 } from './types'
 import { CommentModal, ConfirmModal } from './modals'
+import { explainSelection, isAiConfigured } from './ai'
 import { Overlayer } from '../lib/foliate-js/overlayer.js'
 import { basenameOf, contrastFg, formatAuthor, formatLanguageMap, isDarkColor, randomId, stripNumericTitlePrefix, truncate } from './util'
 import '../lib/foliate-js/view.js'
@@ -130,6 +131,8 @@ export class ReaderView extends ItemView {
 	private popupCloser: ((e: MouseEvent) => void) | null = null
 	/** 跳转后的「返回原位置」浮条 */
 	private jumpReturnEl: HTMLElement | null = null
+	private aiPanelEl: HTMLElement | null = null
+	private aiCloser: ((e: MouseEvent) => void) | null = null
 	/** spine 索引 → 该节里最具体的目录项（同文件下「第X章」优先于「第X部分」） */
 	private tocBySection = new Map<number, { label: string; depth: number }>()
 
@@ -147,6 +150,7 @@ export class ReaderView extends ItemView {
 	private sidebarQuery = ''
 	private sidebarColor: string | null = null
 	private annCollapsed: Set<string> | null = null
+	private collapseAllBtnEl: HTMLButtonElement | null = null
 	private searchInput!: HTMLInputElement
 	private fullTextSearchEl!: HTMLDetailsElement
 	private fullTextSearchInput!: HTMLInputElement
@@ -294,7 +298,7 @@ export class ReaderView extends ItemView {
 
 		const sideBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '批注列表' } })
 		setIcon(sideBtn, 'list')
-		sideBtn.addEventListener('click', () => this.#setSidebarCollapsed(!this.sidebarEl.classList.contains('grove-hidden')))
+		sideBtn.addEventListener('click', () => this.sidebarEl.classList.toggle('grove-hidden'))
 
 		// 外观面板（绝对定位于工具栏下方）
 		this.appearPanelEl = root.createDiv('grove-appear-panel grove-hidden')
@@ -322,15 +326,7 @@ export class ReaderView extends ItemView {
 		const sideHead = this.sidebarEl.createDiv('grove-sidebar-head')
 		this.annCountEl = sideHead.createSpan('grove-ann-count')
 		this.annCountEl.setText('0 个批注')
-		// 收起整条批注栏；收起后阅读区右缘会出现一个把手可以再展开
-		const collapseBtn = sideHead.createEl('button', { cls: 'grove-sidebar-collapse', attr: { 'aria-label': '收起批注栏' } })
-		setIcon(collapseBtn, 'chevrons-right')
-		collapseBtn.addEventListener('click', () => this.#setSidebarCollapsed(true))
 
-		this.sidebarHandleEl = this.readerEl.createDiv('grove-sidebar-handle')
-		const expandBtn = this.sidebarHandleEl.createEl('button', { cls: 'grove-sidebar-handle-btn', attr: { 'aria-label': '展开批注栏' } })
-		setIcon(expandBtn, 'chevrons-left')
-		expandBtn.addEventListener('click', () => this.#setSidebarCollapsed(false))
 
 		const fullTextSearch = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })
 		this.fullTextSearchEl = fullTextSearch
@@ -396,6 +392,8 @@ export class ReaderView extends ItemView {
 			this.#saveFilterState()
 			this.#renderSidebar()
 		})
+		this.collapseAllBtnEl = manageRow.createEl('button', { cls: 'grove-manage-btn', text: '折叠全部' })
+		this.collapseAllBtnEl.addEventListener('click', () => this.#toggleAllGroups())
 		const multiBtn = manageRow.createEl('button', { cls: 'grove-manage-btn', text: '多选' })
 		multiBtn.addEventListener('click', () => this.#setSelectMode(!this.selectMode))
 
@@ -478,7 +476,6 @@ export class ReaderView extends ItemView {
 			this.#resetSidebarFilters()
 			this.#renderSidebar()
 			this.sidebarEl.classList.toggle('grove-hidden', !this.plugin.settings.openSidebarWithBook)
-			this.#syncSidebarHandle()
 		} catch (e) {
 			console.error('[Grove Reader] 打开书籍失败', e)
 			this.#showEmpty(`打开失败：${e instanceof Error ? e.message : String(e)}`)
@@ -490,6 +487,7 @@ export class ReaderView extends ItemView {
 		this.#clearFullTextSearch()
 		this.#hidePopup()
 		this.#hideJumpReturn()
+		this.#hideAiPanel()
 		if (this.saveTimer != null) {
 			window.clearTimeout(this.saveTimer)
 			this.saveTimer = null
@@ -642,15 +640,10 @@ export class ReaderView extends ItemView {
 		}
 		// 引文（原书的 blockquote）用楷体并加一条左侧竖线：
 		// 原书 CSS 只写了 font-family:kaiti，字重字号与正文接近，几乎看不出区别
+		// 引文：低分屏上强制楷体笔画发虚，改成「左侧竖线 + 极淡底色」，
+		// 既不糊也能一眼看出这是引述段落
 		rules.push(
-			`blockquote { border-left: 3px solid color-mix(in srgb, ${fg} 30%, transparent); padding-left: 0.9em; margin-left: 0 !important; margin-right: 0 !important; }`,
-			`blockquote p, blockquote div { font-family: "KaiTi", "楷体", "STKaiti", "Kaiti SC", "Kaiti TC", serif !important; }`,
-		)
-		// 引文（原书的 blockquote）用楷体并加一条左侧竖线：
-		// 原书 CSS 只写了 font-family:kaiti，字重字号与正文接近，几乎看不出区别
-		rules.push(
-			`blockquote { border-left: 3px solid color-mix(in srgb, ${fg} 30%, transparent); padding-left: 0.9em; margin-left: 0 !important; margin-right: 0 !important; }`,
-			`blockquote p, blockquote div { font-family: "KaiTi", "楷体", "STKaiti", "Kaiti SC", "Kaiti TC", serif !important; }`,
+			`blockquote { border-left: 3px solid color-mix(in srgb, ${fg} 32%, transparent); background: color-mix(in srgb, ${fg} 5%, transparent); padding: 0.15em 0.9em 0.15em 0.9em; margin-left: 0 !important; margin-right: 0 !important; border-radius: 2px; }`,
 		)
 		rules.push('pre, code { white-space: pre-wrap; }')
 		return rules.join('\n')
@@ -958,6 +951,16 @@ export class ReaderView extends ItemView {
 		})
 		popup.appendChild(copyBtn)
 
+		const aiBtn = document.createElement('button')
+		aiBtn.textContent = '解释'
+		aiBtn.title = '用 AI 解释这段文字'
+		aiBtn.style.cssText = commentBtn.style.cssText
+		aiBtn.addEventListener('click', e => {
+			e.preventDefault()
+			void this.#explainSelection()
+		})
+		popup.appendChild(aiBtn)
+
 		document.body.appendChild(popup)
 		this.popup = popup
 
@@ -984,6 +987,84 @@ export class ReaderView extends ItemView {
 		window.setTimeout(() => {
 			if (this.popupCloser) document.addEventListener('mousedown', this.popupCloser, true)
 		}, 0)
+	}
+
+	/** 划词解释：调 AI 并把结果放进浮层 */
+	async #explainSelection(): Promise<void> {
+		const pending = this.pending
+		if (!pending) return
+		const text = pending.text
+		const bar = this.popup?.getBoundingClientRect()
+		this.#clearPending()
+		const cfg = {
+			baseUrl: this.plugin.settings.aiBaseUrl ?? '',
+			apiKey: this.plugin.settings.aiApiKey ?? '',
+			model: this.plugin.settings.aiModel ?? '',
+			prompt: this.plugin.settings.aiPrompt ?? '',
+		}
+		if (!isAiConfigured(cfg)) {
+			new Notice('Grove Reader：还没有配置 AI。设置 → 阅读 → AI 解释 里填入接口地址与 API Key（推荐智谱 GLM-4-Flash，免费）', 8000)
+			return
+		}
+		this.#showAiPanel(text, bar)
+		try {
+			const answer = await explainSelection(cfg, text)
+			this.#fillAiPanel(answer)
+		} catch (err) {
+			this.#fillAiPanel(`调用失败：${err instanceof Error ? err.message : String(err)}`, true)
+		}
+	}
+
+	#showAiPanel(sourceText: string, bar: DOMRect | undefined): void {
+		this.aiPanelEl?.remove()
+		const panel = document.body.createDiv('grove-ai-panel')
+		const head = panel.createDiv('grove-ai-head')
+		const icon = head.createSpan('grove-ai-icon')
+		setIcon(icon, 'sparkles')
+		head.createSpan('grove-ai-title').setText('AI 解释')
+		const close = head.createEl('button', { cls: 'grove-ai-close', attr: { 'aria-label': '关闭' } })
+		setIcon(close, 'x')
+		close.addEventListener('click', () => this.#hideAiPanel())
+		panel.createDiv('grove-ai-source').setText(truncate(sourceText.replace(/\s+/g, ' '), 80))
+		const body = panel.createDiv('grove-ai-body')
+		body.setText('思考中…')
+		body.addClass('is-loading')
+
+		document.body.appendChild(panel)
+		const size = panel.getBoundingClientRect()
+		const anchorLeft = bar ? bar.left : window.innerWidth / 2 - size.width / 2
+		const anchorTop = bar ? bar.bottom + 8 : 120
+		const left = Math.min(Math.max(8, anchorLeft), Math.max(8, window.innerWidth - size.width - 8))
+		let top = anchorTop
+		if (top + size.height > window.innerHeight - 8) top = Math.max(8, (bar?.top ?? 200) - size.height - 8)
+		panel.style.left = `${Math.round(left)}px`
+		panel.style.top = `${Math.round(top)}px`
+		this.aiPanelEl = panel
+
+		this.aiCloser = (ev: MouseEvent): void => {
+			if (this.aiPanelEl && !this.aiPanelEl.contains(ev.target as Node)) this.#hideAiPanel()
+		}
+		window.setTimeout(() => {
+			if (this.aiCloser) document.addEventListener('mousedown', this.aiCloser, true)
+		}, 0)
+	}
+
+	#fillAiPanel(content: string, isError = false): void {
+		if (!this.aiPanelEl) return
+		const body = this.aiPanelEl.querySelector('.grove-ai-body') as HTMLElement | null
+		if (!body) return
+		body.removeClass('is-loading')
+		body.toggleClass('is-error', isError)
+		body.setText(content)
+	}
+
+	#hideAiPanel(): void {
+		if (this.aiCloser) {
+			document.removeEventListener('mousedown', this.aiCloser, true)
+			this.aiCloser = null
+		}
+		this.aiPanelEl?.remove()
+		this.aiPanelEl = null
 	}
 
 	#hidePopup(): void {
@@ -1294,6 +1375,14 @@ export class ReaderView extends ItemView {
 			return
 		}
 
+		if (this.collapseAllBtnEl) {
+			const keys = new Set<string>()
+			for (const a of this.data?.annotations ?? []) keys.add(this.#chapterOf(a))
+			const allCollapsed = keys.size > 0 && [...keys].every(k => (this.annCollapsed ?? new Set<string>()).has(k))
+			this.collapseAllBtnEl.setText(allCollapsed ? '展开全部' : '折叠全部')
+			this.collapseAllBtnEl.disabled = this.sortMode === 'recent' || keys.size === 0
+		}
+
 		// 「最近」排序：平铺列出，不按章节分组
 		if (this.sortMode === 'recent') {
 			for (const a of [...filtered].sort((x, y) => y.createdAt - x.createdAt)) {
@@ -1410,6 +1499,22 @@ export class ReaderView extends ItemView {
 		el.addClass('grove-ann-revealed')
 	}
 
+	/** 一次折叠/展开所有章节分组（像文件树的 collapse all） */
+	#toggleAllGroups(): void {
+		if (!this.data) return
+		if (this.annCollapsed === null) this.#loadCollapsedState()
+		const set = this.annCollapsed ?? new Set<string>()
+		const keys = new Set<string>()
+		for (const a of this.data.annotations ?? []) keys.add(this.#chapterOf(a))
+		if (!keys.size) return
+		const allCollapsed = [...keys].every(k => set.has(k))
+		if (allCollapsed) set.clear()
+		else for (const k of keys) set.add(k)
+		this.annCollapsed = set
+		this.#saveCollapsedState()
+		this.#renderSidebar()
+	}
+
 	#loadCollapsedState(): void {
 		try {
 			const raw = localStorage.getItem(this.#collapsedKey())
@@ -1458,6 +1563,7 @@ export class ReaderView extends ItemView {
 	/** 跳转后在左下角留一条「返回原位置」，可以一直挂着，也能关掉 */
 	#showJumpReturn(fromCfi: string): void {
 		this.#hideJumpReturn()
+		this.#hideAiPanel()
 		let fromLabel = ''
 		try {
 			const nav = this.foliate?.resolveNavigation?.(fromCfi)
@@ -1472,6 +1578,7 @@ export class ReaderView extends ItemView {
 		const back = bar.createEl('button', { cls: 'grove-jump-return-btn', text: '返回' })
 		back.addEventListener('click', () => {
 			this.#hideJumpReturn()
+		this.#hideAiPanel()
 			void this.#jumpToCfi(fromCfi, false)
 		})
 		const close = bar.createEl('button', { cls: 'grove-jump-return-close' })
@@ -1479,19 +1586,6 @@ export class ReaderView extends ItemView {
 		close.title = '关闭'
 		close.addEventListener('click', () => this.#hideJumpReturn())
 		this.jumpReturnEl = bar
-	}
-
-	/** 收/展整条批注栏（收起时只留阅读区右缘的把手） */
-	#setSidebarCollapsed(collapsed: boolean): void {
-		if (!this.sidebarEl) return
-		this.sidebarEl.toggleClass('grove-hidden', collapsed)
-		this.#syncSidebarHandle()
-	}
-
-	/** 侧栏隐藏时在阅读区右缘露出展开把手 */
-	#syncSidebarHandle(): void {
-		if (!this.sidebarEl || !this.sidebarHandleEl) return
-		this.sidebarHandleEl.toggleClass('grove-hidden', !this.sidebarEl.classList.contains('grove-hidden'))
 	}
 
 	#hideJumpReturn(): void {
