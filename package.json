@@ -1,6 +1,6 @@
 {
 	"name": "grove-reader",
-	"version": "0.25.0",
+	"version": "0.26.0",
 	"description": "Grove Reader — 在 Obsidian 中阅读电子书，划线批注，一键生成 Markdown 笔记并可回跳原文",
 	"main": "main.js",
 	"scripts": {
