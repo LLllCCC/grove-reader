@@ -790,7 +790,8 @@ export class ReaderView extends ItemView {
 		doc.addEventListener('pointerup', (ev: PointerEvent) => {
 			const t = ev.target
 			if (t instanceof Element && t.closest('.grove-sel-popup')) return
-			window.setTimeout(() => this.#captureSelection(doc, index), 0)
+			const point = { x: ev.clientX, y: ev.clientY }
+			window.setTimeout(() => this.#captureSelection(doc, index, point), 0)
 		})
 		doc.addEventListener('keydown', (ke: KeyboardEvent) => {
 			if (!PAGE_KEYS.has(ke.key)) return
@@ -872,7 +873,7 @@ export class ReaderView extends ItemView {
 	// 划选 → 高亮 / 评论
 	// ------------------------------------------------------------------
 
-	#captureSelection(doc: Document, index: number): void {
+	#captureSelection(doc: Document, index: number, point?: { x: number; y: number }): void {
 		if (!this.foliate) return
 		const sel = doc.defaultView?.getSelection()
 		if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
@@ -892,7 +893,7 @@ export class ReaderView extends ItemView {
 			return
 		}
 		this.pending = { cfi, text: text.trim(), index }
-		this.#showPopup(doc, range)
+		this.#showPopup(doc, range, point)
 	}
 
 	#clearPending(): void {
@@ -900,7 +901,7 @@ export class ReaderView extends ItemView {
 		this.#hidePopup()
 	}
 
-	#showPopup(_doc: Document, range: Range): void {
+	#showPopup(_doc: Document, range: Range, point?: { x: number; y: number }): void {
 		this.#hidePopup()
 		const dark = document.body.classList.contains('theme-dark')
 		// 弹条必须挂在主窗口：留在 iframe 里时 position:fixed 会被 iframe 边界裁剪，
@@ -964,18 +965,27 @@ export class ReaderView extends ItemView {
 		document.body.appendChild(popup)
 		this.popup = popup
 
-		// 用选区「最后一个矩形」定位：跨栏/跨页时包围盒会横跨整页，位置会飘到中间
-		const rects = Array.from(range.getClientRects()).filter(r => r.width > 0 || r.height > 0)
-		const last = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect()
+		// 优先跟着鼠标松开的位置走：跨栏/跨页时选区矩形会横跨整页，按矩形算容易飘
 		const host = this.readerEl.getBoundingClientRect()
-		const anchorX = host.left + last.left + last.width / 2
-		const anchorBottom = host.top + last.bottom
-		const anchorTop = host.top + last.top
+		let anchorX: number
+		let anchorBottom: number
+		let anchorTop: number
+		if (point) {
+			anchorX = host.left + point.x
+			anchorBottom = host.top + point.y
+			anchorTop = host.top + point.y
+		} else {
+			const rects = Array.from(range.getClientRects()).filter(r => r.width > 0 || r.height > 0)
+			const last = rects.length ? rects[rects.length - 1] : range.getBoundingClientRect()
+			anchorX = host.left + last.left + last.width / 2
+			anchorBottom = host.top + last.bottom
+			anchorTop = host.top + last.top
+		}
 		const size = popup.getBoundingClientRect()
 		let left = anchorX - size.width / 2
 		left = Math.max(8, Math.min(left, window.innerWidth - size.width - 8))
-		let top = anchorBottom + 8
-		if (top + size.height > window.innerHeight - 8) top = Math.max(8, anchorTop - size.height - 8)
+		let top = anchorBottom + 10
+		if (top + size.height > window.innerHeight - 8) top = Math.max(8, anchorTop - size.height - 10)
 		popup.style.left = `${Math.round(left)}px`
 		popup.style.top = `${Math.round(top)}px`
 
@@ -1548,11 +1558,13 @@ export class ReaderView extends ItemView {
 	async #jumpToCfi(cfi: string, remember = true): Promise<void> {
 		if (!this.foliate) return
 		const before = remember ? (this.data?.lastLocation?.cfi ?? null) : null
+		// 用 goTo 而不是 select：select 会把目标处的文字整段选中，
+		// 从「返回」跳回来时会留下一片蓝色选区
 		try {
-			await this.foliate.select(cfi)
+			await this.foliate.goTo(cfi)
 		} catch {
 			try {
-				await this.foliate.goTo(cfi)
+				await this.foliate.select(cfi)
 			} catch (err) {
 				console.error('[Grove Reader] 跳转失败', err)
 			}
