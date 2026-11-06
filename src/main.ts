@@ -25,7 +25,8 @@ import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
 import { PdfView, VIEW_TYPE_GROVE_PDF } from './pdfView'
 import { TextView, VIEW_TYPE_GROVE_TEXT } from './textView'
-import { BookPickerModal, ConfirmModal, DangerConfirmModal, FolderPromptModal, HealthReportModal, OpLogModal, ReadingStatsModal, PromptModal, SearchModal, TemplatePickerModal, TrashModal } from './modals'
+import { BookPickerModal, ConfirmModal, DangerConfirmModal, FolderPromptModal, HealthReportModal, NoteSyncModal, OpLogModal, ReadingStatsModal, PromptModal, SearchModal, TemplatePickerModal, TrashModal } from './modals'
+import { applySync, planSync } from './noteSync'
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
 import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
@@ -893,12 +894,21 @@ export default class GroveReaderPlugin extends Plugin {
 			id: 'search-current-book-fulltext',
 			name: '搜索当前书全文',
 			checkCallback: checking => this.withAnyReader(checking, v => {
+				if (v instanceof TextView) {
+					new PromptModal(this.app, '搜索当前书全文', '输入关键词，在当前书正文里搜索', query => v.searchFullText(query)).open()
+					return
+				}
 				if (!(v instanceof ReaderView)) {
 					new Notice(`${APP_NAME}：PDF 请用阅读器内的全文搜索`)
 					return
 				}
 				new PromptModal(this.app, '搜索当前书全文', '输入关键词，在当前书正文里搜索', query => v.searchFullText(query)).open()
 			}),
+		})
+		this.addCommand({
+			id: 'sync-note-to-annotations',
+			name: '从笔记同步批注…',
+			checkCallback: checking => this.withAnyReader(checking, v => void this.openNoteSync(v)),
 		})
 		this.addCommand({
 			id: 'open-trash',
@@ -948,6 +958,41 @@ export default class GroveReaderPlugin extends Plugin {
 	// ------------------------------------------------------------------
 	// 笔记生成
 	// ------------------------------------------------------------------
+
+	/** 从阅读笔记回写批注：先算差异、弹窗勾选，再写数据（不改笔记本身） */
+	async openNoteSync(view: ReaderView | PdfView | TextView): Promise<void> {
+		const data = view.snapshot()
+		if (!data) {
+			new Notice('Grove Reader：当前没有已打开的书籍')
+			return
+		}
+		if (!data.notePath) {
+			new Notice('Grove Reader：这本书还没有阅读笔记，先生成一份再回写')
+			return
+		}
+		const file = this.app.vault.getAbstractFileByPath(data.notePath)
+		if (!(file instanceof TFile)) {
+			new Notice('Grove Reader：笔记文件已不在原位置，请重新生成阅读笔记')
+			return
+		}
+		const markdown = await this.app.vault.read(file)
+		const plan = planSync(data, markdown)
+		if (!plan.changes.length) {
+			new Notice(
+				plan.missing.length
+					? `Grove Reader：笔记里没有这 ${plan.missing.length} 条批注的改动，未做任何修改`
+					: 'Grove Reader：笔记与批注一致，没有需要回写的改动',
+			)
+			return
+		}
+		new NoteSyncModal(this.app, plan, changes => {
+			const n = applySync(data, changes)
+			this.store.save(data)
+			view.refreshAnnotations()
+			this.oplog.add('从笔记回写批注', `《${data.title || data.bookPath}》 ${n} 项`)
+			new Notice(`Grove Reader：已从笔记回写 ${n} 项，笔记未改动`)
+		}).open()
+	}
 
 	async generateNoteFor(view: ReaderView | PdfView | TextView): Promise<void> {
 		const data = view.snapshot()

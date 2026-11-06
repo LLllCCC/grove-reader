@@ -7,6 +7,7 @@ import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, NOTE_BEGIN, NOT
 import { StatsStore, todayKey } from '../src/stats'
 import { BookData } from '../src/types'
 import { compareCfi, formatDuration, relativeTime } from '../src/util'
+import { applySync, parseNoteEntries, planSync } from '../src/noteSync'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-data-'))
 const store = new BookStore(tmp, 2)
@@ -226,5 +227,47 @@ assert.equal(relativeTime(now - 3 * 3600_000, now), '3 小时前')
 assert.equal(relativeTime(now - 30 * 3600_000, now), '昨天')
 assert.equal(formatDuration(90), '2 分钟')
 assert.equal(formatDuration(7200), '2.0 小时')
+
+
+// 17. 笔记 ↔ 批注回写：刚生成的笔记应当零差异
+const syncBook: BookData = {
+	version: 1,
+	bookPath: 'Books/Sync.epub',
+	title: '同步测试',
+	author: '',
+	annotations: [
+		{ id: 'aa11', cfi: 'txt:10-20', text: '第一行摘录\n第二行摘录', color: 'yellow', note: '原评论', createdAt: 1, updatedAt: 1, sectionIndex: 0, chapter: '第一章' },
+		{ id: 'bb22', cfi: 'txt:40-50', text: '另一段', color: 'green', createdAt: 1, updatedAt: 1, sectionIndex: 0, chapter: '第一章' },
+	],
+}
+const note0 = buildNote(syncBook, 'sync-book', null)
+assert.equal(parseNoteEntries(note0).length, 2, '应解析出两条生成条目')
+const plan0 = planSync(syncBook, note0)
+assert.equal(plan0.changes.length, 0, '刚生成的笔记不应产生回写差异')
+assert.equal(plan0.missing.length, 0)
+
+// 18. 改评论 / 改摘录 → 各自产出一条改动
+const edited = note0.replace('原评论', '改后的评论').replace('第二行摘录', '第二行摘录（改）')
+const plan1 = planSync(syncBook, edited)
+assert.equal(plan1.changes.length, 2, '评论与摘录各一条')
+assert.deepEqual(plan1.changes.map(c => c.field).sort(), ['note', 'text'])
+const applied = applySync(syncBook, plan1.changes)
+assert.equal(applied, 2)
+assert.equal(syncBook.annotations[0].note, '改后的评论')
+assert.ok(syncBook.annotations[0].text.includes('（改）'))
+
+// 19. 笔记里少一条 → 只记 missing，不删数据
+const partial = buildNote({ ...syncBook, annotations: [syncBook.annotations[0]] }, 'sync-book', null)
+const plan2 = planSync(syncBook, partial)
+assert.equal(plan2.missing.length, 1, '缺失条目应进 missing')
+assert.equal(plan2.changes.length, 0)
+
+// 20. 未知块 id 被忽略；没有 %% 块的评论记为 skipped
+const withUnknown = note0.replace(NOTE_END, '\n[某条](x) ^grove-zzzz\n' + NOTE_END)
+assert.deepEqual(planSync(syncBook, withUnknown).unknown, ['zzzz'])
+const noCommentBlock = note0.replace('%%\n原评论\n%%', '')
+const plan3 = planSync(syncBook, noCommentBlock)
+assert.equal(plan3.skipped.length, 1, '无法判断的评论应跳过')
+assert.equal(plan3.changes.filter(c => c.field === 'note').length, 0)
 
 console.log('SMOKE OK')

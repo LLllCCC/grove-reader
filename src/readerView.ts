@@ -10,7 +10,7 @@ import {
 	colorCss,
 } from './types'
 import { CommentModal, ConfirmModal } from './modals'
-import { explainSelection, isAiConfigured } from './ai'
+import { AiPanel } from './aiPanel'
 import { Overlayer } from '../lib/foliate-js/overlayer.js'
 import { basenameOf, contrastFg, formatAuthor, formatLanguageMap, isDarkColor, randomId, stripNumericTitlePrefix, truncate } from './util'
 import '../lib/foliate-js/view.js'
@@ -131,8 +131,7 @@ export class ReaderView extends ItemView {
 	private popupCloser: ((e: MouseEvent) => void) | null = null
 	/** 跳转后的「返回原位置」浮条 */
 	private jumpReturnEl: HTMLElement | null = null
-	private aiPanelEl: HTMLElement | null = null
-	private aiCloser: ((e: MouseEvent) => void) | null = null
+	private aiPanel = new AiPanel()
 	/** spine 索引 → 该节里最具体的目录项（同文件下「第X章」优先于「第X部分」） */
 	private tocBySection = new Map<number, { label: string; depth: number }>()
 
@@ -487,7 +486,7 @@ export class ReaderView extends ItemView {
 		this.#clearFullTextSearch()
 		this.#hidePopup()
 		this.#hideJumpReturn()
-		this.#hideAiPanel()
+		this.aiPanel.hide()
 		if (this.saveTimer != null) {
 			window.clearTimeout(this.saveTimer)
 			this.saveTimer = null
@@ -1028,7 +1027,7 @@ export class ReaderView extends ItemView {
 		}, 0)
 	}
 
-	/** 划词解释：调 AI 并把结果放进浮层 */
+	/** 划词解释：调 AI 并把结果放进浮层（浮层与 TXT 阅读器共用 aiPanel.ts） */
 	async #explainSelection(): Promise<void> {
 		const pending = this.pending
 		if (!pending) return
@@ -1041,69 +1040,7 @@ export class ReaderView extends ItemView {
 			model: this.plugin.settings.aiModel ?? '',
 			prompt: this.plugin.settings.aiPrompt ?? '',
 		}
-		if (!isAiConfigured(cfg)) {
-			new Notice('Grove Reader：还没有配置 AI。设置 → 阅读 → AI 解释 里填入接口地址与 API Key（推荐智谱 GLM-4-Flash，免费）', 8000)
-			return
-		}
-		this.#showAiPanel(text, bar)
-		try {
-			const answer = await explainSelection(cfg, text)
-			this.#fillAiPanel(answer)
-		} catch (err) {
-			this.#fillAiPanel(`调用失败：${err instanceof Error ? err.message : String(err)}`, true)
-		}
-	}
-
-	#showAiPanel(sourceText: string, bar: DOMRect | undefined): void {
-		this.aiPanelEl?.remove()
-		const panel = document.body.createDiv('grove-ai-panel')
-		const head = panel.createDiv('grove-ai-head')
-		const icon = head.createSpan('grove-ai-icon')
-		setIcon(icon, 'sparkles')
-		head.createSpan('grove-ai-title').setText('AI 解释')
-		const close = head.createEl('button', { cls: 'grove-ai-close', attr: { 'aria-label': '关闭' } })
-		setIcon(close, 'x')
-		close.addEventListener('click', () => this.#hideAiPanel())
-		panel.createDiv('grove-ai-source').setText(truncate(sourceText.replace(/\s+/g, ' '), 80))
-		const body = panel.createDiv('grove-ai-body')
-		body.setText('思考中…')
-		body.addClass('is-loading')
-
-		document.body.appendChild(panel)
-		const size = panel.getBoundingClientRect()
-		const anchorLeft = bar ? bar.left : window.innerWidth / 2 - size.width / 2
-		const anchorTop = bar ? bar.bottom + 8 : 120
-		const left = Math.min(Math.max(8, anchorLeft), Math.max(8, window.innerWidth - size.width - 8))
-		let top = anchorTop
-		if (top + size.height > window.innerHeight - 8) top = Math.max(8, (bar?.top ?? 200) - size.height - 8)
-		panel.style.left = `${Math.round(left)}px`
-		panel.style.top = `${Math.round(top)}px`
-		this.aiPanelEl = panel
-
-		this.aiCloser = (ev: MouseEvent): void => {
-			if (this.aiPanelEl && !this.aiPanelEl.contains(ev.target as Node)) this.#hideAiPanel()
-		}
-		window.setTimeout(() => {
-			if (this.aiCloser) document.addEventListener('mousedown', this.aiCloser, true)
-		}, 0)
-	}
-
-	#fillAiPanel(content: string, isError = false): void {
-		if (!this.aiPanelEl) return
-		const body = this.aiPanelEl.querySelector('.grove-ai-body') as HTMLElement | null
-		if (!body) return
-		body.removeClass('is-loading')
-		body.toggleClass('is-error', isError)
-		body.setText(content)
-	}
-
-	#hideAiPanel(): void {
-		if (this.aiCloser) {
-			document.removeEventListener('mousedown', this.aiCloser, true)
-			this.aiCloser = null
-		}
-		this.aiPanelEl?.remove()
-		this.aiPanelEl = null
+		await this.aiPanel.explain(cfg, text, bar)
 	}
 
 	#hidePopup(): void {
@@ -1606,7 +1543,7 @@ export class ReaderView extends ItemView {
 	/** 跳转后在左下角留一条「返回原位置」，可以一直挂着，也能关掉 */
 	#showJumpReturn(fromCfi: string): void {
 		this.#hideJumpReturn()
-		this.#hideAiPanel()
+		this.aiPanel.hide()
 		let fromLabel = ''
 		try {
 			const nav = this.foliate?.resolveNavigation?.(fromCfi)
@@ -1621,7 +1558,7 @@ export class ReaderView extends ItemView {
 		const back = bar.createEl('button', { cls: 'grove-jump-return-btn', text: '返回' })
 		back.addEventListener('click', () => {
 			this.#hideJumpReturn()
-		this.#hideAiPanel()
+		this.aiPanel.hide()
 			void this.#jumpToCfi(fromCfi, false)
 		})
 		const close = bar.createEl('button', { cls: 'grove-jump-return-close' })
@@ -1700,6 +1637,11 @@ export class ReaderView extends ItemView {
 		if (this.wheelAccum > 0) this.nextPage()
 		else this.prevPage()
 		this.wheelAccum = 0
+	}
+
+	/** 批注被外部改动（从笔记回写）后刷新侧栏 */
+	refreshAnnotations(): void {
+		this.#renderSidebar()
 	}
 
 	nextPage(): void {

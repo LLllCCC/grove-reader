@@ -1080,6 +1080,11 @@ export class PdfView extends ItemView {
 		if (m) this.#scrollToPage(Number.parseInt(m[1], 10))
 	}
 
+	/** 批注被外部改动（从笔记回写）后刷新侧栏 */
+	refreshAnnotations(): void {
+		this.#renderSidebar()
+	}
+
 	nextPage(): void {
 		this.#scrollToPage(Math.min(this.numPages, this.currentPage + 1))
 	}

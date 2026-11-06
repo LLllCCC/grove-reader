@@ -277,6 +277,22 @@
 	border-radius: 2px;
 }
 
+/* 每条结果末尾的页码，方便判断位置 */
+.grove-fulltext-search-page {
+	margin-left: 6px;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	white-space: nowrap;
+}
+
+/* TXT 正文里的搜索命中：压在批注底色之上，深浅主题都能认出来 */
+.grove-text-content mark.grove-find-hit {
+	background: var(--text-highlight-bg);
+	color: var(--text-normal);
+	border-radius: 2px;
+	box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
 .grove-ann-group-head {
 	display: flex;
 	align-items: center;
@@ -2717,4 +2733,134 @@
 
 .grove-ai-body.is-error {
 	color: var(--text-error);
+}
+
+/* ---- 笔记 → 批注回写 ---- */
+
+.grove-sync-list {
+	max-height: 46vh;
+	overflow-y: auto;
+	margin: 8px 0 4px;
+	padding: 2px 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+}
+
+.grove-sync-item {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 6px 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.grove-sync-item:last-child {
+	border-bottom: none;
+}
+
+.grove-sync-item input[type='checkbox'] {
+	flex: none;
+	margin-top: 3px;
+}
+
+.grove-sync-body {
+	flex: 1;
+	min-width: 0;
+}
+
+.grove-sync-head {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+}
+
+.grove-sync-field {
+	flex: none;
+	padding: 0 5px;
+	border-radius: 3px;
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-sync-diff {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	word-break: break-word;
+}
+
+.grove-sync-hint {
+	margin-top: 4px;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-sync-empty {
+	padding: 10px 4px;
+	color: var(--text-muted);
+}
+
+/* ---- 笔记 → 批注回写 ---- */
+
+.grove-sync-list {
+	max-height: 46vh;
+	overflow-y: auto;
+	margin: 8px 0 4px;
+	padding: 2px 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+}
+
+.grove-sync-item {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 6px 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.grove-sync-item:last-child {
+	border-bottom: none;
+}
+
+.grove-sync-item input[type='checkbox'] {
+	flex: none;
+	margin-top: 3px;
+}
+
+.grove-sync-body {
+	flex: 1;
+	min-width: 0;
+}
+
+.grove-sync-head {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+}
+
+.grove-sync-field {
+	flex: none;
+	padding: 0 5px;
+	border-radius: 3px;
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-sync-diff {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	word-break: break-word;
+}
+
+.grove-sync-hint {
+	margin-top: 4px;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-sync-empty {
+	padding: 10px 4px;
+	color: var(--text-muted);
 }

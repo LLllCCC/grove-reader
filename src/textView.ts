@@ -11,6 +11,7 @@ import {
 } from './types'
 import { CommentModal, ConfirmModal } from './modals'
 import { closeAnnMenu, showAnnMenu } from './annMenu'
+import { AiPanel } from './aiPanel'
 import { basenameOf, cleanBookTitle, contrastFg, isDarkColor, randomId, truncate } from './util'
 import { decodeTextBuffer, TextViewState, VIEW_TYPE_GROVE_TEXT } from './textCodec'
 
@@ -81,6 +82,7 @@ export class TextView extends ItemView {
 
 	private pending: TextSelection | null = null
 	private popup: HTMLElement | null = null
+	private aiPanel = new AiPanel()
 	private sidebarQuery = ''
 	private sidebarColor: string | null = null
 	private sortMode: 'position' | 'recent' = 'position'
@@ -103,6 +105,16 @@ export class TextView extends ItemView {
 	private annListEl!: HTMLElement
 	private annCountEl!: HTMLElement
 	private searchInput!: HTMLInputElement
+	// 全文搜索（正文，不是批注）
+	private fullTextSearchEl: HTMLDetailsElement | null = null
+	private fullTextSearchInput!: HTMLInputElement
+	private fullTextSearchStatus!: HTMLElement
+	private fullTextSearchResults!: HTMLElement
+	private fullTextTaskId = 0
+	private fullTextCache: string | null = null
+	private fullTextLowerCache: string | null = null
+	/** 当前定位到的正文命中区间；翻页后消失，重新搜索会替换 */
+	private findHit: { start: number; end: number } | null = null
 	private filterDotEls = new Map<string, HTMLElement>()
 	private clearBtnEl!: HTMLButtonElement
 	private sortBtnEl!: HTMLButtonElement
@@ -195,6 +207,7 @@ export class TextView extends ItemView {
 	async onClose(): Promise<void> {
 		this.#flushSave()
 		this.#hidePopup()
+		this.aiPanel.hide()
 		this.#closeToc()
 		closeAnnMenu()
 		this.resizeObserver?.disconnect()
@@ -364,6 +377,34 @@ export class TextView extends ItemView {
 		this.annCountEl = sideHead.createSpan('grove-ann-count')
 		this.annCountEl.setText('0 个批注')
 
+		// 正文全文搜索：与 EPUB 阅读器同一套 DOM/CSS，收起时不占空间
+		const fullTextSearch = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })
+		this.fullTextSearchEl = fullTextSearch as HTMLDetailsElement
+		fullTextSearch.createEl('summary', { text: '全文搜索' })
+		const fullTextSearchControls = fullTextSearch.createDiv('grove-fulltext-search-controls')
+		this.fullTextSearchInput = fullTextSearchControls.createEl('input', {
+			cls: 'grove-ann-search',
+			attr: { type: 'search', placeholder: '输入关键词，按 Enter 搜索本书…' },
+		})
+		this.fullTextSearchInput.addEventListener('keydown', e => {
+			if (e.key === 'Enter') {
+				e.preventDefault()
+				this.#runFullTextSearch()
+			} else if (e.key === 'Escape') {
+				this.#clearFullTextSearch()
+			}
+		})
+		const fullTextSearchMeta = fullTextSearch.createDiv('grove-fulltext-search-meta')
+		this.fullTextSearchStatus = fullTextSearchMeta.createSpan('grove-fulltext-search-status')
+		this.fullTextSearchStatus.setText('输入关键词后按 Enter 搜索全文')
+		const clearFullTextSearch = fullTextSearchMeta.createEl('button', {
+			cls: 'grove-manage-btn',
+			text: '清除',
+			attr: { 'aria-label': '清除全文搜索' },
+		})
+		clearFullTextSearch.addEventListener('click', () => this.#clearFullTextSearch())
+		this.fullTextSearchResults = fullTextSearch.createDiv('grove-fulltext-search-results')
+
 		const controls = this.sidebarEl.createDiv('grove-sidebar-controls')
 		this.searchInput = controls.createEl('input', {
 			cls: 'grove-ann-search',
@@ -464,6 +505,12 @@ export class TextView extends ItemView {
 		this.warning = decoded.warning
 		this.#buildChapters(decoded.text)
 		this.#buildPages(decoded.text)
+		// 换编码 / 重新解码后原文变了，全文搜索的缓存与命中也必须作废
+		this.fullTextCache = null
+		this.fullTextLowerCache = null
+		this.findHit = null
+		this.fullTextSearchResults?.empty()
+		this.fullTextSearchStatus?.setText('输入关键词后按 Enter 搜索全文')
 
 		let target: number | null = null
 		const jump = this.pendingCfi ? parseTextCfi(this.pendingCfi) : null
@@ -872,6 +919,9 @@ export class TextView extends ItemView {
 			.filter((x): x is { a: Annotation; range: { start: number; end: number } } => !!x.range)
 			.filter(x => x.range.start < pageEnd && x.range.end > pageStart)
 			.sort((x, y) => x.range.start - y.range.start)
+		// 全文搜索的命中只保留一条，跨页时不画
+		const find =
+			this.findHit && this.findHit.start < pageEnd && this.findHit.end > pageStart ? this.findHit : null
 
 		this.textEl.empty()
 		// 章节标题（本页出现的）与高亮分别切区间，按边界逐段输出：
@@ -887,6 +937,10 @@ export class TextView extends ItemView {
 			bounds.add(Math.max(0, Math.min(text.length, range.start - pageStart)))
 			bounds.add(Math.max(0, Math.min(text.length, range.end - pageStart)))
 		}
+		if (find) {
+			bounds.add(Math.max(0, Math.min(text.length, find.start - pageStart)))
+			bounds.add(Math.max(0, Math.min(text.length, find.end - pageStart)))
+		}
 		const points = [...bounds].sort((a, b) => a - b)
 		for (let i = 0; i < points.length - 1; i++) {
 			const from = points[i]
@@ -897,11 +951,19 @@ export class TextView extends ItemView {
 			const gEnd = pageStart + to
 			const heading = headings.find(h => h.start < gEnd && h.end > gStart)
 			const hit = hits.find(x => x.range.start < gEnd && x.range.end > gStart)
-			if (!heading && !hit) {
+			const isFind = !!find && find.start < gEnd && find.end > gStart
+			if (!heading && !hit && !isFind) {
 				this.textEl.appendChild(document.createTextNode(seg))
 				continue
 			}
 			let leaf: Node = document.createTextNode(seg)
+			// 命中底色压在批注高亮之上：搜索时最先要看到的是「在哪」
+			if (isFind) {
+				const mark = document.createElement('mark')
+				mark.className = 'grove-find-hit'
+				mark.appendChild(leaf)
+				leaf = mark
+			}
 			if (hit) {
 				const mark = document.createElement('mark')
 				mark.className = 'grove-txt-mark'
@@ -1121,6 +1183,108 @@ export class TextView extends ItemView {
 		window.setTimeout(() => mark.removeClass('is-flash'), 1400)
 	}
 
+	// ------------------------------------------------------------------
+	// 正文全文搜索（TXT）
+	// ------------------------------------------------------------------
+
+	/** 各页首尾相接就是原文，拼一次缓存起来，避免每次搜索都重拼 800 万字 */
+	#fullText(): string {
+		if (this.fullTextCache === null) this.fullTextCache = this.pages.join('')
+		return this.fullTextCache
+	}
+
+	/**
+	 * 忽略大小写用的干草堆。
+	 * 少数语言字符小写后长度会变（如 İ → i̇），那时索引对不上，退回区分大小写。
+	 */
+	#searchHaystack(): { text: string; fold: boolean } {
+		const text = this.#fullText()
+		if (this.fullTextLowerCache === null) this.fullTextLowerCache = text.toLowerCase()
+		return { text: this.fullTextLowerCache, fold: this.fullTextLowerCache.length === text.length }
+	}
+
+	/** 命令面板「搜索当前书全文」复用侧栏面板 */
+	searchFullText(query: string): void {
+		const q = query.trim()
+		if (!q) return
+		if (!this.bytes) {
+			new Notice('Grove Reader：文件还在加载，请稍后再试')
+			return
+		}
+		this.sidebarEl.removeClass('grove-hidden')
+		if (this.fullTextSearchEl) this.fullTextSearchEl.open = true
+		this.fullTextSearchInput.value = q
+		this.#runFullTextSearch()
+	}
+
+	#runFullTextSearch(): void {
+		const query = this.fullTextSearchInput.value.trim()
+		this.fullTextTaskId++
+		this.fullTextSearchResults.empty()
+		if (this.findHit) {
+			this.findHit = null
+			this.#renderPage()
+		}
+		if (!query) {
+			this.fullTextSearchStatus.setText('输入关键词后按 Enter 搜索全文')
+			return
+		}
+		const text = this.#fullText()
+		const { text: hay, fold } = this.#searchHaystack()
+		const needle = fold ? query.toLowerCase() : query
+		const limit = 300
+		const hits: Array<{ start: number; end: number }> = []
+		let from = 0
+		while (from <= text.length) {
+			const idx = hay.indexOf(needle, from)
+			if (idx < 0) break
+			hits.push({ start: idx, end: idx + query.length })
+			if (hits.length >= limit) break
+			from = idx + Math.max(1, needle.length)
+		}
+		if (!hits.length) {
+			this.fullTextSearchStatus.setText('没有找到匹配内容')
+			return
+		}
+		for (const hit of hits) {
+			const row = this.fullTextSearchResults.createEl('button', { cls: 'grove-fulltext-search-result' })
+			row.createSpan('grove-fulltext-search-context').setText(
+				text.slice(Math.max(0, hit.start - 18), hit.start).replace(/\s+/g, ' '),
+			)
+			row.createSpan('grove-fulltext-search-hit').setText(text.slice(hit.start, hit.end))
+			row.createSpan('grove-fulltext-search-context').setText(
+				text.slice(hit.end, Math.min(text.length, hit.end + 26)).replace(/\s+/g, ' '),
+			)
+			row.createSpan('grove-fulltext-search-page').setText(`第 ${this.#pageOfOffset(hit.start) + 1} 页`)
+			row.addEventListener('click', () => this.#jumpToFind(hit))
+		}
+		this.fullTextSearchStatus.setText(
+			`${hits.length} 处命中${hits.length >= limit ? `（仅显示前 ${limit} 处）` : ''}`,
+		)
+	}
+
+	#jumpToFind(hit: { start: number; end: number }): void {
+		this.findHit = hit
+		if (this.#pageOfOffset(hit.start) !== this.page) {
+			this.#jumpToOffset(hit.start)
+			return
+		}
+		// 同一页内跳转也让 #renderPage 重画一次，命中底色才会出现
+		this.pendingOffset = hit.start
+		this.#renderPage()
+	}
+
+	#clearFullTextSearch(): void {
+		this.fullTextTaskId++
+		if (this.fullTextSearchInput) this.fullTextSearchInput.value = ''
+		this.fullTextSearchResults?.empty()
+		this.fullTextSearchStatus?.setText('输入关键词后按 Enter 搜索全文')
+		if (this.findHit) {
+			this.findHit = null
+			this.#renderPage()
+		}
+	}
+
 	#goPage(page: number): void {
 		this.page = Math.max(0, Math.min(this.pages.length - 1, page))
 		this.screen = 0
@@ -1132,6 +1296,12 @@ export class TextView extends ItemView {
 	// ------------------------------------------------------------------
 	// 翻页
 	// ------------------------------------------------------------------
+
+	/** 批注被外部改动（从笔记回写）后刷新侧栏与当前页高亮 */
+	refreshAnnotations(): void {
+		this.#renderSidebar()
+		if (this.bytes) this.#renderPage()
+	}
 
 	nextPage(): void {
 		if (this.screen < this.screenCount - 1) {
@@ -1313,16 +1483,43 @@ export class TextView extends ItemView {
 			this.#clearPending()
 		})
 
+		const explainBtn = popup.createEl('button', { text: '解释' })
+		explainBtn.title = '用 AI 解释这段文字'
+		explainBtn.style.cssText = buttonCss
+		explainBtn.addEventListener('click', e => {
+			e.preventDefault()
+			void this.#explainSelection()
+		})
+
 		document.body.appendChild(popup)
 		this.popup = popup
 
+		// 按钮数量会变（高亮色点 + 评论/复制/解释），宽度实测后再夹边界，
+		// 写死常量会在加按钮后把弹条顶出屏幕
 		const rect = range.getBoundingClientRect()
-		let left = rect.left + rect.width / 2 - POPUP_WIDTH / 2
-		left = Math.max(8, Math.min(left, window.innerWidth - POPUP_WIDTH - 8))
+		const width = popup.getBoundingClientRect().width || POPUP_WIDTH
+		let left = rect.left + rect.width / 2 - width / 2
+		left = Math.max(8, Math.min(left, window.innerWidth - width - 8))
 		let top = rect.bottom + 8
 		if (top + 44 > window.innerHeight) top = Math.max(8, rect.top - 44)
 		popup.style.left = `${Math.round(left)}px`
 		popup.style.top = `${Math.round(top)}px`
+	}
+
+	/** 划词解释：与 EPUB 共用 aiPanel，未配置 AI 时由浮层给出明确提示 */
+	async #explainSelection(): Promise<void> {
+		const pending = this.pending
+		if (!pending) return
+		const text = pending.text
+		const bar = this.popup?.getBoundingClientRect()
+		this.#clearPending()
+		const cfg = {
+			baseUrl: this.plugin.settings.aiBaseUrl ?? '',
+			apiKey: this.plugin.settings.aiApiKey ?? '',
+			model: this.plugin.settings.aiModel ?? '',
+			prompt: this.plugin.settings.aiPrompt ?? '',
+		}
+		await this.aiPanel.explain(cfg, text, bar)
 	}
 
 	#hidePopup(): void {

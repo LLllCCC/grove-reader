@@ -8,6 +8,7 @@ import type GroveReaderPlugin from './main'
 import { basenameOf, cleanBookTitle } from './util'
 import type { OpEntry } from './oplog'
 import type { HealthReport } from './health'
+import type { SyncChange, SyncPlan } from './noteSync'
 
 export class BookPickerModal extends FuzzySuggestModal<TFile> {
 	constructor(app: App, private onPick: (file: TFile) => void) {
@@ -1140,4 +1141,92 @@ export class PromptModal extends Modal {
 	onClose(): void {
 		this.contentEl.empty()
 	}
+}
+
+// ------------------------------------------------------------------
+// 笔记 → 批注回写
+// ------------------------------------------------------------------
+
+/** 预览笔记里的改动，勾选后写回批注数据；缺条目只提示，不删数据 */
+export class NoteSyncModal extends Modal {
+	constructor(
+		app: App,
+		private plan: SyncPlan,
+		private onApply: (changes: SyncChange[]) => void,
+	) {
+		super(app)
+	}
+
+	onOpen(): void {
+		this.contentEl.empty()
+		this.contentEl.createEl('h3', { text: '从笔记同步批注' })
+		this.contentEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: '勾选要写回批注数据的改动。笔记里被删掉的条目不会删批注，只在这里提示。',
+		})
+
+		const selected = new Set(this.plan.changes.map(c => changeKey(c)))
+		const list = this.contentEl.createDiv('grove-sync-list')
+		if (!this.plan.changes.length) {
+			list.createDiv('grove-sync-empty').setText('没有检测到被改动的摘录或评论')
+		}
+		for (const c of this.plan.changes) {
+			const item = list.createDiv('grove-sync-item')
+			const box = item.createEl('input', { type: 'checkbox' })
+			box.checked = true
+			box.addEventListener('change', () => {
+				if (box.checked) selected.add(changeKey(c))
+				else selected.delete(changeKey(c))
+				syncApplyButton()
+			})
+			const body = item.createDiv('grove-sync-body')
+			const head = body.createDiv('grove-sync-head')
+			head.createSpan('grove-sync-field').setText(c.field === 'note' ? '评论' : '摘录')
+			head.createSpan('grove-sync-diff').setText(`${collapse(c.from) || '（空）'} → ${collapse(c.to) || '（空）'}`)
+		}
+
+		if (this.plan.missing.length) {
+			const hint = this.contentEl.createDiv('grove-sync-hint')
+			hint.setText(`笔记里找不到 ${this.plan.missing.length} 条批注（未删除，可在插件里单独处理）`)
+		}
+		if (this.plan.skipped.length) {
+			this.contentEl.createDiv('grove-sync-hint').setText(
+				`${this.plan.skipped.length} 条批注的评论无法判断（条目里没有 %% 块），已跳过`,
+			)
+		}
+		if (this.plan.unknown.length) {
+			this.contentEl.createDiv('grove-sync-hint').setText(
+				`笔记里有 ${this.plan.unknown.length} 个块 id 对不上这本书的批注，已忽略`,
+			)
+		}
+
+		const buttons = this.contentEl.createDiv('modal-button-container')
+		const cancel = buttons.createEl('button', { text: '取消' })
+		cancel.addEventListener('click', () => this.close())
+		const apply = buttons.createEl('button', { text: '应用改动', cls: 'mod-cta' })
+		const syncApplyButton = (): void => {
+			apply.setText(`应用改动（${selected.size}）`)
+			apply.disabled = selected.size === 0
+		}
+		syncApplyButton()
+		apply.addEventListener('click', () => {
+			const picked = this.plan.changes.filter(c => selected.has(changeKey(c)))
+			this.onApply(picked)
+			this.close()
+		})
+	}
+
+	onClose(): void {
+		this.contentEl.empty()
+	}
+}
+
+function changeKey(c: SyncChange): string {
+	return `${c.id}|${c.field}`
+}
+
+/** 差异预览压成一行，太长截断 */
+function collapse(text: string): string {
+	const one = (text || '').replace(/\s+/g, ' ').trim()
+	return one.length > 42 ? `${one.slice(0, 42)}…` : one
 }
