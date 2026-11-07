@@ -23,7 +23,7 @@ Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / c
 | 目录 | 工具栏下拉框 |
 | 生成笔记 | 工具栏笔记按钮或命令「生成 / 更新阅读笔记」，保存到设置中的笔记文件夹 |
 | 发送到 Canvas | 命令「把批注发送到 Canvas…」：勾选批注导出成画布卡片，可新建画布或追加到已有画布；EPUB 批注菜单与 TXT 划词菜单也有「发送到 Canvas」；卡片色跟随高亮色，按 3 列排布，含摘录、评论、回笔记与回原文链接 |
-| Dataview 字段 | 每份笔记的 frontmatter 会写 `grove-annotations` / `grove-format` / `grove-progress` / `grove-status` / `grove-seconds` / `grove-last-read` / `grove-publisher`，可直接用 Dataview 或 Bases 查询 |
+| Dataview 字段 | 每份笔记的 frontmatter 会写 `grove_annotations` / `grove_format` / `grove_progress` / `grove_status` / `grove_seconds` / `grove_last_read` / `grove_publisher`，可直接用 Dataview 或 Bases 查询 |
 | 从笔记回写批注 | 命令「从笔记同步批注…」：把笔记里改过的摘录 / 评论写回批注数据，先列差异、逐项勾选；笔记里删掉的条目不会删批注；笔记文件夹改过导致路径失效时按书名与 frontmatter 自动找回 |
 | 全文搜索 | 侧栏「全文搜索」输入关键词回车（EPUB / PDF / TXT 同一入口）；TXT 八百万字实测约 60ms，结果带页码，点击跳转并把命中处标黄 |
 | 阅读目标与热力图 | 阅读统计查看今日/连续/活跃/累计，最近 12 周热力图；设置 → 阅读与笔记 → 每日阅读目标 |
@@ -78,20 +78,20 @@ Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / c
 | 字段 | 含义 |
 | --- | --- |
 | `grove-book` | 书籍 id（同名书认领笔记用） |
-| `grove-annotations` | 批注条数 |
-| `grove-format` | EPUB / PDF / TXT 等 |
-| `grove-progress` | 阅读进度 0–100 |
-| `grove-status` | 想读 / 在读 / 读完（按进度推） |
-| `grove-seconds` | 累计阅读秒数 |
-| `grove-last-read` | 最近阅读日期 `YYYY-MM-DD` |
-| `grove-publisher` | 出版社（书架里有才写） |
+| `grove_annotations` | 批注条数 |
+| `grove_format` | EPUB / PDF / TXT 等 |
+| `grove_progress` | 阅读进度 0–100 |
+| `grove_status` | 想读 / 在读 / 读完（按进度推） |
+| `grove_seconds` | 累计阅读秒数 |
+| `grove_last_read` | 最近阅读日期 `YYYY-MM-DD` |
+| `grove_publisher` | 出版社（书架里有才写） |
 
 示例查询：
 
 ```dataview
-TABLE grove-annotations AS 批注, grove-progress AS 进度, grove-status AS 状态, grove-seconds AS 秒
+TABLE grove_annotations AS 批注, grove_progress AS 进度, grove_status AS 状态, grove_seconds AS 秒
 FROM "Grove Reader/阅读笔记"
-SORT grove-last-read DESC
+SORT grove_last_read DESC
 ```
 
 已有笔记可以用命令「刷新全部阅读笔记（补齐统计字段）」一次性补上。

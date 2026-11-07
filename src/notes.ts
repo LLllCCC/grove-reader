@@ -268,20 +268,31 @@ function metaEntries(data: BookData, bookId: string, extra?: NoteExtraFields): A
 		['grove-book', bookId],
 	]
 	if (!extra) return entries
-	if (typeof extra.annotations === 'number') entries.push(['grove-annotations', String(extra.annotations)])
-	if (extra.format) entries.push(['grove-format', yamlSafe(extra.format)])
+	if (typeof extra.annotations === 'number') entries.push(['grove_annotations', String(extra.annotations)])
+	if (extra.format) entries.push(['grove_format', yamlSafe(extra.format)])
 	if (typeof extra.progress === 'number') {
 		const p = Math.max(0, Math.min(100, Math.round(extra.progress)))
-		entries.push(['grove-progress', String(p)])
+		entries.push(['grove_progress', String(p)])
 	}
-	if (extra.status) entries.push(['grove-status', yamlSafe(extra.status)])
-	if (typeof extra.seconds === 'number') entries.push(['grove-seconds', String(Math.max(0, Math.round(extra.seconds)))])
+	if (extra.status) entries.push(['grove_status', yamlSafe(extra.status)])
+	if (typeof extra.seconds === 'number') entries.push(['grove_seconds', String(Math.max(0, Math.round(extra.seconds)))])
 	if (typeof extra.lastRead === 'number' && extra.lastRead > 0) {
-		entries.push(['grove-last-read', new Date(extra.lastRead).toISOString().slice(0, 10)])
+		entries.push(['grove_last_read', new Date(extra.lastRead).toISOString().slice(0, 10)])
 	}
-	if (extra.publisher) entries.push(['grove-publisher', yamlSafe(extra.publisher)])
+	if (extra.publisher) entries.push(['grove_publisher', yamlSafe(extra.publisher)])
 	return entries
 }
+
+/** 0.28.0 早期用连字符命名，Dataview 会把它当减法；刷新时顺手清掉这些旧键 */
+const LEGACY_META_KEYS = [
+	'grove-annotations',
+	'grove-format',
+	'grove-progress',
+	'grove-status',
+	'grove-seconds',
+	'grove-last-read',
+	'grove-publisher',
+]
 
 function frontmatter(data: BookData, bookId: string, extra?: NoteExtraFields): string {
 	return ['---', ...metaEntries(data, bookId, extra).map(([k, v]) => `${k}: ${v}`), '---'].join('\n')
@@ -297,6 +308,8 @@ function refreshFrontmatter(existing: string, data: BookData, bookId: string, ex
 		return lines
 	}
 	let lines = (m[1] ?? '').split(/\r?\n/)
+	// 去掉旧命名的统计键（连字符在 Dataview 里会被解析成减法）
+	lines = lines.filter(l => !LEGACY_META_KEYS.some(k => l.startsWith(`${k}:`)))
 	// 已有键原地替换，缺的键追加在末尾；顺序稳定，不会每次刷新都改动文本
 	for (const [key, value] of metaEntries(data, bookId, extra)) {
 		if (lines.some(l => l.startsWith(`${key}:`))) lines = set(lines, key, value)

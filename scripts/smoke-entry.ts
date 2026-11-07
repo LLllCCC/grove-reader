@@ -295,18 +295,30 @@ const metaNote = buildNote(syncBook, 'sync-book', null, null, {
 	publisher: '某出版社',
 })
 for (const line of [
-	'grove-annotations: 2',
-	'grove-format: "EPUB"',
-	'grove-progress: 42',
-	'grove-status: "在读"',
-	'grove-seconds: 720',
-	'grove-last-read: 2026-11-06',
-	'grove-publisher: "某出版社"',
+	'grove_annotations: 2',
+	'grove_format: "EPUB"',
+	'grove_progress: 42',
+	'grove_status: "在读"',
+	'grove_seconds: 720',
+	'grove_last_read: 2026-11-06',
+	'grove_publisher: "某出版社"',
 ]) assert.ok(metaNote.includes(line), '缺少字段 ' + line)
 const withUserField = metaNote.replace('grove-book: sync-book', 'grove-book: sync-book\ncustom-field: keep-me')
 const refreshed = buildNote(syncBook, 'sync-book', withUserField, null, { annotations: 3 })
 assert.ok(refreshed.includes('custom-field: keep-me'), '不能删掉用户自定义字段')
-assert.ok(refreshed.includes('grove-annotations: 3'), '统计字段应更新')
+assert.ok(refreshed.includes('grove_annotations: 3'), '统计字段应更新')
+// 旧版连字符字段应在刷新时被清掉（Dataview 会把 grove-status 当减法）
+const legacyNote = metaNote.replace('grove_status: "在读"', 'grove-status: "在读"')
+const cleaned = buildNote(syncBook, 'sync-book', legacyNote, null, {
+	annotations: 1,
+	format: 'EPUB',
+	progress: 10,
+	status: '在读',
+	seconds: 60,
+	lastRead: Date.now(),
+})
+assert.ok(!cleaned.includes('grove-status:'), '旧字段应被清理')
+assert.ok(cleaned.includes('grove_status:'), '新字段应在')
 
 // 23. Canvas 卡片：正文结构、排布不重叠、坏文件不静默清空
 const cardText = buildCardText(
