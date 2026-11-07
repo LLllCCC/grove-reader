@@ -20,15 +20,19 @@ import {
 	SUPPORTED_BOOK_EXTS,
 	ShelfBookInfo,
 	BACKUP_FOLDER_NAME,
+	FORMAT_LABELS,
 } from './types'
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
 import { PdfView, VIEW_TYPE_GROVE_PDF } from './pdfView'
 import { TextView, VIEW_TYPE_GROVE_TEXT } from './textView'
-import { BookPickerModal, ConfirmModal, DangerConfirmModal, FolderPromptModal, HealthReportModal, NoteSyncModal, OpLogModal, ReadingStatsModal, PromptModal, SearchModal, TemplatePickerModal, TrashModal } from './modals'
+import { BookPickerModal, CanvasExportModal, ConfirmModal, DangerConfirmModal, FolderPromptModal, HealthReportModal, NoteSyncModal, OpLogModal, ReadingStatsModal, PromptModal, SearchModal, TemplatePickerModal, TrashModal } from './modals'
+import type { CanvasExportPayload } from './modals'
 import { applySync, planSync } from './noteSync'
+import { appendCards, buildCardText, canvasColor, emptyCanvas, parseCanvas, serializeCanvas } from './canvas'
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
+import type { NoteExtraFields } from './notes'
 import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
 import { isReaderExt, isShelfExt } from './types'
 import { usageDocMarkdown, USAGE_DOC_NAME } from './usageDoc'
@@ -906,6 +910,21 @@ export default class GroveReaderPlugin extends Plugin {
 			}),
 		})
 		this.addCommand({
+			id: 'export-annotations-canvas',
+			name: '把批注发送到 Canvas…',
+			checkCallback: checking => this.withAnyReader(checking, v => void this.exportToCanvas(v)),
+		})
+		this.addCommand({
+			id: 'refresh-all-notes',
+			name: '刷新全部阅读笔记（补齐统计字段）',
+			callback: () => void this.refreshAllNotes(),
+		})
+		this.addCommand({
+			id: 'refresh-all-notes',
+			name: '刷新全部阅读笔记（补齐统计字段）',
+			callback: () => void this.refreshAllNotes(),
+		})
+		this.addCommand({
 			id: 'sync-note-to-annotations',
 			name: '从笔记同步批注…',
 			checkCallback: checking => this.withAnyReader(checking, v => void this.openNoteSync(v)),
@@ -958,6 +977,130 @@ export default class GroveReaderPlugin extends Plugin {
 	// ------------------------------------------------------------------
 	// 笔记生成
 	// ------------------------------------------------------------------
+
+	/** 把批注发到 Canvas；ids 为空表示整本书 */
+	async exportToCanvas(view: ReaderView | PdfView | TextView, ids?: string[]): Promise<void> {
+		const data = view.snapshot()
+		if (!data) {
+			new Notice('Grove Reader：当前没有已打开的书籍')
+			return
+		}
+		const list = ids?.length ? data.annotations.filter(a => ids.includes(a.id)) : data.annotations
+		if (!list.length) {
+			new Notice('Grove Reader：这本书还没有批注')
+			return
+		}
+		const canvases = this.app.vault
+			.getFiles()
+			.filter(f => f.extension === 'canvas')
+			.map(f => ({ path: f.path, name: f.basename }))
+			.sort((a, b) => a.name.localeCompare(b.name))
+		const title = data.title || '未命名'
+		new CanvasExportModal(this.app, title, list, canvases, sanitizeFileName(`${title} - 批注`), payload =>
+			void this.#writeCanvas(data, list, payload),
+		).open()
+	}
+
+	async #writeCanvas(
+		data: BookData,
+		annotations: Array<{ id: string; text: string; note?: string; chapter?: string; color: string; pdf?: { page: number } }>,
+		payload: CanvasExportPayload,
+	): Promise<void> {
+		const picked = annotations.filter(a => payload.ids.includes(a.id))
+		if (!picked.length) return
+		const noteFile = this.#noteFileFor(data)
+		const cards = picked.map(a => ({
+			text: buildCardText(
+				a as never,
+				data.title || '未命名',
+				noteFile ? `[[${noteFile.path}#^grove-${a.id}|打开笔记]]` : undefined,
+			),
+			color: canvasColor(a.color),
+		}))
+
+		let target = payload.target
+		if (target) {
+			const file = this.app.vault.getAbstractFileByPath(target)
+			if (!(file instanceof TFile)) {
+				new Notice('Grove Reader：目标画布已不存在')
+				return
+			}
+			const existing = await this.app.vault.read(file)
+			let doc
+			try {
+				doc = parseCanvas(existing)
+			} catch {
+				new Notice('Grove Reader：目标不是有效的 Canvas 文件，未做修改')
+				return
+			}
+			appendCards(doc, cards)
+			await this.app.vault.modify(file, serializeCanvas(doc))
+		} else {
+			const folder = normalizePath(`${LIBRARY_ROOT}/画布`)
+			if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder)
+			target = normalizePath(`${folder}/${sanitizeFileName(payload.name || '批注画布')}.canvas`)
+			if (this.app.vault.getAbstractFileByPath(target)) {
+				new Notice('Grove Reader：同名画布已存在，请换个名字')
+				return
+			}
+			const doc = emptyCanvas()
+			appendCards(doc, cards)
+			await this.app.vault.create(target, serializeCanvas(doc))
+		}
+		new Notice(`Grove Reader：已把 ${cards.length} 条批注写入画布`)
+		const file = this.app.vault.getAbstractFileByPath(target)
+		if (file instanceof TFile) await this.app.workspace.getLeaf('split').openFile(file)
+	}
+
+	/** 批量刷新已生成的笔记：补统计字段、重排生成区；有未回写改动的跳过 */
+	async refreshAllNotes(): Promise<void> {
+		const targets: Array<{ data: BookData; file: TFile }> = []
+		for (const p of this.store.listBookPaths()) {
+			const data = this.store.load(p)
+			const file = this.#noteFileFor(data)
+			if (file) targets.push({ data, file })
+		}
+		if (!targets.length) {
+			new Notice('Grove Reader：没有找到已生成的阅读笔记')
+			return
+		}
+		new ConfirmModal(
+			this.app,
+			`将刷新 ${targets.length} 份阅读笔记的生成区：区间外的手写内容保留，笔记里有未回写改动的会跳过。`,
+			() => void this.#applyRefreshAll(targets),
+			'开始刷新',
+			'mod-cta',
+		).open()
+	}
+
+	async #applyRefreshAll(targets: Array<{ data: BookData; file: TFile }>): Promise<void> {
+		let ok = 0
+		let skipped = 0
+		let failed = 0
+		for (const { data, file } of targets) {
+			try {
+				const existing = await this.app.vault.read(file)
+				const pending = planSync(data, existing)
+				if (pending.entries > 0 && pending.changes.length > 0) {
+					skipped++
+					continue
+				}
+				const markdown = await this.#composeNoteMarkdown(data, existing, false)
+				if (markdown !== existing) await this.app.vault.modify(file, markdown)
+				if (data.notePath !== file.path) {
+					data.notePath = file.path
+					this.store.save(data)
+				}
+				ok++
+			} catch (e) {
+				failed++
+				console.error('[Grove Reader] 刷新笔记失败', file.path, e)
+			}
+		}
+		new Notice(
+			`Grove Reader：已刷新 ${ok} 份${skipped ? `，跳过 ${skipped} 份（有未回写改动）` : ''}${failed ? `，失败 ${failed} 份` : ''}`,
+		)
+	}
 
 	/**
 	 * 找一本书对应的笔记文件。
@@ -1140,6 +1283,23 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	/** 读取模板并把批注数据渲染成完整笔记 Markdown（含 frontmatter 与标记区） */
+	/** 笔记 frontmatter 里的统计字段：进度取最后位置，时长取阅读统计，出版社取书架缓存 */
+	#noteExtra(data: BookData): NoteExtraFields {
+		const ext = (data.bookPath.split('.').pop() ?? '').toLowerCase()
+		const fraction = data.lastLocation?.fraction
+		const progress = typeof fraction === 'number' ? Math.max(0, Math.min(1, fraction)) * 100 : 0
+		const stat = this.stats.book(data.bookPath)
+		return {
+			annotations: data.annotations.length,
+			format: FORMAT_LABELS[ext] ?? ext.toUpperCase(),
+			progress,
+			status: progress >= 99 ? '读完' : progress > 0 ? '在读' : '想读',
+			seconds: stat.seconds,
+			lastRead: stat.lastRead || data.lastLocation?.updatedAt || 0,
+			publisher: this.shelfCache.get(data.bookPath)?.publisher ?? '',
+		}
+	}
+
 	async #composeNoteMarkdown(data: BookData, existing: string | null, announce: boolean): Promise<string> {
 		const tplPath = this.templatePathFor(data)
 		let template: string | null = null
@@ -1154,7 +1314,7 @@ export default class GroveReaderPlugin extends Plugin {
 				template = null
 			}
 		}
-		return buildNote(data, bookIdFor(data.bookPath), existing, template)
+		return buildNote(data, bookIdFor(data.bookPath), existing, template, this.#noteExtra(data))
 	}
 
 	private noteRefreshTimer: number | null = null

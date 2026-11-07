@@ -246,18 +246,49 @@ function yamlSafe(value: string): string {
 	return JSON.stringify(value)
 }
 
-function frontmatter(data: BookData, bookId: string): string {
-	return [
-		'---',
-		`title: ${yamlSafe(data.title || '未命名')}`,
-		`author: ${yamlSafe(data.author || '')}`,
-		`grove-book: ${bookId}`,
-		'---',
-	].join('\n')
+/** 额外写进 frontmatter 的统计字段，供 Dataview / Bases 查询 */
+export interface NoteExtraFields {
+	annotations?: number
+	format?: string
+	/** 0–100 */
+	progress?: number
+	/** 想读 / 在读 / 读完 */
+	status?: string
+	seconds?: number
+	/** 毫秒时间戳，写成 YYYY-MM-DD */
+	lastRead?: number
+	publisher?: string
 }
 
-/** 更新已有笔记 frontmatter 里插件维护的三个字段；没有该字段或无 frontmatter 就不动 */
-function refreshFrontmatter(existing: string, data: BookData, bookId: string): string {
+/** 插件维护的 frontmatter 字段表：重建与增量刷新都按这张表走，避免两处规则漂移 */
+function metaEntries(data: BookData, bookId: string, extra?: NoteExtraFields): Array<[string, string]> {
+	const entries: Array<[string, string]> = [
+		['title', yamlSafe(data.title || '未命名')],
+		['author', yamlSafe(data.author || '')],
+		['grove-book', bookId],
+	]
+	if (!extra) return entries
+	if (typeof extra.annotations === 'number') entries.push(['grove-annotations', String(extra.annotations)])
+	if (extra.format) entries.push(['grove-format', yamlSafe(extra.format)])
+	if (typeof extra.progress === 'number') {
+		const p = Math.max(0, Math.min(100, Math.round(extra.progress)))
+		entries.push(['grove-progress', String(p)])
+	}
+	if (extra.status) entries.push(['grove-status', yamlSafe(extra.status)])
+	if (typeof extra.seconds === 'number') entries.push(['grove-seconds', String(Math.max(0, Math.round(extra.seconds)))])
+	if (typeof extra.lastRead === 'number' && extra.lastRead > 0) {
+		entries.push(['grove-last-read', new Date(extra.lastRead).toISOString().slice(0, 10)])
+	}
+	if (extra.publisher) entries.push(['grove-publisher', yamlSafe(extra.publisher)])
+	return entries
+}
+
+function frontmatter(data: BookData, bookId: string, extra?: NoteExtraFields): string {
+	return ['---', ...metaEntries(data, bookId, extra).map(([k, v]) => `${k}: ${v}`), '---'].join('\n')
+}
+
+/** 更新已有笔记 frontmatter 里插件维护的字段（缺的补上，用户自己加的字段不动） */
+function refreshFrontmatter(existing: string, data: BookData, bookId: string, extra?: NoteExtraFields): string {
 	const m = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)/.exec(existing)
 	if (!m || m.index == null) return existing
 	const set = (lines: string[], key: string, value: string): string[] => {
@@ -266,9 +297,11 @@ function refreshFrontmatter(existing: string, data: BookData, bookId: string): s
 		return lines
 	}
 	let lines = (m[1] ?? '').split(/\r?\n/)
-	lines = set(lines, 'title', yamlSafe(data.title || '未命名'))
-	lines = set(lines, 'author', yamlSafe(data.author || ''))
-	lines = set(lines, 'grove-book', bookId)
+	// 已有键原地替换，缺的键追加在末尾；顺序稳定，不会每次刷新都改动文本
+	for (const [key, value] of metaEntries(data, bookId, extra)) {
+		if (lines.some(l => l.startsWith(`${key}:`))) lines = set(lines, key, value)
+		else lines.push(`${key}: ${value}`)
+	}
 	return existing.slice(0, m.index) + `---\n${lines.join('\n')}\n---` + existing.slice(m.index + m[0].length)
 }
 
@@ -278,7 +311,13 @@ function refreshFrontmatter(existing: string, data: BookData, bookId: string): s
  * - existing 为 null：新建文件（带 frontmatter）。
  * - 已有标记区间：只覆盖区间内内容；无标记的既有文件在末尾追加。
  */
-export function buildNote(data: BookData, bookId: string, existing: string | null, template?: string | null): string {
+export function buildNote(
+	data: BookData,
+	bookId: string,
+	existing: string | null,
+	template?: string | null,
+	extra?: NoteExtraFields,
+): string {
 	const tpl = template && template.trim() ? template : DEFAULT_NOTE_TEMPLATE
 	let body: string
 	try {
@@ -290,10 +329,10 @@ export function buildNote(data: BookData, bookId: string, existing: string | nul
 	const inner = `${NOTE_BEGIN}\n\n${body}\n\n${NOTE_END}`
 
 	if (existing == null || existing.trim() === '') {
-		return `${frontmatter(data, bookId)}\n\n${inner}\n`
+		return `${frontmatter(data, bookId, extra)}\n\n${inner}\n`
 	}
 	// 已有笔记：先同步插件维护的 frontmatter 字段，再替换标记区间
-	existing = refreshFrontmatter(existing, data, bookId)
+	existing = refreshFrontmatter(existing, data, bookId, extra)
 	const begin = existing.indexOf(NOTE_BEGIN)
 	// 用最后一个 END：END 标记被误删时按「BEGIN 之后全是生成区」处理，
 	// 否则每次刷新都会在末尾追加一整块重复内容

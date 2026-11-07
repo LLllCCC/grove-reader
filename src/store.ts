@@ -70,6 +70,25 @@ export class BookStore {
 		}
 	}
 
+	/** 所有已有批注数据的书籍路径（批量维护、刷新笔记用） */
+	listBookPaths(): string[] {
+		try {
+			const out: string[] = []
+			for (const f of fs.readdirSync(this.booksDir)) {
+				if (!f.endsWith('.json')) continue
+				try {
+					const d = JSON.parse(fs.readFileSync(path.join(this.booksDir, f), 'utf-8')) as BookData
+					if (typeof d?.bookPath === 'string' && d.bookPath) out.push(d.bookPath)
+				} catch {
+					// 单个文件坏掉不影响其余书籍
+				}
+			}
+			return out
+		} catch {
+			return []
+		}
+	}
+
 	hasDataFor(vaultPath: string): boolean {
 		return fs.existsSync(this.fileFor(this.bookId(vaultPath)))
 	}

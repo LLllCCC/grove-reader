@@ -8,6 +8,7 @@ import { StatsStore, todayKey } from '../src/stats'
 import { BookData } from '../src/types'
 import { compareCfi, formatDuration, relativeTime } from '../src/util'
 import { applySync, normalizeExcerpt, parseNoteEntries, planSync } from '../src/noteSync'
+import { appendCards, buildCardText, emptyCanvas, parseCanvas, serializeCanvas, shortTitle } from '../src/canvas'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-data-'))
 const store = new BookStore(tmp, 2)
@@ -282,5 +283,58 @@ const blankBook: BookData = {
 }
 assert.equal(normalizeExcerpt('a\n\nb'), 'a\nb')
 assert.equal(planSync(blankBook, buildNote(blankBook, 'blank', null)).changes.length, 0, '空行差异不应算改动')
+
+// 22. frontmatter 统计字段：新笔记直接写全，老笔记刷新时补齐且不动用户字段
+const metaNote = buildNote(syncBook, 'sync-book', null, null, {
+	annotations: 2,
+	format: 'EPUB',
+	progress: 42,
+	status: '在读',
+	seconds: 720,
+	lastRead: new Date('2026-11-06T12:00:00Z').getTime(),
+	publisher: '某出版社',
+})
+for (const line of [
+	'grove-annotations: 2',
+	'grove-format: "EPUB"',
+	'grove-progress: 42',
+	'grove-status: "在读"',
+	'grove-seconds: 720',
+	'grove-last-read: 2026-11-06',
+	'grove-publisher: "某出版社"',
+]) assert.ok(metaNote.includes(line), '缺少字段 ' + line)
+const withUserField = metaNote.replace('grove-book: sync-book', 'grove-book: sync-book\ncustom-field: keep-me')
+const refreshed = buildNote(syncBook, 'sync-book', withUserField, null, { annotations: 3 })
+assert.ok(refreshed.includes('custom-field: keep-me'), '不能删掉用户自定义字段')
+assert.ok(refreshed.includes('grove-annotations: 3'), '统计字段应更新')
+
+// 23. Canvas 卡片：正文结构、排布不重叠、坏文件不静默清空
+const cardText = buildCardText(
+	{ id: 'aa11', cfi: 'txt:1-9', text: '第一行\n第二行', color: 'yellow', note: '我的评论', createdAt: 1, updatedAt: 1 },
+	'测试书',
+	'[[笔记#^grove-aa11|打开笔记]]',
+)
+assert.ok(cardText.includes('> 第一行') && cardText.includes('> 第二行'), '摘录应转成引用块')
+assert.ok(cardText.includes('我的评论'), '评论应带上')
+assert.ok(cardText.includes('打开笔记'), '应带回笔记链接')
+
+const canvasDoc = emptyCanvas()
+const added = appendCards(canvasDoc, [{ text: 'a' }, { text: 'b' }, { text: 'c' }, { text: 'd', color: '3' }])
+assert.equal(added, 4)
+assert.equal(canvasDoc.nodes.length, 4)
+const [n0, n1, n2, n3] = canvasDoc.nodes
+assert.equal(n0.y, n1.y, '前三个同行')
+assert.ok(n3.y > n0.y, '第四个换行')
+assert.ok(n0.x + n0.width <= n1.x, '卡片左右不能重叠')
+assert.equal(n3.color, '3')
+const round = parseCanvas(serializeCanvas(canvasDoc))
+assert.equal(round.nodes.length, 4)
+let threw = false
+try { parseCanvas('not json') } catch { threw = true }
+assert.ok(threw, '坏文件应抛错而不是清空')
+
+// 24. 卡片抬头取短书名，别让整段副标题占满第一行
+assert.equal(shortTitle('枪炮、病菌与钢铁（全新版本，重磅上市）'), '枪炮、病菌与钢铁')
+assert.equal(shortTitle('置身事内：中国政府与经济发展'), '置身事内')
 
 console.log('SMOKE OK')

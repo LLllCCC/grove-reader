@@ -1550,6 +1550,7 @@ export class TextView extends ItemView {
 				void navigator.clipboard.writeText(a.text).then(() => new Notice('Grove Reader：已复制'))
 			},
 			onDelete: () => this.#confirmDelete(a),
+			onSendToCanvas: () => void this.plugin.exportToCanvas(this, [a.id]),
 		})
 	}
 

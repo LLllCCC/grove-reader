@@ -1,11 +1,11 @@
 import { App, AbstractInputSuggest, FuzzySuggestModal, Modal, Notice, TFile, TFolder } from 'obsidian'
-import { colorName, isShelfExt } from './types'
+import { Annotation, colorName, isShelfExt } from './types'
 import { colorDot, normalizeTerms, searchDocs } from './search'
 import type { SearchDoc } from './search'
 import type { BookList } from './lists'
 import { todayKey } from './stats'
 import type GroveReaderPlugin from './main'
-import { basenameOf, cleanBookTitle } from './util'
+import { basenameOf, cleanBookTitle, truncate } from './util'
 import type { OpEntry } from './oplog'
 import type { HealthReport } from './health'
 import type { SyncChange, SyncPlan } from './noteSync'
@@ -74,6 +74,8 @@ export class ConfirmModal extends Modal {
 		app: App,
 		private message: string,
 		private onConfirm: () => void,
+		private okText = '删除',
+		private okClass = 'mod-warning',
 	) {
 		super(app)
 	}
@@ -83,7 +85,7 @@ export class ConfirmModal extends Modal {
 		this.contentEl.createEl('h3', { text: '确认操作' })
 		this.contentEl.createEl('p', { text: this.message })
 		const buttons = this.contentEl.createDiv('modal-button-container')
-		const ok = buttons.createEl('button', { text: '删除', cls: 'mod-warning' })
+		const ok = buttons.createEl('button', { text: this.okText, cls: this.okClass })
 		ok.addEventListener('click', () => {
 			this.onConfirm()
 			this.close()
@@ -1229,4 +1231,119 @@ function changeKey(c: SyncChange): string {
 function collapse(text: string): string {
 	const one = (text || '').replace(/\s+/g, ' ').trim()
 	return one.length > 42 ? `${one.slice(0, 42)}…` : one
+}
+
+// ------------------------------------------------------------------
+// 批注 → Canvas
+// ------------------------------------------------------------------
+
+export interface CanvasTarget {
+	path: string
+	name: string
+}
+
+export interface CanvasExportPayload {
+	ids: string[]
+	/** 已有画布的路径；新建时为空 */
+	target: string
+	/** 新建画布的文件名（不含 .canvas） */
+	name: string
+}
+
+/** 选批注 + 选目标画布；导出逻辑留给 main，弹窗只负责收集意图 */
+export class CanvasExportModal extends Modal {
+	constructor(
+		app: App,
+		private bookTitle: string,
+		private annotations: Annotation[],
+		private canvases: CanvasTarget[],
+		private defaultName: string,
+		private onExport: (payload: CanvasExportPayload) => void,
+	) {
+		super(app)
+	}
+
+	onOpen(): void {
+		this.contentEl.empty()
+		this.contentEl.createEl('h3', { text: '发送批注到 Canvas' })
+		this.contentEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: `从《${this.bookTitle}》选择要导出的批注：卡片含摘录、评论、回笔记与回原文链接。`,
+		})
+
+		const selected = new Set(this.annotations.map(a => a.id))
+		const toolbar = this.contentEl.createDiv('grove-canvas-toolbar')
+		const countEl = toolbar.createSpan('grove-canvas-count')
+		const allBtn = toolbar.createEl('button', { text: '全选', cls: 'grove-manage-btn' })
+		const noneBtn = toolbar.createEl('button', { text: '全不选', cls: 'grove-manage-btn' })
+
+		const list = this.contentEl.createDiv('grove-sync-list grove-canvas-list')
+		const boxes: HTMLInputElement[] = []
+		for (const a of this.annotations) {
+			const item = list.createDiv('grove-sync-item')
+			const box = item.createEl('input', { type: 'checkbox' })
+			box.checked = true
+			boxes.push(box)
+			box.addEventListener('change', () => {
+				if (box.checked) selected.add(a.id)
+				else selected.delete(a.id)
+				syncCount()
+			})
+			const body = item.createDiv('grove-sync-body')
+			const head = body.createDiv('grove-sync-head')
+			head.createSpan('grove-sync-field').setText(a.chapter || '未分章')
+			head.createSpan('grove-canvas-page').setText(a.pdf?.page ? `第 ${a.pdf.page} 页` : '')
+			body.createDiv('grove-canvas-excerpt').setText(truncate(a.text.replace(/\s+/g, ' '), 100))
+		}
+
+		const targetRow = this.contentEl.createDiv('grove-canvas-target')
+		const select = targetRow.createEl('select', { cls: 'dropdown' })
+		select.createEl('option', { value: '__new__', text: '新建画布' })
+		for (const c of this.canvases) select.createEl('option', { value: c.path, text: `追加到：${c.name}` })
+		const nameInput = targetRow.createEl('input', { type: 'text', cls: 'grove-folder-input' })
+		nameInput.value = this.defaultName
+		nameInput.placeholder = '画布名称'
+		select.addEventListener('change', () => {
+			nameInput.toggleClass('grove-hidden', select.value !== '__new__')
+		})
+
+		allBtn.addEventListener('click', () => {
+			for (const b of boxes) b.checked = true
+			for (const a of this.annotations) selected.add(a.id)
+			syncCount()
+		})
+		noneBtn.addEventListener('click', () => {
+			for (const b of boxes) b.checked = false
+			selected.clear()
+			syncCount()
+		})
+
+		const buttons = this.contentEl.createDiv('modal-button-container')
+		const cancel = buttons.createEl('button', { text: '取消' })
+		cancel.addEventListener('click', () => this.close())
+		const ok = buttons.createEl('button', { text: '导出', cls: 'mod-cta' })
+		const syncCount = (): void => {
+			countEl.setText(`已选 ${selected.size} / ${this.annotations.length}`)
+			ok.setText(`导出（${selected.size}）`)
+			ok.disabled = selected.size === 0
+		}
+		syncCount()
+		ok.addEventListener('click', () => {
+			const name = nameInput.value.trim()
+			if (select.value === '__new__' && !name) {
+				new Notice('Grove Reader：请先给新画布起个名字')
+				return
+			}
+			this.onExport({
+				ids: [...selected],
+				target: select.value === '__new__' ? '' : select.value,
+				name,
+			})
+			this.close()
+		})
+	}
+
+	onClose(): void {
+		this.contentEl.empty()
+	}
 }

@@ -2864,3 +2864,52 @@
 	padding: 10px 4px;
 	color: var(--text-muted);
 }
+
+/* ---- 批注 → Canvas 弹窗 ---- */
+
+.grove-canvas-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 6px 0;
+}
+
+.grove-canvas-count {
+	flex: 1;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-canvas-list {
+	max-height: 38vh;
+}
+
+.grove-canvas-excerpt {
+	margin-top: 2px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.45;
+}
+
+.grove-canvas-page {
+	flex: none;
+	margin-left: 6px;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-canvas-target {
+	display: flex;
+	gap: 8px;
+	margin: 10px 0 4px;
+}
+
+.grove-canvas-target .dropdown {
+	flex: none;
+	max-width: 55%;
+}
+
+.grove-canvas-target input {
+	flex: 1;
+	min-width: 0;
+}

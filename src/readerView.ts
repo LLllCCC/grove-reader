@@ -860,6 +860,8 @@ export class ReaderView extends ItemView {
 		})
 		menu.addSeparator()
 		menu.addItem(item =>
+			item.setTitle('发送到 Canvas').setIcon('layout-dashboard').onClick(() => void this.plugin.exportToCanvas(this, [a.id])))
+		menu.addItem(item =>
 			item.setTitle('复制原文').setIcon('copy').onClick(() => {
 				void navigator.clipboard.writeText(a.text)
 				new Notice('Grove Reader：已复制')

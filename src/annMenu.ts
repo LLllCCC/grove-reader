@@ -12,6 +12,8 @@ export interface AnnMenuActions {
 	onChangeColor: (color: string) => void
 	onCopyText: () => void
 	onDelete: () => void
+	/** 有值时才显示「发送到 Canvas」 */
+	onSendToCanvas?: () => void
 }
 
 let currentMenu: HTMLElement | null = null
@@ -68,8 +70,9 @@ export function showAnnMenu(
 	const rows: Array<{ icon: string; label: string; run: () => void }> = [
 		{ icon: 'message-square', label: '编辑评论', run: actions.onEditComment },
 		{ icon: 'copy', label: '复制原文', run: actions.onCopyText },
-		{ icon: 'trash-2', label: '删除批注', run: actions.onDelete },
 	]
+	if (actions.onSendToCanvas) rows.push({ icon: 'layout-dashboard', label: '发送到 Canvas', run: actions.onSendToCanvas })
+	rows.push({ icon: 'trash-2', label: '删除批注', run: actions.onDelete })
 	for (const row of rows) {
 		const item = document.createElement('div')
 		item.className = 'grove-ann-menu-item'
