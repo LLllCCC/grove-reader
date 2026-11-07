@@ -22,6 +22,8 @@ Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / c
 | 批注列表 | 工具栏列表按钮，点击条目跳回原文，可改色 / 删除 |
 | 目录 | 工具栏下拉框 |
 | 生成笔记 | 工具栏笔记按钮或命令「生成 / 更新阅读笔记」，保存到设置中的笔记文件夹 |
+| 发送到 Canvas | 命令「把批注发送到 Canvas…」：勾选批注导出成画布卡片，可新建画布或追加到已有画布；EPUB 批注菜单与 TXT 划词菜单也有「发送到 Canvas」；卡片色跟随高亮色，按 3 列排布，含摘录、评论、回笔记与回原文链接 |
+| Dataview 字段 | 每份笔记的 frontmatter 会写 `grove-annotations` / `grove-format` / `grove-progress` / `grove-status` / `grove-seconds` / `grove-last-read` / `grove-publisher`，可直接用 Dataview 或 Bases 查询 |
 | 从笔记回写批注 | 命令「从笔记同步批注…」：把笔记里改过的摘录 / 评论写回批注数据，先列差异、逐项勾选；笔记里删掉的条目不会删批注；笔记文件夹改过导致路径失效时按书名与 frontmatter 自动找回 |
 | 全文搜索 | 侧栏「全文搜索」输入关键词回车（EPUB / PDF / TXT 同一入口）；TXT 八百万字实测约 60ms，结果带页码，点击跳转并把命中处标黄 |
 | 阅读目标与热力图 | 阅读统计查看今日/连续/活跃/累计，最近 12 周热力图；设置 → 阅读与笔记 → 每日阅读目标 |
@@ -69,6 +71,31 @@ Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / c
 - 想改评论或摘录，直接编辑生成区里的 `%%` 块 / 引用块，再用命令「从笔记同步批注…」回写。
 - 笔记里有还没回写的改动时，**自动更新会跳过这份笔记并提示**，不会把你的编辑覆盖掉。
 
+### Dataview 字段
+
+笔记 frontmatter 里插件维护的字段（每次生成/刷新自动更新，用户自己加的字段原样保留）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `grove-book` | 书籍 id（同名书认领笔记用） |
+| `grove-annotations` | 批注条数 |
+| `grove-format` | EPUB / PDF / TXT 等 |
+| `grove-progress` | 阅读进度 0–100 |
+| `grove-status` | 想读 / 在读 / 读完（按进度推） |
+| `grove-seconds` | 累计阅读秒数 |
+| `grove-last-read` | 最近阅读日期 `YYYY-MM-DD` |
+| `grove-publisher` | 出版社（书架里有才写） |
+
+示例查询：
+
+```dataview
+TABLE grove-annotations AS 批注, grove-progress AS 进度, grove-status AS 状态, grove-seconds AS 秒
+FROM "Grove Reader/阅读笔记"
+SORT grove-last-read DESC
+```
+
+已有笔记可以用命令「刷新全部阅读笔记（补齐统计字段）」一次性补上。
+
 ## 数据安全（个人自用优先级最高项）
 
 - 每本书一个 JSON，默认在 `.obsidian/plugins/grove-reader/data/books/<bookId>.json`；设置 → 数据与维护 → **数据文件夹** 可把整个 `data/` 改到库内普通文件夹（填 `Grove Reader` 时实际写入 `Grove Reader/data/`），便于随库同步与备份。修改后点 **「迁移数据…」** 自动复制到新位置并重启 Obsidian；旧数据不会自动删除，`.trash` 回收站不随迁移复制；Markdown 笔记只是导出视图，JSON 才是数据源头；
@@ -111,5 +138,5 @@ Grove Reader/
 ## 路线图（对应两轮规划收敛后的优先级）
 
 - **P1**：全书内搜索、批注管理增强（多选/导出）、PDF 批注摘要页签
-- **P2**：笔记 → 批注回写（已完成手动回写，2026-11-06）、Canvas 卡片、Dataview 查询字段
+- **P2**：笔记 → 批注回写（2026-11-06 手动回写）、Canvas 卡片（2026-11-07）、Dataview 字段（2026-11-07）均已完成；剩余 Canvas 卡片回写、Bases 视图模板
 - **P3**：AI 助手、移动端、增量阅读
