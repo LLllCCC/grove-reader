@@ -63,3 +63,15 @@
 4. `fs.statSync(...).size` → `app.vault.getAbstractFileByPath(rel) as TFile` 的 `stat.size`（同步）。
 5. `fs.existsSync(abs)` → 库内用 `getAbstractFileByPath`，库外用 `isAbsolutePath` + 桌面端 fs。
 6. 改完 `bookshelf.ts` 后，`main.ts` 的 `new ShelfCache(...)` 要传 io，并 `await shelfCache.load()`。
+
+## 剩余阻塞（2026-11-08 19:10）
+
+手机端加载前还剩三个顶层 `node:` 模块：
+
+| 文件 | 顶层导入 | 处理方案 |
+|---|---|---|
+| `main.ts` | `node:fs` / `node:fs/promises` / `node:path`（89 处引用） | 拆 `desktopFs.ts`：备份导出、数据迁移、库外字节读取这些只在桌面用的逻辑整体搬出去，动态 import；路径拼接统一换 `joinPath`；库内读文件走 `io.readBinary` |
+| `pdfView.ts` | `node:path` / `node:fs/promises` | PDF 视图改桌面端动态注册，手机端不加载（里程碑 A 明确不做 PDF） |
+| `trash.ts` / `health.ts` | `node:fs` / `node:path` | 回收站与体检改 PlatformIO；手机端可先隐藏入口，B 阶段再补 |
+
+顺序建议：`trash/health`（小）→ `pdfView`（动态注册）→ `main.ts`（最后、最大）→ 改 `isDesktopOnly` → 独立测试库真机验证。
