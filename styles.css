@@ -3013,3 +3013,8 @@ body.is-mobile .grove-page-btns {
 body.is-mobile .grove-jump-return {
 	bottom: calc(16px + 64px);
 }
+
+/* 移动端：回跳胶囊同样避开 Obsidian 底部悬浮栏 */
+body.is-mobile .grove-jump-return {
+	bottom: calc(16px + 64px);
+}
