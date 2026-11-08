@@ -2959,3 +2959,27 @@
 .grove-hidden-book {
 	padding: 2px 0;
 }
+
+/* 颜色竖排（EPUB 批注菜单） */
+.grove-ann-menu-colors.is-column {
+	flex-direction: column;
+	align-items: stretch;
+	gap: 2px;
+	padding-bottom: 6px;
+}
+
+.grove-ann-menu-colors.is-column .grove-ann-menu-color {
+	justify-content: flex-start;
+}
+
+/* 颜色竖排（EPUB 批注菜单） */
+.grove-ann-menu-colors.is-column {
+	flex-direction: column;
+	align-items: stretch;
+	gap: 2px;
+	padding-bottom: 6px;
+}
+
+.grove-ann-menu-colors.is-column .grove-ann-menu-color {
+	justify-content: flex-start;
+}

@@ -34,6 +34,7 @@ export function showAnnMenu(
 	ev: { clientX: number; clientY: number },
 	activeColor: string,
 	actions: AnnMenuActions,
+	options: { colorsLayout?: 'row' | 'column' } = {},
 ): void {
 	closeAnnMenu()
 
@@ -43,6 +44,7 @@ export function showAnnMenu(
 
 	const colors = document.createElement('div')
 	colors.className = 'grove-ann-menu-colors'
+	if (options.colorsLayout === 'column') colors.classList.add('is-column')
 	for (const c of HIGHLIGHT_COLORS) {
 		const item = document.createElement('div')
 		item.className = 'grove-ann-menu-color'

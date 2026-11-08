@@ -859,7 +859,7 @@ export class ReaderView extends ItemView {
 			},
 			onSendToCanvas: () => void this.plugin.exportToCanvas(this, [a.id]),
 			onDelete: () => this.#confirmDelete(a),
-		})
+		}, { colorsLayout: 'column' })
 	}
 
 	// ------------------------------------------------------------------
