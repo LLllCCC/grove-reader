@@ -2983,3 +2983,14 @@
 .grove-ann-menu-colors.is-column .grove-ann-menu-color {
 	justify-content: flex-start;
 }
+
+/* 原生批注菜单里的颜色圆点 */
+.grove-menu-color-dot {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	margin-right: 6px;
+	flex: none;
+	align-self: center;
+}
