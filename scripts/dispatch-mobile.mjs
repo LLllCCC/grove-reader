@@ -50,6 +50,12 @@ if (process.argv.includes('--login')) {
 	console.log('▶ 工作目录:', repo)
 	console.log('▶ 任务书: docs/mobile-port.md\n')
 
+	if (process.argv.includes('--dry-run')) {
+		console.log('（--dry-run 只打印参数，不真正派活）')
+		console.log(JSON.stringify(args, null, 1))
+		process.exit(0)
+	}
+
 	const child = spawn(process.execPath, args, { stdio: 'inherit', cwd: repo })
 	child.on('exit', code => {
 		if (code === 0) {
