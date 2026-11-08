@@ -1,8 +1,6 @@
 import { ItemView, Menu, Notice, WorkspaceLeaf, requestUrl, setIcon } from 'obsidian'
 import type { TAbstractFile } from 'obsidian'
 import { TFile } from 'obsidian'
-import fs from 'node:fs'
-import pathModule from 'node:path'
 import { shell } from 'electron'
 import { makeBook } from '../lib/foliate-js/view.js'
 import type GroveReaderPlugin from './main'
@@ -312,45 +310,19 @@ function arrayBufferToBase64(buf: ArrayBuffer): string {
 // 扫描
 // ------------------------------------------------------------------
 
-export function scanBookFolders(folders: string[], vaultBase: string): string[] {
-	const found: string[] = []
-	const seen = new Set<string>()
-
-	const walk = (dir: string, depth: number): void => {
-		if (depth > 6) return
-		let list: fs.Dirent[]
-		try {
-			list = fs.readdirSync(dir, { withFileTypes: true })
-		} catch {
-			return
-		}
-		for (const item of list) {
-			if (item.name.startsWith('.')) continue
-			const full = pathModule.join(dir, item.name)
-			if (item.isDirectory()) {
-				walk(full, depth + 1)
-			} else if (item.isFile() && isShelfExt(item.name.split('.').pop()?.toLowerCase() ?? '')) {
-				if (!seen.has(full)) {
-					seen.add(full)
-					found.push(full)
-				}
-			}
-		}
-	}
-
+export function scanBookFolders(folders: string[], vaultFiles: string[]): string[] {
+	const found = new Set<string>()
 	for (const folder of folders) {
-		const abs = isAbsolutePath(folder) ? folder : pathModule.join(vaultBase, folder)
-		walk(abs, 0)
+		const prefix = folder.replace(/\\/g, '/').replace(/\/+$/, '')
+		// 库外绝对路径在移动端无法访问，也不再走桌面 fs；这类书改为「打开书籍…」手动添加
+		if (isAbsolutePath(prefix)) continue
+		for (const file of vaultFiles) {
+			if (!file.startsWith(`${prefix}/`)) continue
+			if (file.slice(prefix.length + 1).split('/').length > 7) continue
+			if (isShelfExt(file.split('.').pop()?.toLowerCase() ?? '')) found.add(file)
+		}
 	}
-
-	// 库内文件统一转换为库相对路径（与选书器、批注数据的 bookPath 一致）
-	return found
-		.map(abs => {
-			const rel = pathModule.relative(vaultBase, abs)
-			if (rel && !rel.startsWith('..') && !pathModule.isAbsolute(rel)) return rel.split(pathModule.sep).join('/')
-			return abs
-		})
-		.sort()
+	return [...found].sort()
 }
 
 // ------------------------------------------------------------------
@@ -568,7 +540,7 @@ export class BookshelfView extends ItemView {
 	#scan(folders: string[]): string[] {
 		const key = folders.join('\u0000')
 		if (!this.scanCache || this.scanCache.key !== key || this.scanCache.token !== this.scanToken) {
-			this.scanCache = { key, token: this.scanToken, paths: scanBookFolders(folders, this.plugin.vaultBase) }
+			this.scanCache = { key, token: this.scanToken, paths: scanBookFolders(folders, this.app.vault.getFiles().map(f => f.path)) }
 		}
 		return this.scanCache.paths
 	}
@@ -786,11 +758,8 @@ export class BookshelfView extends ItemView {
 			let candidates = free.filter(p => basenameOf(p) === basenameOf(oldPath))
 			if (!candidates.length && entry.size != null) {
 				candidates = free.filter(p => {
-					try {
-						return fs.statSync(this.#absPath(p)).size === entry.size
-					} catch {
-						return false
-					}
+					const f = this.app.vault.getAbstractFileByPath(p)
+					return f instanceof TFile && entry.size !== undefined && f.stat.size === entry.size
 				})
 			}
 			if (candidates.length !== 1) continue
@@ -810,7 +779,7 @@ export class BookshelfView extends ItemView {
 			if (entry.customCover || entry.manualMeta) continue
 			let gone = false
 			try {
-				gone = !fs.existsSync(this.#absPath(oldPath))
+				gone = !this.app.vault.getAbstractFileByPath(oldPath)
 			} catch {
 				continue
 			}
@@ -909,7 +878,7 @@ export class BookshelfView extends ItemView {
 		const title = this.#displayTitle(path)
 		const data = this.plugin.store.load(path)
 		const count = data.annotations?.length ?? 0
-		const notePath = data.notePath && fs.existsSync(this.#absPath(data.notePath)) ? data.notePath : undefined
+		const notePath = data.notePath && this.app.vault.getAbstractFileByPath(data.notePath) ? data.notePath : undefined
 		const noteName = notePath ? basenameOf(notePath) : undefined
 		new DeleteBookModal(this.app, title, count, noteName, async (deleteFile, deleteNote) => {
 			const closed = this.plugin.closeBookViews(path)
@@ -1127,11 +1096,8 @@ export class BookshelfView extends ItemView {
 	}
 
 	#fileSize(path: string): number | undefined {
-		try {
-			return fs.statSync(this.#absPath(path)).size
-		} catch {
-			return undefined
-		}
+		const f = this.app.vault.getAbstractFileByPath(path)
+		return f instanceof TFile ? f.stat.size : undefined
 	}
 
 	#scheduleTooltip(card: HTMLElement, text: string): void {
@@ -1184,13 +1150,10 @@ export class BookshelfView extends ItemView {
 		const existing = cache.get(path)
 		let mtime: number | undefined
 		let size: number | undefined
-		try {
-			const st = fs.statSync(this.#absPath(path))
-			mtime = st.mtimeMs
-			size = st.size
-		} catch {
-			return
-		}
+		const vf = this.app.vault.getAbstractFileByPath(path)
+		if (!(vf instanceof TFile)) return
+		mtime = vf.stat.mtime
+		size = vf.stat.size
 		const addedAt = existing?.addedAt ?? Date.now()
 		const ext = (path.split('.').pop() ?? '').toLowerCase()
 		// 缺 publisher 字段的旧电子书缓存视为不完整：下次刷新重解析补一次
@@ -1325,7 +1288,7 @@ export class BookshelfView extends ItemView {
 	}
 
 	#absPath(path: string): string {
-		return isAbsolutePath(path) ? path : pathModule.join(this.plugin.vaultBase, path)
+		return isAbsolutePath(path) ? path : joinPath(this.plugin.vaultBase, path)
 	}
 
 	async #runQueue(tasks: Array<() => Promise<void>>, limit: number): Promise<void> {
