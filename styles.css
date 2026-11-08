@@ -2994,3 +2994,17 @@
 	flex: none;
 	align-self: center;
 }
+
+/* 移动端：翻页按钮避开 Obsidian 自己的底部悬浮栏 */
+body.is-mobile .grove-page-btns {
+	bottom: calc(16px + 64px);
+	opacity: 1;
+	pointer-events: auto;
+}
+
+/* 移动端：翻页按钮避开 Obsidian 自己的底部悬浮栏 */
+body.is-mobile .grove-page-btns {
+	bottom: calc(16px + 64px);
+	opacity: 1;
+	pointer-events: auto;
+}
