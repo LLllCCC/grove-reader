@@ -5,11 +5,12 @@ import { open as openFile, stat as statFile, type FileHandle } from 'node:fs/pro
 import * as pdfjsLib from 'pdfjs-dist'
 import type { PDFDocumentProxy, PDFWorker } from 'pdfjs-dist'
 import type GroveReaderPlugin from './main'
-import { Annotation, BookData, HIGHLIGHT_COLORS, colorCss } from './types'
+import { Annotation, BookData, HIGHLIGHT_COLORS, VIEW_TYPE_GROVE_PDF, colorCss } from './types'
 import { CommentModal, ConfirmModal } from './modals'
 import { basenameOf, isAbsolutePath, normalizeSelectionText, randomId, truncate } from './util'
 
-export const VIEW_TYPE_GROVE_PDF = 'grove-pdf-view'
+/** 常量定义在 types.ts（main.ts 不 import 本模块也要能判断 PDF 视图），这里保持原导出名 */
+export { VIEW_TYPE_GROVE_PDF }
 
 // pdf.worker 模块被 import 时会自注册 globalThis.pdfjsWorker（毒化 Obsidian 原生
 // PDF 视图：其自带 pdfjs 版本与我们的不一致直接冲突），必须立即清除。

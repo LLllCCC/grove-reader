@@ -1,7 +1,4 @@
-import { FileSystemAdapter, Notice, Plugin, TFile, TFolder, addIcon, normalizePath, setIcon } from 'obsidian'
-import fs from 'node:fs'
-import fsp from 'node:fs/promises'
-import pathModule from 'node:path'
+import { FileSystemAdapter, Notice, Platform, Plugin, TFile, TFolder, addIcon, normalizePath, setIcon } from 'obsidian'
 import { BookStore } from './store'
 import { ShelfCache } from './bookshelf'
 import { ListsStore } from './lists'
@@ -12,7 +9,6 @@ import {
 	DEFAULT_SETTINGS,
 	DEFAULT_SHELF_DISPLAY,
 	LIBRARY_ROOT,
-	LEGACY_LIBRARY_ROOT,
 	BookData,
 	NoteTemplate,
 	GroveSettings,
@@ -21,10 +17,10 @@ import {
 	ShelfBookInfo,
 	BACKUP_FOLDER_NAME,
 	FORMAT_LABELS,
+	VIEW_TYPE_GROVE_PDF,
 } from './types'
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
-import { PdfView, VIEW_TYPE_GROVE_PDF } from './pdfView'
 import { TextView, VIEW_TYPE_GROVE_TEXT } from './textView'
 import { BookPickerModal, CanvasExportModal, ConfirmModal, DangerConfirmModal, FolderPromptModal, HealthReportModal, NoteSyncModal, OpLogModal, ReadingStatsModal, PromptModal, SearchModal, TemplatePickerModal, TrashModal } from './modals'
 import type { CanvasExportPayload } from './modals'
@@ -39,13 +35,15 @@ import { usageDocMarkdown, USAGE_DOC_NAME } from './usageDoc'
 import { LOGO_OPTIONS, logoById } from './logos'
 import { OpLog } from './oplog'
 import { createPlatformIO } from './platformFactory'
-import { joinPath } from './platformIO'
+import { PlatformIO, joinPath } from './platformIO'
 import { DebugLog } from './debugLog'
-import { buildHealthReport, healthCleanupCount, HealthReport } from './health'
-import { TrashStore } from './trash'
 import { buildSearchIndex, exportCsv, exportMarkdown } from './search'
 import type { SearchDoc } from './search'
-import { shell } from 'electron'
+// 以下模块只在桌面端动态加载（它们 import Node fs / Node path / electron），
+// 这里只取类型，不会在运行期被 require。
+import type { PdfView } from './pdfView'
+import type { TrashStore } from './trash'
+import type { HealthReport } from './health'
 
 export default class GroveReaderPlugin extends Plugin {
 	settings: GroveSettings = { ...DEFAULT_SETTINGS, appearance: { ...DEFAULT_APPEARANCE } }
@@ -55,7 +53,12 @@ export default class GroveReaderPlugin extends Plugin {
 	stats!: StatsStore
 	oplog!: OpLog
 	debugLog!: DebugLog
-	trash!: TrashStore
+	/** 回收站需要 Node fs，只在桌面端构造；移动端为 null */
+	trash: TrashStore | null = null
+	/** 跨平台文件层：桌面端是 Node fs，移动端是 vault.adapter */
+	io!: PlatformIO
+	/** 桌面专属 fs 模块（Node fs），只在桌面端 onload 里动态加载 */
+	private desktopFs: typeof import('./desktopFs') | null = null
 	vaultBase = ''
 	/** 插件安装目录（data.json 在这里，不随数据目录迁移） */
 	pluginDir = ''
@@ -66,31 +69,41 @@ export default class GroveReaderPlugin extends Plugin {
 	private persistTimer: number | null = null
 	private ribbonEl: HTMLElement | null = null
 
+	/** 手机端（含手机 App）：回收站/体检/PDF/库外路径等桌面能力全部禁用 */
+	get isMobile(): boolean {
+		return Platform.isMobile || Platform.isMobileApp
+	}
+
 	async onload(): Promise<void> {
 		await this.loadSettings()
 		for (const option of LOGO_OPTIONS) {
 			if (option.icon) addIcon(`grove-logo-${option.id}`, option.icon)
 		}
 		const adapter = this.app.vault.adapter
-		if (adapter instanceof FileSystemAdapter) this.vaultBase = adapter.getBasePath()
-		const pluginDirRel = this.manifest.dir || pathModule.join('.obsidian', 'plugins', this.manifest.id)
-		this.pluginDir = this.vaultBase ? pathModule.join(this.vaultBase, pluginDirRel) : pluginDirRel
-		// 旧实例可能把 data.json 写回迁移前的路径：启动时按实际目录自动纠正
-		this.adoptMigratedFolders()
+		if (!this.isMobile && adapter instanceof FileSystemAdapter) this.vaultBase = adapter.getBasePath()
+		const pluginDirRel = this.manifest.dir || joinPath('.obsidian', 'plugins', this.manifest.id)
+		this.pluginDir = this.vaultBase ? joinPath(this.vaultBase, pluginDirRel) : pluginDirRel
+		if (!this.isMobile) this.desktopFs = await import('./desktopFs')
+		// 旧实例可能把 data.json 写回迁移前的路径：启动时按实际目录自动纠正（需读磁盘，仅桌面端）
+		await this.adoptMigratedFolders()
 		// 数据目录可迁到库内普通文件夹（便于随库同步/备份）；留空则沿用插件目录
 		const dataFolder = this.settings.dataFolder?.trim()
 		this.dataRoot = dataFolder
-			? (this.vaultBase ? pathModule.join(this.vaultBase, normalizePath(dataFolder)) : normalizePath(dataFolder))
+			? (this.vaultBase ? joinPath(this.vaultBase, normalizePath(dataFolder)) : normalizePath(dataFolder))
 			: this.pluginDir
 		const io = await createPlatformIO(this.app)
+		this.io = io
 		this.oplog = new OpLog(this.dataRoot, io)
 		await this.oplog.load()
 		this.debugLog = new DebugLog(this.dataRoot, io, this.settings.debugMode)
-		this.trash = new TrashStore(this.dataRoot, this.vaultBase)
-		const purged = this.trash.purgeExpired()
-		if (purged) {
-			this.oplog.add('回收站清理', `自动清理 ${purged} 项`)
-			this.debug('trash', 'purge expired', { count: purged })
+		if (!this.isMobile) {
+			const { TrashStore } = await import('./trash')
+			this.trash = new TrashStore(this.dataRoot, this.vaultBase)
+			const purged = this.trash.purgeExpired()
+			if (purged) {
+				this.oplog.add('回收站清理', `自动清理 ${purged} 项`)
+				this.debug('trash', 'purge expired', { count: purged })
+			}
 		}
 		this.store = new BookStore(this.dataRoot, this.settings.maxBackups, io)
 		await this.store.preload()
@@ -114,8 +127,12 @@ export default class GroveReaderPlugin extends Plugin {
 
 		this.registerView(VIEW_TYPE_GROVE_READER, leaf => new ReaderView(leaf, this))
 		this.registerView(VIEW_TYPE_GROVE_BOOKSHELF, leaf => new BookshelfView(leaf, this))
-		this.registerView(VIEW_TYPE_GROVE_PDF, leaf => new PdfView(leaf, this))
 		this.registerView(VIEW_TYPE_GROVE_TEXT, leaf => new TextView(leaf, this))
+		// PDF 视图依赖 Node fs / pdfjs 的 worker，只在桌面端注册；手机端打开 PDF 给提示
+		if (!this.isMobile) {
+			const { PdfView } = await import('./pdfView')
+			this.registerView(VIEW_TYPE_GROVE_PDF, leaf => new PdfView(leaf, this))
+		}
 		// 注册扩展名：电子书文件会显示在文件列表中，点击直接用阅读器打开
 		// 注意：pdf 不注册——保持 Obsidian 原生双击行为，PDF 经书架/协议进入插件
 		this.registerExtensions(SUPPORTED_BOOK_EXTS, VIEW_TYPE_GROVE_READER)
@@ -185,12 +202,18 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	async openDebugLog(): Promise<void> {
+		if (this.isMobile) {
+			new Notice(`${APP_NAME}：手机端暂不支持打开调试日志文件`)
+			return
+		}
 		if (!this.settings.debugMode) {
 			new Notice(`${APP_NAME}：请先开启调试模式`)
 			return
 		}
 		this.debug('app', 'open debug log')
 		try {
+			// 桌面端才有 electron：延迟 require，避免手机端加载插件时就 require('electron')
+			const { shell } = require('electron') as typeof import('electron')
 			await shell.openPath(this.debugLog.path())
 		} catch (e) {
 			new Notice(`${APP_NAME}：无法打开日志文件（${e instanceof Error ? e.message : String(e)}）`)
@@ -199,6 +222,7 @@ export default class GroveReaderPlugin extends Plugin {
 
 	/** 每天/每周首次启动时自动备份；时间戳先落盘，避免同一天重复执行 */
 	async maybeAutoBackup(): Promise<void> {
+		if (this.isMobile) return
 		const mode = this.settings.autoBackup
 		if (mode !== 'daily' && mode !== 'weekly') return
 		const interval = mode === 'daily' ? 86_400_000 : 7 * 86_400_000
@@ -209,18 +233,28 @@ export default class GroveReaderPlugin extends Plugin {
 		await this.exportDataBackup()
 	}
 
-	/** 数据体检：只读扫描，不删任何东西 */
+	/** 数据体检：只读扫描，不删任何东西（依赖 Node fs，仅桌面端） */
 	showHealthReport(): void {
+		if (this.isMobile) {
+			new Notice(`${APP_NAME}：手机端暂不支持数据体检`)
+			return
+		}
+		void this.#runHealthReport()
+	}
+
+	async #runHealthReport(): Promise<void> {
+		const { buildHealthReport, healthCleanupCount } = await import('./health')
 		const report = buildHealthReport(this.vaultBase, this.dataRoot, this.settings.notesFolder)
 		this.debug('health', 'scan', {
 			json: report.jsonCount,
 			missingBooks: report.missingBooks.length,
 			missingNotes: report.missingNotes.length,
 		})
-		new HealthReportModal(this.app, report, healthCleanupCount(report, this.vaultBase), () => this.confirmCleanupHealth(report)).open()
+		new HealthReportModal(this.app, report, healthCleanupCount(report, this.vaultBase), () => void this.confirmCleanupHealth(report)).open()
 	}
 
-	private confirmCleanupHealth(report: HealthReport): void {
+	private async confirmCleanupHealth(report: HealthReport): Promise<void> {
+		const { healthCleanupCount } = await import('./health')
 		const count = healthCleanupCount(report, this.vaultBase)
 		if (!count) {
 			new Notice(`${APP_NAME}：没有可清理的失效引用`)
@@ -229,7 +263,7 @@ export default class GroveReaderPlugin extends Plugin {
 		new ConfirmModal(
 			this.app,
 			`将移除 ${count} 项失效引用（书架缓存、书单、统计、笔记路径），不会删除任何书籍或批注 JSON。继续？`,
-			() => this.cleanupHealth(report),
+			() => void this.cleanupHealth(report),
 		).open()
 	}
 
@@ -250,8 +284,10 @@ export default class GroveReaderPlugin extends Plugin {
 		}
 		for (const issue of report.missingNotes) {
 			if (!issue.bookPath) continue
-			const abs = isAbsolutePath(issue.bookPath) ? issue.bookPath : pathModule.join(this.vaultBase, issue.bookPath)
-			if (!fs.existsSync(abs)) continue
+			const exists = isAbsolutePath(issue.bookPath)
+				? (this.desktopFs?.pathExists(issue.bookPath) ?? false)
+				: this.app.vault.getAbstractFileByPath(issue.bookPath) !== null
+			if (!exists) continue
 			this.store.clearNotePath(issue.bookPath)
 			removed++
 		}
@@ -264,11 +300,15 @@ export default class GroveReaderPlugin extends Plugin {
 		new Notice(`${APP_NAME}：已清理 ${removed} 项失效引用`)
 	}
 
-	/** 删除书籍时把书籍/笔记/批注/封面一起移入插件回收站 */
-	moveToTrash(bookPath: string, title: string, notePath?: string): void {
+	/**
+	 * 删除书籍时把书籍/笔记/批注/封面一起移入插件回收站。
+	 * 回收站需要 Node fs，手机端没有：返回 false，调用方按普通删除处理。
+	 */
+	moveToTrash(bookPath: string, title: string, notePath?: string): boolean {
+		if (!this.trash) return false
 		const entry = this.shelfCache.get(bookPath)
 		const dataFile = `${bookIdFor(bookPath)}.json`
-		const hasData = fs.existsSync(pathModule.join(this.dataRoot, 'data', 'books', dataFile))
+		const hasData = this.store.hasDataFor(bookPath)
 		this.trash.move({
 			title,
 			bookPath,
@@ -279,9 +319,14 @@ export default class GroveReaderPlugin extends Plugin {
 			statsEntry: this.stats.peek(bookPath) ?? null,
 			listId: this.lists.listIdOf(bookPath),
 		})
+		return true
 	}
 
 	async restoreTrash(id: string): Promise<void> {
+		if (!this.trash) {
+			new Notice(`${APP_NAME}：手机端暂不支持回收站`)
+			return
+		}
 		const entry = this.trash.restore(id)
 		this.shelfCache.set(entry.bookPath, entry.shelfEntry ?? {})
 		if (entry.statsEntry) this.stats.setBook(entry.bookPath, entry.statsEntry)
@@ -295,6 +340,10 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	purgeTrash(id: string): void {
+		if (!this.trash) {
+			new Notice(`${APP_NAME}：手机端暂不支持回收站`)
+			return
+		}
 		const entry = this.trash.list().find(e => e.id === id)
 		this.trash.purge(id)
 		this.oplog.add('回收站永久删除', entry ? `《${entry.title}》` : id)
@@ -303,6 +352,10 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	emptyTrash(): void {
+		if (!this.trash) {
+			new Notice(`${APP_NAME}：手机端暂不支持回收站`)
+			return
+		}
 		const count = this.trash.empty()
 		this.oplog.add('清空回收站', `${count} 项`)
 		this.debug('trash', 'empty', { count })
@@ -310,6 +363,10 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	showTrash(): void {
+		if (!this.trash) {
+			new Notice(`${APP_NAME}：手机端暂不支持回收站`)
+			return
+		}
 		new TrashModal(this.app, this).open()
 	}
 
@@ -320,14 +377,14 @@ export default class GroveReaderPlugin extends Plugin {
 
 	/** 书还在不在：库内走 vault 索引，库外绝对路径只在桌面端查磁盘 */
 	#bookFileExists(path: string): boolean {
-		if (isAbsolutePath(path)) {
-			try {
-				return fs.existsSync(path)
-			} catch {
-				return false
-			}
-		}
+		if (isAbsolutePath(path)) return this.desktopFs?.pathExists(path) ?? false
 		return this.app.vault.getAbstractFileByPath(path) !== null
+	}
+
+	/** 打开前确认文件存在：库内用索引，库外（仅桌面端）落盘查 */
+	#fileExistsOnDisk(path: string): boolean {
+		if (!this.desktopFs) return false
+		return this.desktopFs.pathExists(isAbsolutePath(path) ? path : joinPath(this.vaultBase, path))
 	}
 
 	showSearch(): void {
@@ -340,9 +397,10 @@ export default class GroveReaderPlugin extends Plugin {
 			return
 		}
 		const baseFolder = (this.settings.notesFolder?.trim() || '阅读笔记').replace(/\\/g, '/').replace(/\/+$/, '')
-		const folder = `${baseFolder}/批注检索`
+		const folder = normalizePath(`${baseFolder}/批注检索`)
 		try {
-			fs.mkdirSync(pathModule.join(this.vaultBase, folder), { recursive: true })
+			// 库内路径统一走 vault.adapter（桌面端 io 是 Node fs，只认绝对路径）
+			if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder)
 		} catch {
 			// 写文件时会再报错
 		}
@@ -350,10 +408,10 @@ export default class GroveReaderPlugin extends Plugin {
 		const p = (n: number): string => String(n).padStart(2, '0')
 		const base = `批注检索-${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`
 		const ext = format === 'md' ? 'md' : 'csv'
-		let target = `${folder}/${base}.${ext}`
+		let target = normalizePath(`${folder}/${base}.${ext}`)
 		let i = 2
-		while (this.app.vault.getAbstractFileByPath(target) || fs.existsSync(pathModule.join(this.vaultBase, target))) {
-			target = `${folder}/${base}-${i}.${ext}`
+		while (this.app.vault.getAbstractFileByPath(target) || await this.app.vault.adapter.exists(target)) {
+			target = normalizePath(`${folder}/${base}-${i}.${ext}`)
 			i++
 		}
 		const content = format === 'md' ? exportMarkdown(docs, query) : exportCsv(docs)
@@ -361,7 +419,7 @@ export default class GroveReaderPlugin extends Plugin {
 			await this.app.vault.create(target, content)
 		} catch {
 			try {
-				fs.writeFileSync(pathModule.join(this.vaultBase, target), content, 'utf-8')
+				await this.app.vault.adapter.write(target, content)
 			} catch (e) {
 				new Notice(`${APP_NAME}：导出失败（${e instanceof Error ? e.message : String(e)}）`)
 				return
@@ -375,67 +433,16 @@ export default class GroveReaderPlugin extends Plugin {
 	/**
 	 * 书库被整体迁到 <库>/Grove Reader/ 后，若设置里仍是旧路径（例如迁移时旧实例
 	 * 又把 data.json 写回去了），按磁盘实际情况自动接管，避免书架空白。
+	 * 需要直接读磁盘，只有桌面端能做；手机端跳过。
 	 */
-	private adoptMigratedFolders(): void {
-		if (!this.vaultBase) return
-		const root = pathModule.join(this.vaultBase, LIBRARY_ROOT)
-		const dataOk = fs.existsSync(pathModule.join(root, 'data', 'shelf.json'))
-		const booksDir = pathModule.join(root, '书籍')
-		const notesDir = pathModule.join(root, '阅读笔记')
-		const hasBooks = (dir: string): boolean => {
-			try {
-				return fs.readdirSync(dir).some(n => isShelfExt(pathModule.extname(n).slice(1)))
-			} catch {
-				return false
-			}
-		}
-		if (!dataOk && !hasBooks(booksDir) && !fs.existsSync(notesDir)) return
-
-		let changed = false
-		const configuredData = this.settings.dataFolder?.trim() ?? ''
-		const hasBookJson = (folder: string): boolean => {
-			try {
-				return fs.readdirSync(pathModule.join(folder, 'data', 'books')).some(n => n.endsWith('.json'))
-			} catch {
-				return false
-			}
-		}
-		// 配置的数据目录必须真的指向存在的书，否则视为迁移后的旧路径
-		const configuredDataOk = ((): boolean => {
-			if (!configuredData) return false
-			try {
-				const shelf = JSON.parse(fs.readFileSync(pathModule.join(this.vaultBase, configuredData, 'data', 'shelf.json'), 'utf-8')) as { entries?: Record<string, unknown> }
-				return Object.keys(shelf.entries ?? {}).some(k => fs.existsSync(pathModule.join(this.vaultBase, k)))
-			} catch {
-				return false
-			}
-		})()
-		// 旧目录可能被旧实例重建出 shelf.json（但没有 books/*.json），此时以有批注数据的目录为准；
-		// 但用户主动设置的其他自定义目录要尊重，只有空值或旧目录名才自动纠正
-		const canonicalHasData = hasBookJson(root)
-		const configuredHasData = configuredData ? hasBookJson(pathModule.join(this.vaultBase, configuredData)) : false
-		const configuredIsLegacy = !configuredData || configuredData === LEGACY_LIBRARY_ROOT || configuredData === LIBRARY_ROOT
-		if (dataOk && (!configuredDataOk || (configuredIsLegacy && canonicalHasData && !configuredHasData))) {
-			this.settings.dataFolder = LIBRARY_ROOT
-			changed = true
-		}
-		const foldersOk = (this.settings.scanFolders ?? []).some(f => hasBooks(isAbsolutePath(f) ? f : pathModule.join(this.vaultBase, f)))
-		if (hasBooks(booksDir) && !foldersOk) {
-			this.settings.scanFolders = [`${LIBRARY_ROOT}/书籍`]
-			changed = true
-		}
-		const notesAbs = this.settings.notesFolder
-			? pathModule.join(this.vaultBase, this.settings.notesFolder)
-			: ''
-		if (fs.existsSync(notesDir) && (!notesAbs || !fs.existsSync(notesAbs))) {
-			this.settings.notesFolder = `${LIBRARY_ROOT}/阅读笔记`
-			changed = true
-		}
-		if (changed) {
-			void this.saveSettings()
-			console.log('[Grove Reader] 已自动接管迁移后的书库目录')
-			this.debug('adopt', 'switched settings to current library root', { root: LIBRARY_ROOT })
-		}
+	private async adoptMigratedFolders(): Promise<void> {
+		if (this.isMobile || !this.vaultBase) return
+		const { adoptMigratedFolders } = await import('./desktopFs')
+		const changed = adoptMigratedFolders({ vaultBase: this.vaultBase, settings: this.settings })
+		if (!changed) return
+		void this.saveSettings()
+		console.log('[Grove Reader] 已自动接管迁移后的书库目录')
+		this.debug('adopt', 'switched settings to current library root', { root: LIBRARY_ROOT })
 	}
 
 	// ------------------------------------------------------------------
@@ -449,8 +456,7 @@ export default class GroveReaderPlugin extends Plugin {
 	#startStatsTracking(): void {
 		const INTERVAL = 15_000
 		this.registerInterval(window.setInterval(() => {
-			const view = this.app.workspace.getActiveViewOfType(ReaderView)
-				?? this.app.workspace.getActiveViewOfType(PdfView)
+			const view = this.app.workspace.getActiveViewOfType(ReaderView) ?? this.activePdf()
 			if (!view?.ready || !document.hasFocus()) return
 			this.stats.record(view.bookPath, INTERVAL / 1000, 0)
 		}, INTERVAL))
@@ -465,13 +471,27 @@ export default class GroveReaderPlugin extends Plugin {
 		return this.app.workspace.getActiveViewOfType(ReaderView)
 	}
 
+	/**
+	 * pdfView 只在桌面端动态加载，这里不能再用 instanceof / getActiveViewOfType(PdfView)，
+	 * 统一按视图类型字符串判断。getLeavesOfType 已按最近使用排序，第一个就是「当前」。
+	 */
+	#isPdfView(view: unknown): view is PdfView {
+		const v = view as { getViewType?: () => string } | null
+		return !!v && typeof v.getViewType === 'function' && v.getViewType() === VIEW_TYPE_GROVE_PDF
+	}
+
+	private activePdf(): PdfView | null {
+		const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_PDF)[0]
+		return leaf && this.#isPdfView(leaf.view) ? leaf.view : null
+	}
+
 	private withAnyReader(checking: boolean, run: (view: ReaderView | PdfView | TextView) => unknown): boolean {
 		const r = this.activeReader()
 		if (r?.ready) {
 			if (!checking) run(r)
 			return true
 		}
-		const p = this.app.workspace.getActiveViewOfType(PdfView)
+		const p = this.activePdf()
 		if (p?.ready) {
 			if (!checking) run(p)
 			return true
@@ -530,7 +550,7 @@ export default class GroveReaderPlugin extends Plugin {
 		return this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_READER)
 			.some(leaf => leaf.view instanceof ReaderView && leaf.view.bookPath === bookPath)
 			|| this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_PDF)
-				.some(leaf => leaf.view instanceof PdfView && leaf.view.bookPath === bookPath)
+				.some(leaf => this.#isPdfView(leaf.view) && leaf.view.bookPath === bookPath)
 	}
 
 	/** 删除书籍前关掉仍打开着它的阅读视图，避免继续写回数据；返回关闭的视图数 */
@@ -544,7 +564,7 @@ export default class GroveReaderPlugin extends Plugin {
 		}
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_PDF)) {
 			const view = leaf.view
-			if (view instanceof PdfView && view.bookPath === bookPath) {
+			if (this.#isPdfView(view) && view.bookPath === bookPath) {
 				leaf.detach()
 				closed++
 			}
@@ -616,9 +636,10 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	async openBookByPath(bookPath: string, cfi?: string): Promise<void> {
-		const absPath = isAbsolutePath(bookPath) ? bookPath : pathModule.join(this.vaultBase, bookPath)
-		if (!fs.existsSync(absPath)) {
-			new Notice(`${APP_NAME}：文件不存在或已被移动：${bookPath}`)
+		if (!this.app.vault.getAbstractFileByPath(bookPath) && !this.#fileExistsOnDisk(bookPath)) {
+			new Notice(isAbsolutePath(bookPath) && this.isMobile
+				? `${APP_NAME}：手机端暂不支持打开库外文件：${bookPath}`
+				: `${APP_NAME}：文件不存在或已被移动：${bookPath}`)
 			return
 		}
 		const ext = (bookPath.split('.').pop() ?? '').toLowerCase()
@@ -673,10 +694,14 @@ export default class GroveReaderPlugin extends Plugin {
 
 	/** 在 Grove Reader 内打开 PDF（专用视图：渲染 + 文字层划选批注） */
 	async #openPdfBook(bookPath: string, cfi?: string): Promise<void> {
+		if (this.isMobile) {
+			new Notice(`${APP_NAME}：手机端暂不支持 PDF 阅读，请用系统的 PDF 应用打开`)
+			return
+		}
 		const existing = this.app.workspace
 			.getLeavesOfType(VIEW_TYPE_GROVE_PDF)
-			.find(leaf => leaf.view instanceof PdfView && leaf.view.bookPath === bookPath)
-		if (existing && existing.view instanceof PdfView) {
+			.find(leaf => this.#isPdfView(leaf.view) && leaf.view.bookPath === bookPath)
+		if (existing && this.#isPdfView(existing.view)) {
 			this.app.workspace.revealLeaf(existing)
 			if (cfi) existing.view.jumpToCfi(cfi)
 			return
@@ -728,13 +753,13 @@ export default class GroveReaderPlugin extends Plugin {
 		await this.openBookByPath(bookPath, cfi || undefined)
 	}
 
-	/** 读书籍字节：优先走库文件，找不到时按本机路径读（支持库外书籍） */
+	/** 读书籍字节：优先走库文件，找不到时按本机路径读（库外书籍只有桌面端支持） */
 	async readBookBytes(bookPath: string): Promise<ArrayBuffer> {
 		const f = this.app.vault.getAbstractFileByPath(bookPath)
 		if (f instanceof TFile) return this.app.vault.readBinary(f)
-		const abs = isAbsolutePath(bookPath) ? bookPath : pathModule.join(this.vaultBase, bookPath)
-		const buf = fs.readFileSync(abs)
-		return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
+		if (!this.desktopFs) throw new Error(`手机端暂不支持读取库外文件：${bookPath}`)
+		const abs = isAbsolutePath(bookPath) ? bookPath : joinPath(this.vaultBase, bookPath)
+		return this.desktopFs.readBytes(abs)
 	}
 
 	/**
@@ -742,81 +767,35 @@ export default class GroveReaderPlugin extends Plugin {
 	 * 资源随插件分发在插件目录 pdfjs/ 下，经库资源协议暴露给渲染进程。
 	 */
 	pdfjsAssetUrl(rel: string): string | null {
+		if (this.isMobile) return null
 		const adapter = this.app.vault.adapter
 		if (!(adapter instanceof FileSystemAdapter)) return null
-		const full = normalizePath(`${this.manifest.dir || pathModule.join('.obsidian', 'plugins', this.manifest.id)}/pdfjs/${rel}`)
+		const full = normalizePath(`${this.manifest.dir || joinPath('.obsidian', 'plugins', this.manifest.id)}/pdfjs/${rel}`)
 		let base = adapter.getResourcePath(full).split('?')[0]
 		if (!base.endsWith('/')) base += '/'
 		return base
 	}
 
-	/** 书架统计缓存：key 为批注 JSON 绝对路径，按文件 mtime 失效 */
-	private shelfStatsCache = new Map<string, { mtime: number; bookPath: string; info: ShelfBookInfo }>()
-
 	/**
 	 * 汇总所有书的批注数 / 进度 / 最近阅读，供书架卡片展示。
-	 * 解析结果按文件 mtime 缓存：刷新书架不再重复 JSON.parse 全部批注文件。
+	 * 批注 JSON 在启动时已由 BookStore 预载进内存，这里不再扫磁盘/parse JSON，
+	 * 也就不用 Node fs（移动端同一套逻辑）。
 	 */
 	collectBookStats(): Map<string, ShelfBookInfo> {
 		const map = new Map<string, ShelfBookInfo>()
-		const dir = pathModule.join(this.dataRoot, 'data', 'books')
-		let names: string[] = []
-		try {
-			names = fs.readdirSync(dir)
-		} catch {
-			this.shelfStatsCache.clear()
-			return map
-		}
-		const seen = new Set<string>()
-		for (const name of names) {
-			if (!name.endsWith('.json')) continue
-			const full = pathModule.join(dir, name)
-			seen.add(full)
-			let mtime = 0
-			try {
-				mtime = fs.statSync(full).mtimeMs
-			} catch {
-				continue
-			}
-			let cached = this.shelfStatsCache.get(full)
-			if (!cached || cached.mtime !== mtime) {
-				try {
-					const data = JSON.parse(fs.readFileSync(full, 'utf-8')) as {
-						bookPath?: string
-						annotations?: unknown[]
-						lastLocation?: { fraction?: number }
-						notePath?: string
-					}
-					if (typeof data?.bookPath !== 'string') {
-						this.shelfStatsCache.delete(full)
-						continue
-					}
-					const notePath = typeof data.notePath === 'string' ? data.notePath : undefined
-					cached = {
-						mtime,
-						bookPath: data.bookPath,
-						info: {
-							annotations: Array.isArray(data.annotations) ? data.annotations.length : 0,
-							fraction: data.lastLocation?.fraction,
-							// 笔记被删/改名后不再显示标记
-							notePath: notePath && this.app.vault.getAbstractFileByPath(notePath) instanceof TFile ? notePath : undefined,
-						},
-					}
-					this.shelfStatsCache.set(full, cached)
-				} catch {
-					this.shelfStatsCache.delete(full)
-					continue
-				}
-			}
-			const stats = this.stats.peek(cached.bookPath)
-			map.set(cached.bookPath, {
-				...cached.info,
+		for (const bookPath of this.store.listBookPaths()) {
+			const data = this.store.load(bookPath)
+			if (typeof data?.bookPath !== 'string') continue
+			const notePath = typeof data.notePath === 'string' ? data.notePath : undefined
+			const stats = this.stats.peek(data.bookPath)
+			map.set(data.bookPath, {
+				annotations: data.annotations.length,
+				fraction: data.lastLocation?.fraction,
+				// 笔记被删/改名后不再显示标记
+				notePath: notePath && this.app.vault.getAbstractFileByPath(notePath) instanceof TFile ? notePath : undefined,
 				lastRead: stats?.lastRead || undefined,
 				seconds: stats?.seconds || undefined,
 			})
-		}
-		for (const key of this.shelfStatsCache.keys()) {
-			if (!seen.has(key)) this.shelfStatsCache.delete(key)
 		}
 		return map
 	}
@@ -1392,7 +1371,7 @@ export default class GroveReaderPlugin extends Plugin {
 		}
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_PDF)) {
 			const v = leaf.view
-			if (v instanceof PdfView && v.bookPath === bookPath) {
+			if (this.#isPdfView(v) && v.bookPath === bookPath) {
 				v.syncMeta(title, author)
 				return
 			}
@@ -1478,6 +1457,10 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	promptMigrateDataFolder(): void {
+		if (this.isMobile) {
+			new Notice(`${APP_NAME}：手机端暂不支持迁移数据文件夹`)
+			return
+		}
 		new FolderPromptModal(
 			this.app,
 			'迁移数据文件夹',
@@ -1486,8 +1469,12 @@ export default class GroveReaderPlugin extends Plugin {
 		).open()
 	}
 
-	/** 复制 data/ 到新的库内目录；不删旧数据，重启后生效 */
+	/** 复制 data/ 到新的库内目录；不删旧数据，重启后生效（复制本身需要 Node fs） */
 	async migrateDataFolder(targetFolder: string): Promise<void> {
+		if (this.isMobile) {
+			new Notice(`${APP_NAME}：手机端暂不支持迁移数据文件夹`)
+			return
+		}
 		const folder = targetFolder.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
 		if (!folder) {
 			new Notice(`${APP_NAME}：请填写库内文件夹路径`)
@@ -1502,27 +1489,18 @@ export default class GroveReaderPlugin extends Plugin {
 			return
 		}
 		const sourceRoot = this.dataRoot
-		const targetRoot = pathModule.join(this.vaultBase, normalizePath(folder))
-		const source = pathModule.join(sourceRoot, 'data')
-		const target = pathModule.join(targetRoot, 'data')
-		if (pathModule.resolve(sourceRoot) === pathModule.resolve(targetRoot)) {
-			new Notice(`${APP_NAME}：目标就是当前数据文件夹`)
+		const targetRoot = joinPath(this.vaultBase, normalizePath(folder))
+		const desktop = this.desktopFs
+		if (!desktop) {
+			new Notice(`${APP_NAME}：手机端暂不支持迁移数据文件夹`)
 			return
 		}
-		if (!fs.existsSync(source)) {
-			new Notice(`${APP_NAME}：当前数据文件夹里没有 data/，无法迁移`)
+		const check = desktop.checkMigrateTarget({ vaultBase: this.vaultBase, sourceRoot, folder })
+		if (!check.ok) {
+			new Notice(`${APP_NAME}：${check.message}`)
 			return
 		}
-		const srcAbs = pathModule.resolve(source)
-		const dstAbs = pathModule.resolve(target)
-		if (dstAbs.startsWith(srcAbs + pathModule.sep) || srcAbs.startsWith(dstAbs + pathModule.sep)) {
-			new Notice(`${APP_NAME}：不能迁移到自身或子目录`)
-			return
-		}
-		if (fs.existsSync(target) && fs.readdirSync(target).length > 0) {
-			new Notice(`${APP_NAME}：目标已有数据，请换一个空文件夹`)
-			return
-		}
+		const { source, target } = check
 		new ConfirmModal(
 			this.app,
 			`把当前数据复制到「${folder}/data」？\n\n源：${source}\n目标：${target}\n\n复制期间请不要继续阅读/批注；复制完成后立即重启 Obsidian。旧数据不会删除，回收站（.trash）不迁移。`,
@@ -1530,17 +1508,12 @@ export default class GroveReaderPlugin extends Plugin {
 				void (async () => {
 					try {
 						new Notice(`${APP_NAME}：正在复制数据…`)
-						const files = await copyDirAsync(source, target)
-						const srcBooks = countJson(pathModule.join(source, 'books'))
-						const dstBooks = countJson(pathModule.join(target, 'books'))
-						if (srcBooks !== dstBooks) {
-							throw new Error(`校验失败：源 ${srcBooks} 份批注，目标 ${dstBooks} 份`)
-						}
+						const result = await desktop.migrateDataFolder({ vaultBase: this.vaultBase, sourceRoot, folder })
 						this.settings.dataFolder = folder
 						await this.saveSettings()
-						this.oplog.add('迁移数据文件夹', `${sourceRoot} → ${targetRoot}；${dstBooks} 份批注`)
-						this.debug('data', 'migrate', { from: sourceRoot, to: targetRoot, files, books: dstBooks })
-						new Notice(`${APP_NAME}：已复制 ${files} 个文件。请重启 Obsidian 生效；旧数据确认无误后再删。`)
+						this.oplog.add('迁移数据文件夹', `${sourceRoot} → ${targetRoot}；${result.books} 份批注`)
+						this.debug('data', 'migrate', { from: sourceRoot, to: targetRoot, files: result.files, books: result.books })
+						new Notice(`${APP_NAME}：已复制 ${result.files} 个文件。请重启 Obsidian 生效；旧数据确认无误后再删。`)
 					} catch (e) {
 						new Notice(`${APP_NAME}：迁移失败（${e instanceof Error ? e.message : String(e)}）。目标目录可能有残留文件，请检查后重试。`)
 					}
@@ -1585,9 +1558,14 @@ export default class GroveReaderPlugin extends Plugin {
 	/**
 	 * 把全部批注/书架数据导出到库内普通文件夹（随库同步，删除/重装插件都不受影响）。
 	 * 批注 JSON 的权威副本仍在插件 data/ 下；这里是可带走的保险副本，防插件目录被误删。
-	 * 设置了 backupTargetDir 时额外复制一份过去（同盘备份防不了磁盘故障）。
+	 * 设置 backupTargetDir 时额外复制一份过去（同盘备份防不了磁盘故障）。
+	 * 实际复制交给 desktopFs（Node fs），手机端不可用。
 	 */
 	async exportDataBackup(): Promise<void> {
+		if (this.isMobile) {
+			new Notice('Grove Reader：手机端暂不支持备份导出')
+			return
+		}
 		if (!this.vaultBase) {
 			new Notice('Grove Reader：无法定位库目录，备份失败')
 			return
@@ -1596,113 +1574,22 @@ export default class GroveReaderPlugin extends Plugin {
 		this.shelfCache.saveNow()
 		this.lists.saveNow()
 		const rel = this.backupFolderRel()
-		const root = pathModule.join(this.vaultBase, rel)
 		try {
-			// 目标目录若不是我们建的（没有标记文件，且已存在同名数据文件），
-			// 直接中止——避免用户把备份路径指到已有笔记文件夹时被 prune 误删
-			const marker = pathModule.join(root, '.grove-backup')
-			const hasMarker = await fsp.access(marker).then(() => true).catch(() => false)
-			if (!hasMarker) {
-				let entries: string[] = []
-				try {
-					entries = await fsp.readdir(root)
-				} catch {
-					entries = []
-				}
-				let legacy = false
-				try {
-					legacy = (await fsp.readFile(pathModule.join(root, '说明.md'), 'utf-8')).includes('由 Grove Reader')
-				} catch {
-					legacy = false
-				}
-				const clash = entries.some(n => ['books', 'covers', 'shelf.json', 'lists.json', 'data.json', 'oplog.json'].includes(n))
-				if (clash && !legacy) {
-					new Notice(`Grove Reader：目标文件夹「${rel}」里已有同名文件，为避免误删已中止。请换一个空文件夹，或清空后重试`)
-					return
-				}
-				await fsp.mkdir(root, { recursive: true })
-				await fsp.writeFile(marker, 'Grove Reader 备份目录标记：存在此文件时才会覆盖写入。\n', 'utf-8')
+			const { exportDataBackup } = await import('./desktopFs')
+			const result = await exportDataBackup({
+				vaultBase: this.vaultBase,
+				dataRoot: this.dataRoot,
+				pluginDir: this.pluginDir,
+				rel,
+				target: this.settings.backupTargetDir?.trim() || undefined,
+			})
+			if (result.status === 'blocked') {
+				new Notice(`Grove Reader：目标文件夹「${rel}」里已有同名文件，为避免误删已中止。请换一个空文件夹，或清空后重试`)
+				return
 			}
-
-			// 只清我们自己的文件，不动用户可能放进该文件夹的其他内容
-			const prune = async (dir: string, filter: (name: string) => boolean): Promise<void> => {
-				let names: string[] = []
-				try {
-					names = await fsp.readdir(dir)
-				} catch {
-					return // 目录不存在
-				}
-				for (const name of names) {
-					if (!filter(name)) continue
-					await fsp.rm(pathModule.join(dir, name), { force: true, recursive: true }).catch(() => { })
-				}
-			}
-			await prune(pathModule.join(root, 'books'), name => name.endsWith('.json'))
-			await prune(pathModule.join(root, 'covers'), () => true)
-			for (const name of ['shelf.json', 'lists.json', 'data.json', 'oplog.json']) {
-				await fsp.rm(pathModule.join(root, name), { force: true }).catch(() => { })
-			}
-
-			let bookCount = 0
-			const booksDir = pathModule.join(this.dataRoot, 'data', 'books')
-			await fsp.mkdir(pathModule.join(root, 'books'), { recursive: true })
-			let bookNames: string[] = []
-			try {
-				bookNames = await fsp.readdir(booksDir)
-			} catch {
-				// 尚无任何批注数据
-			}
-			for (const name of bookNames) {
-				if (!name.endsWith('.json')) continue
-				await fsp.copyFile(pathModule.join(booksDir, name), pathModule.join(root, 'books', name))
-				bookCount++
-			}
-			for (const [src, dst] of [
-				[pathModule.join(this.dataRoot, 'data', 'shelf.json'), 'shelf.json'],
-				[pathModule.join(this.dataRoot, 'data', 'lists.json'), 'lists.json'],
-				[pathModule.join(this.dataRoot, 'data', 'oplog.json'), 'oplog.json'],
-				[pathModule.join(this.pluginDir, 'data.json'), 'data.json'],
-			] as const) {
-				await fsp.copyFile(src, pathModule.join(root, dst)).catch(() => { })
-			}
-			const coversDir = pathModule.join(this.dataRoot, 'data', 'covers')
-			try {
-				const covers = await fsp.readdir(coversDir)
-				await fsp.mkdir(pathModule.join(root, 'covers'), { recursive: true })
-				for (const name of covers) {
-					await fsp.copyFile(pathModule.join(coversDir, name), pathModule.join(root, 'covers', name))
-				}
-			} catch {
-				// 尚无封面
-			}
-			const guide = [
-				'本文件夹由 Grove Reader 的「备份批注数据到库内」命令生成，是批注数据的保险副本。',
-				'它是普通库内文件：随库同步、随笔记一起备份，删除/重装插件都不受影响。',
-				'',
-				'恢复方法：',
-				'1. 关闭 Obsidian；',
-				'2. 把 books/、shelf.json、lists.json、covers/ 放回 <库>/.obsidian/plugins/grove-reader/data/；',
-				'3. 把 data.json 放回 <库>/.obsidian/plugins/grove-reader/（插件根目录）；',
-				'4. 重新打开 Obsidian。',
-				'',
-				`最近备份时间：${new Date().toLocaleString('zh-CN', { hour12: false })}`,
-			].join('\n')
-			await fsp.writeFile(pathModule.join(root, '说明.md'), guide, 'utf-8')
-
-			let extra = ''
-			const target = this.settings.backupTargetDir?.trim()
-			if (target) {
-				try {
-					await copyDirAsync(root, pathModule.join(target, rel))
-					extra = `，并已复制一份到 ${target}`
-				} catch (e) {
-					console.error('[Grove Reader] 复制备份到额外位置失败', e)
-					extra = `（额外位置 ${target} 复制失败，库内备份已完成；请检查路径/磁盘是否可用）`
-				}
-			}
-			this.oplog?.add('备份数据', `${bookCount} 本书；库内「${rel}」`)
-			this.debug('backup', 'export', { rel, bookCount })
-			new Notice(`Grove Reader：已备份 ${bookCount} 本书的批注数据到库内「${rel}」${extra}`)
+			this.oplog?.add('备份数据', `${result.bookCount} 本书；库内「${rel}」`)
+			this.debug('backup', 'export', { rel, bookCount: result.bookCount })
+			new Notice(`Grove Reader：已备份 ${result.bookCount} 本书的批注数据到库内「${rel}」${result.extra}`)
 		} catch (e) {
 			console.error('[Grove Reader] 备份批注数据失败', e)
 			new Notice(`Grove Reader：备份失败（${e instanceof Error ? e.message : String(e)}）`)
@@ -1711,32 +1598,13 @@ export default class GroveReaderPlugin extends Plugin {
 
 	/** 设置里改了库内备份文件夹后，把旧文件夹的内容转移到新路径（同名覆盖，旧文件夹清空后删除） */
 	async migrateBackupFolder(from: string, to: string): Promise<void> {
-		if (!this.vaultBase) return
-		const src = pathModule.join(this.vaultBase, from)
-		const dst = pathModule.join(this.vaultBase, to)
-		if (src === dst) return
-		try {
-			await fsp.access(src)
-		} catch {
-			return // 旧文件夹还没生成过备份，无需转移
-		}
-		try {
-			await fsp.mkdir(pathModule.dirname(dst), { recursive: true })
-			try {
-				await fsp.access(dst)
-				// 新路径已存在：逐条合并，同名以旧文件夹里的为准（都是可再生的备份）
-				for (const name of await fsp.readdir(src)) {
-					await fsp.rm(pathModule.join(dst, name), { force: true, recursive: true }).catch(() => { })
-					await fsp.rename(pathModule.join(src, name), pathModule.join(dst, name))
-				}
-			} catch {
-				await fsp.rename(src, dst)
-			}
-			await fsp.rmdir(src).catch(() => { }) // 只在旧文件夹已空时才删得掉
+		if (this.isMobile || !this.vaultBase) return
+		const { moveBackupFolder } = await import('./desktopFs')
+		const result = await moveBackupFolder({ vaultBase: this.vaultBase, from, to })
+		if (result.status === 'moved') {
 			new Notice(`Grove Reader：库内备份已转移到「${to}」`)
-		} catch (e) {
-			console.error('[Grove Reader] 转移备份文件夹失败', e)
-			new Notice(`Grove Reader：转移备份文件夹失败（${e instanceof Error ? e.message : String(e)}），已保留原路径`)
+		} else if (result.status === 'failed') {
+			new Notice(`Grove Reader：转移备份文件夹失败（${result.error ?? ''}），已保留原路径`)
 		}
 	}
 
@@ -1781,30 +1649,5 @@ export default class GroveReaderPlugin extends Plugin {
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_TEXT)) {
 			if (leaf.view instanceof TextView) leaf.view.relayout()
 		}
-	}
-}
-
-/** 递归复制目录（fs.promises 版，不阻塞 UI 线程），返回复制的文件数 */
-async function copyDirAsync(src: string, dst: string): Promise<number> {
-	await fsp.mkdir(dst, { recursive: true })
-	let n = 0
-	for (const name of await fsp.readdir(src)) {
-		const s = pathModule.join(src, name)
-		const d = pathModule.join(dst, name)
-		const st = await fsp.stat(s)
-		if (st.isDirectory()) n += await copyDirAsync(s, d)
-		else {
-			await fsp.copyFile(s, d)
-			n++
-		}
-	}
-	return n
-}
-
-function countJson(dir: string): number {
-	try {
-		return fs.readdirSync(dir).filter(name => name.endsWith('.json')).length
-	} catch {
-		return 0
 	}
 }

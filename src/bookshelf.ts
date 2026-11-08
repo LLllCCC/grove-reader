@@ -1,7 +1,6 @@
-import { ItemView, Menu, Notice, WorkspaceLeaf, requestUrl, setIcon } from 'obsidian'
+import { ItemView, Menu, Notice, Platform, WorkspaceLeaf, requestUrl, setIcon } from 'obsidian'
 import type { TAbstractFile } from 'obsidian'
 import { TFile } from 'obsidian'
-import { shell } from 'electron'
 import { makeBook } from '../lib/foliate-js/view.js'
 import type GroveReaderPlugin from './main'
 import { FORMAT_LABELS, ShelfBookInfo, isReaderExt, isShelfExt } from './types'
@@ -886,7 +885,16 @@ export class BookshelfView extends ItemView {
 			if (closed) await new Promise(resolve => window.setTimeout(resolve, 300))
 			this.plugin.debug('delete', 'book', { path, deleteFile, deleteNote })
 			if (deleteFile) {
-				this.plugin.moveToTrash(path, title, deleteNote ? notePath : undefined)
+				const trashed = this.plugin.moveToTrash(path, title, deleteNote ? notePath : undefined)
+				if (!trashed) {
+					// 手机端没有插件回收站：按 Obsidian 的删除设置直接删原文件（与笔记）
+					const bookFile = this.app.vault.getAbstractFileByPath(path)
+					if (bookFile instanceof TFile) await this.app.fileManager.trashFile(bookFile)
+					if (deleteNote && notePath) {
+						const noteFile = this.app.vault.getAbstractFileByPath(notePath)
+						if (noteFile instanceof TFile) await this.app.fileManager.trashFile(noteFile)
+					}
+				}
 				// 批注 JSON 已移入回收站，这里只清自动备份与索引
 				this.plugin.store.delete(path)
 				this.plugin.stats.remove(path)
@@ -895,8 +903,8 @@ export class BookshelfView extends ItemView {
 				const hidden = this.plugin.settings.hiddenBooks ?? []
 				this.plugin.settings.hiddenBooks = hidden.filter(p => p !== path)
 				await this.plugin.saveSettings()
-				this.plugin.oplog.add('删除书籍', `《${title}》；移入回收站；阅读笔记${deleteNote ? '一并移入' : '保留'}`)
-				new Notice('已移入回收站，可在 设置 → 回收站 恢复')
+				this.plugin.oplog.add('删除书籍', `《${title}》；${trashed ? '移入回收站' : '已删除原文件'}；阅读笔记${deleteNote ? (trashed ? '一并移入' : '一并删除') : '保留'}`)
+				new Notice(trashed ? '已移入回收站，可在 设置 → 回收站 恢复' : '已删除书籍文件')
 			} else {
 				const hidden = this.plugin.settings.hiddenBooks ?? []
 				if (!hidden.includes(path)) hidden.push(path)
@@ -1070,9 +1078,17 @@ export class BookshelfView extends ItemView {
 					run()
 				}
 			}))
-			menu.addItem(item => item.setTitle('在文件夹中显示').setIcon('folder-open').onClick(() => {
-				shell.showItemInFolder(this.#absPath(path))
-			}))
+			// electron 只在桌面端存在：延迟 require，避免手机端加载插件时就 require('electron')
+			if (!Platform.isMobile) {
+				menu.addItem(item => item.setTitle('在文件夹中显示').setIcon('folder-open').onClick(() => {
+					try {
+						const { shell } = require('electron') as typeof import('electron')
+						shell.showItemInFolder(this.#absPath(path))
+					} catch (e) {
+						new Notice(`无法在文件夹中显示：${e instanceof Error ? e.message : String(e)}`)
+					}
+				}))
+			}
 			menu.addItem(item => item.setTitle('复制完整文件名').setIcon('copy').onClick(() => {
 				void navigator.clipboard.writeText(basenameOf(path))
 				new Notice('已复制文件名')

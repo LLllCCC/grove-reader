@@ -740,10 +740,15 @@ export class TrashModal extends Modal {
 		const { contentEl } = this
 		contentEl.empty()
 		contentEl.createEl('h3', { text: '回收站' })
-		const entries = this.plugin.trash.list()
+		const trash = this.plugin.trash
+		if (!trash) {
+			contentEl.createEl('p', { text: '手机端暂不支持回收站。' })
+			return
+		}
+		const entries = trash.list()
 		contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: `删除的书籍、笔记、批注和封面会先放在这里，保留 ${this.plugin.trash.retentionDays()} 天。恢复会放回原路径；原位置已有同名文件时会拒绝恢复。`,
+			text: `删除的书籍、笔记、批注和封面会先放在这里，保留 ${trash.retentionDays()} 天。恢复会放回原路径；原位置已有同名文件时会拒绝恢复。`,
 		})
 		if (!entries.length) {
 			contentEl.createEl('p', { text: '回收站是空的。' })

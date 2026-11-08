@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, Setting, setIcon } from 'obsidian'
+import { App, Notice, Platform, PluginSettingTab, Setting, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import { FolderPromptModal, FolderSuggest, ConfirmModal, OpLogModal, TemplateEditModal } from './modals'
 import { APP_NAME, BACKUP_FOLDER_NAME, DEFAULT_SHELF_DISPLAY } from './types'
@@ -489,14 +489,17 @@ export class GroveSettingTab extends PluginSettingTab {
 			.addButton(button =>
 				button.setButtonText('搜索').setCta().onClick(() => this.plugin.showSearch()))
 
-		// —— 回收站 ——
-		containerEl.createEl('h3', { text: '回收站' })
-		const trashCount = this.plugin.trash.list().length
-		new Setting(containerEl)
-			.setName('已删除的书籍')
-			.setDesc(`删书时把原文件、笔记、批注和封面移到这里，保留 ${this.plugin.trash.retentionDays()} 天；可恢复或永久删除`)
-			.addButton(button =>
-				button.setButtonText(`打开（${trashCount}）`).onClick(() => this.plugin.showTrash()))
+		// —— 回收站（依赖 node:fs，手机端没有）——
+		const trash = this.plugin.trash
+		if (!Platform.isMobile && trash) {
+			containerEl.createEl('h3', { text: '回收站' })
+			const trashCount = trash.list().length
+			new Setting(containerEl)
+				.setName('已删除的书籍')
+				.setDesc(`删书时把原文件、笔记、批注和封面移到这里，保留 ${trash.retentionDays()} 天；可恢复或永久删除`)
+				.addButton(button =>
+					button.setButtonText(`打开（${trashCount}）`).onClick(() => this.plugin.showTrash()))
+		}
 
 		// —— 操作记录 ——
 		containerEl.createEl('h3', { text: '操作记录' })
@@ -517,11 +520,13 @@ export class GroveSettingTab extends PluginSettingTab {
 
 		// —— 维护 ——
 		containerEl.createEl('h3', { text: '维护' })
-		new Setting(containerEl)
-			.setName('数据体检')
-			.setDesc('检查批注 JSON、笔记、书架缓存、书单、统计之间的引用是否还对得上；只读，不会删除书籍或批注')
-			.addButton(button =>
-				button.setButtonText('运行').setCta().onClick(() => this.plugin.showHealthReport()))
+		if (!Platform.isMobile) {
+			new Setting(containerEl)
+				.setName('数据体检')
+				.setDesc('检查批注 JSON、笔记、书架缓存、书单、统计之间的引用是否还对得上；只读，不会删除书籍或批注')
+				.addButton(button =>
+					button.setButtonText('运行').setCta().onClick(() => this.plugin.showHealthReport()))
+		}
 		new Setting(containerEl)
 			.setName('调试模式')
 			.setDesc('把打开书籍、删除、清空、备份等事件写入 data/debug.log（512KB 轮转），默认关闭；反馈问题时再开')

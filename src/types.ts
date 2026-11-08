@@ -14,6 +14,12 @@ export const BACKUP_FOLDER_NAME = 'Grove Reader 数据备份'
 
 export const SUPPORTED_BOOK_EXTS = ['epub', 'mobi', 'azw3', 'fb2', 'fbz', 'cbz']
 
+/**
+ * PDF 视图类型放在这里，是因为 pdfView 只在桌面端动态加载：
+ * main.ts 需要在不 import pdfView 的前提下判断叶子是不是 PDF 视图。
+ */
+export const VIEW_TYPE_GROVE_PDF = 'grove-pdf-view'
+
 /** 书架卡片上的格式标签文案（含 PDF；PDF 不在插件内渲染，但同为「书的格式」） */
 export const FORMAT_LABELS: Record<string, string> = {
 	epub: 'EPUB',
