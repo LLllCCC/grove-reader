@@ -1,5 +1,4 @@
-import fs from 'node:fs'
-import pathModule from 'node:path'
+import { PlatformIO, joinPath, readJsonFile, writeJsonFile } from './platformIO'
 import { randomId } from './util'
 
 // ------------------------------------------------------------------
@@ -22,20 +21,20 @@ interface ListsFile {
 export class ListsStore {
 	private file: string
 	private data: ListsFile = { version: 1, lists: [], members: {} }
-	private saveTimer: NodeJS.Timeout | null = null
+	private saveTimer: ReturnType<typeof setTimeout> | null = null
+	private queue: Promise<void> = Promise.resolve()
 
-	constructor(rootDir: string) {
-		this.file = pathModule.join(rootDir, 'data', 'lists.json')
+	constructor(
+		rootDir: string,
+		private io: PlatformIO,
+	) {
+		this.file = joinPath(rootDir, 'data', 'lists.json')
 	}
 
-	load(): void {
-		try {
-			const parsed = JSON.parse(fs.readFileSync(this.file, 'utf-8')) as ListsFile
-			if (parsed && Array.isArray(parsed.lists) && parsed.members && typeof parsed.members === 'object') {
-				this.data = parsed
-			}
-		} catch {
-			// 首次或损坏时使用空数据
+	async load(): Promise<void> {
+		const parsed = await readJsonFile<ListsFile>(this.io, this.file)
+		if (parsed && Array.isArray(parsed.lists) && parsed.members && typeof parsed.members === 'object') {
+			this.data = parsed
 		}
 	}
 
@@ -90,13 +89,16 @@ export class ListsStore {
 			clearTimeout(this.saveTimer)
 			this.saveTimer = null
 		}
-		try {
-			fs.mkdirSync(pathModule.dirname(this.file), { recursive: true })
-			const tmp = `${this.file}.tmp`
-			fs.writeFileSync(tmp, JSON.stringify(this.data), 'utf-8')
-			fs.renameSync(tmp, this.file)
-		} catch (e) {
-			console.error('[Grove Reader] 书单数据写入失败', e)
-		}
+		const snapshot = this.data
+		this.queue = this.queue
+			.catch(() => undefined)
+			.then(() => writeJsonFile(this.io, this.file, snapshot))
+			.catch(e => {
+				console.error('[Grove Reader] 书单数据写入失败', e)
+			})
+	}
+
+	async flush(): Promise<void> {
+		await this.queue
 	}
 }

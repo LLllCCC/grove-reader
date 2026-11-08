@@ -1,5 +1,4 @@
-import fs from 'node:fs'
-import path from 'node:path'
+import { PlatformIO, readJsonFile, writeJsonFile } from './platformIO'
 
 export interface StatsDay {
 	/** 当日累计阅读秒数 */
@@ -31,22 +30,22 @@ export function todayKey(d = new Date()): string {
 
 /**
  * 阅读统计存储：data/stats.json，按书记录累计时长/翻页数与按日明细。
- * 写入采用与其他存储一致的防抖 + 临时文件原子重命名。
+ * 读：启动时 `await load()` 一次读进内存；写：防抖后异步原子落盘。
  */
 export class StatsStore {
 	private data: StatsFile = { version: 1, books: {} }
-	private saveTimer: NodeJS.Timeout | null = null
+	private saveTimer: ReturnType<typeof setTimeout> | null = null
+	private queue: Promise<void> = Promise.resolve()
 
-	constructor(private file: string) {}
+	constructor(
+		private file: string,
+		private io: PlatformIO,
+	) {}
 
-	load(): void {
-		try {
-			const parsed = JSON.parse(fs.readFileSync(this.file, 'utf-8')) as StatsFile
-			if (parsed && typeof parsed === 'object' && parsed.books && typeof parsed.books === 'object') {
-				this.data = parsed
-			}
-		} catch {
-			// 首次或损坏时使用空数据
+	async load(): Promise<void> {
+		const parsed = await readJsonFile<StatsFile>(this.io, this.file)
+		if (parsed && typeof parsed === 'object' && parsed.books && typeof parsed.books === 'object') {
+			this.data = parsed
 		}
 	}
 
@@ -165,19 +164,23 @@ export class StatsStore {
 		}, 2000)
 	}
 
-	/** 同步写入：文件只有几 KB 且 2s 防抖，不值得为它占用线程池 */
+	/** 排队写盘；同一实例的写入严格串行 */
 	saveNow(): void {
 		if (this.saveTimer) {
 			clearTimeout(this.saveTimer)
 			this.saveTimer = null
 		}
-		try {
-			fs.mkdirSync(path.dirname(this.file), { recursive: true })
-			const tmp = `${this.file}.tmp`
-			fs.writeFileSync(tmp, JSON.stringify(this.data), 'utf-8')
-			fs.renameSync(tmp, this.file)
-		} catch (e) {
-			console.error('[Grove Reader] 阅读统计写入失败', e)
-		}
+		const snapshot = this.data
+		this.queue = this.queue
+			.catch(() => undefined)
+			.then(() => writeJsonFile(this.io, this.file, snapshot))
+			.catch(e => {
+				console.error('[Grove Reader] 阅读统计写入失败', e)
+			})
+	}
+
+	/** 等待所有排队写入落盘 */
+	async flush(): Promise<void> {
+		await this.queue
 	}
 }

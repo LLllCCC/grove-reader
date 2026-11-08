@@ -51,6 +51,10 @@ export class DesktopIO implements PlatformIO {
 		return fsp.copyFile(from, to)
 	}
 
+	async append(path: string, data: string): Promise<void> {
+		await fsp.appendFile(path, data, 'utf-8')
+	}
+
 	async list(path: string): Promise<{ files: string[]; folders: string[] }> {
 		const entries = await fsp.readdir(path, { withFileTypes: true })
 		const files: string[] = []

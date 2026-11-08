@@ -1,5 +1,4 @@
-import fs from 'node:fs'
-import pathModule from 'node:path'
+import { PlatformIO, joinPath, readJsonFile, writeJsonFile } from './platformIO'
 
 export interface OpEntry {
 	at: number
@@ -16,22 +15,22 @@ const MAX_ENTRIES = 200
 export class OpLog {
 	private file: string
 	private entries: OpEntry[] = []
-	private timer: NodeJS.Timeout | null = null
+	private timer: ReturnType<typeof setTimeout> | null = null
+	private queue: Promise<void> = Promise.resolve()
 
-	constructor(rootDir: string) {
-		this.file = pathModule.join(rootDir, 'data', 'oplog.json')
+	constructor(
+		rootDir: string,
+		private io: PlatformIO,
+	) {
+		this.file = joinPath(rootDir, 'data', 'oplog.json')
 	}
 
-	load(): void {
-		try {
-			const parsed = JSON.parse(fs.readFileSync(this.file, 'utf-8')) as OpEntry[]
-			if (Array.isArray(parsed)) {
-				this.entries = parsed
-					.filter(e => e && typeof e.at === 'number' && typeof e.action === 'string')
-					.slice(-MAX_ENTRIES)
-			}
-		} catch {
-			// 首次或损坏时使用空记录
+	async load(): Promise<void> {
+		const parsed = await readJsonFile<OpEntry[]>(this.io, this.file)
+		if (Array.isArray(parsed)) {
+			this.entries = parsed
+				.filter(e => e && typeof e.at === 'number' && typeof e.action === 'string')
+				.slice(-MAX_ENTRIES)
 		}
 	}
 
@@ -69,13 +68,16 @@ export class OpLog {
 			clearTimeout(this.timer)
 			this.timer = null
 		}
-		try {
-			fs.mkdirSync(pathModule.dirname(this.file), { recursive: true })
-			const tmp = `${this.file}.tmp`
-			fs.writeFileSync(tmp, JSON.stringify(this.entries), 'utf-8')
-			fs.renameSync(tmp, this.file)
-		} catch (e) {
-			console.error('[Grove Reader] 操作记录写入失败', e)
-		}
+		const snapshot = [...this.entries]
+		this.queue = this.queue
+			.catch(() => undefined)
+			.then(() => writeJsonFile(this.io, this.file, snapshot))
+			.catch(e => {
+				console.error('[Grove Reader] 操作记录写入失败', e)
+			})
+	}
+
+	async flush(): Promise<void> {
+		await this.queue
 	}
 }

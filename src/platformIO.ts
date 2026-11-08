@@ -23,8 +23,37 @@ export interface PlatformIO {
 	removeDir(path: string): Promise<void>
 	rename(from: string, to: string): Promise<void>
 	copy(from: string, to: string): Promise<void>
+	append(path: string, data: string): Promise<void>
 	list(path: string): Promise<{ files: string[]; folders: string[] }>
 	stat(path: string): Promise<FileStat | null>
+}
+
+/** 读 JSON：文件不存在或解析失败都返回 null，调用方用默认值兜底 */
+export async function readJsonFile<T>(io: PlatformIO, path: string): Promise<T | null> {
+	try {
+		return JSON.parse(await io.read(path)) as T
+	} catch {
+		return null
+	}
+}
+
+/** 原子写 JSON：先写 .tmp 再改名，改名失败时降级为直接覆盖 */
+export async function writeJsonFile(io: PlatformIO, path: string, data: unknown): Promise<void> {
+	const text = JSON.stringify(data)
+	const dir = dirName(path)
+	if (dir) await io.mkdir(dir)
+	const tmp = `${path}.tmp`
+	await io.write(tmp, text)
+	try {
+		await io.rename(tmp, path)
+	} catch {
+		await io.write(path, text)
+		try {
+			await io.remove(tmp)
+		} catch {
+			// ignore
+		}
+	}
 }
 
 /** 用 '/' 拼路径：Node fs 与 vault.adapter 都接受，避免在移动端 import node:path */

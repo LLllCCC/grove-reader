@@ -39,6 +39,7 @@ import { usageDocMarkdown, USAGE_DOC_NAME } from './usageDoc'
 import { LOGO_OPTIONS, logoById } from './logos'
 import { OpLog } from './oplog'
 import { createPlatformIO } from './platformFactory'
+import { joinPath } from './platformIO'
 import { DebugLog } from './debugLog'
 import { buildHealthReport, healthCleanupCount, HealthReport } from './health'
 import { TrashStore } from './trash'
@@ -81,16 +82,16 @@ export default class GroveReaderPlugin extends Plugin {
 		this.dataRoot = dataFolder
 			? (this.vaultBase ? pathModule.join(this.vaultBase, normalizePath(dataFolder)) : normalizePath(dataFolder))
 			: this.pluginDir
-		this.oplog = new OpLog(this.dataRoot)
-		this.oplog.load()
-		this.debugLog = new DebugLog(this.dataRoot, this.settings.debugMode)
+		const io = await createPlatformIO(this.app)
+		this.oplog = new OpLog(this.dataRoot, io)
+		await this.oplog.load()
+		this.debugLog = new DebugLog(this.dataRoot, io, this.settings.debugMode)
 		this.trash = new TrashStore(this.dataRoot, this.vaultBase)
 		const purged = this.trash.purgeExpired()
 		if (purged) {
 			this.oplog.add('回收站清理', `自动清理 ${purged} 项`)
 			this.debug('trash', 'purge expired', { count: purged })
 		}
-		const io = await createPlatformIO(this.app)
 		this.store = new BookStore(this.dataRoot, this.settings.maxBackups, io)
 		await this.store.preload()
 		let lastSaveErrorAt = 0
@@ -106,10 +107,10 @@ export default class GroveReaderPlugin extends Plugin {
 		}
 		this.shelfCache = new ShelfCache(this.dataRoot)
 		this.shelfCache.load()
-		this.lists = new ListsStore(this.dataRoot)
-		this.lists.load()
-		this.stats = new StatsStore(pathModule.join(this.dataRoot, 'data', 'stats.json'))
-		this.stats.load()
+		this.lists = new ListsStore(this.dataRoot, io)
+		await this.lists.load()
+		this.stats = new StatsStore(joinPath(this.dataRoot, 'data', 'stats.json'), io)
+		await this.stats.load()
 
 		this.registerView(VIEW_TYPE_GROVE_READER, leaf => new ReaderView(leaf, this))
 		this.registerView(VIEW_TYPE_GROVE_BOOKSHELF, leaf => new BookshelfView(leaf, this))
@@ -148,7 +149,10 @@ export default class GroveReaderPlugin extends Plugin {
 		// 各视图的 onClose 会负责落盘与销毁渲染器；这里再兜一层排队中的批注写入
 		void this.store?.flush()
 		this.stats?.saveNow()
+		void this.stats?.flush()
 		this.oplog?.saveNow()
+		void this.oplog?.flush()
+		void this.debugLog?.flush()
 	}
 
 	/** 当前应使用的图标 id（original 或无效值时回退到 Obsidian 原生 library） */

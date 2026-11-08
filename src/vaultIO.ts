@@ -53,6 +53,10 @@ export class VaultIO implements PlatformIO {
 		await this.adapter.writeBinary(this.p(to), data)
 	}
 
+	async append(path: string, data: string): Promise<void> {
+		await this.adapter.append(this.p(path), data)
+	}
+
 	async list(path: string): Promise<{ files: string[]; folders: string[] }> {
 		const r = await this.adapter.list(this.p(path))
 		return { files: r.files, folders: r.folders }

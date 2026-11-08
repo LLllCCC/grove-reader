@@ -1,5 +1,4 @@
-import fs from 'node:fs'
-import pathModule from 'node:path'
+import { PlatformIO, joinPath } from './platformIO'
 
 const MAX_BYTES = 512 * 1024
 
@@ -11,9 +10,15 @@ const MAX_BYTES = 512 * 1024
 export class DebugLog {
 	private file: string
 	private enabled: boolean
+	private queue: Promise<void> = Promise.resolve()
+	private rotated = false
 
-	constructor(rootDir: string, enabled: boolean) {
-		this.file = pathModule.join(rootDir, 'data', 'debug.log')
+	constructor(
+		rootDir: string,
+		private io: PlatformIO,
+		enabled: boolean,
+	) {
+		this.file = joinPath(rootDir, 'data', 'debug.log')
 		this.enabled = enabled
 	}
 
@@ -27,34 +32,45 @@ export class DebugLog {
 
 	write(category: string, message: string, data?: unknown): void {
 		if (!this.enabled) return
-		try {
-			fs.mkdirSync(pathModule.dirname(this.file), { recursive: true })
-			this.#rotateIfNeeded()
-			const suffix = data === undefined ? '' : ` ${stringify(data)}`
-			fs.appendFileSync(this.file, `[${new Date().toISOString()}] [${category}] ${message}${suffix}\n`, 'utf-8')
-		} catch (e) {
-			console.error('[Grove Reader] 调试日志写入失败', e)
-		}
+		const suffix = data === undefined ? '' : ` ${stringify(data)}`
+		const line = `[${new Date().toISOString()}] [${category}] ${message}${suffix}\n`
+		this.queue = this.queue
+			.catch(() => undefined)
+			.then(async () => {
+				await this.#rotateIfNeeded()
+				await this.io.append(this.file, line)
+			})
+			.catch(e => {
+				console.error('[Grove Reader] 调试日志写入失败', e)
+			})
 	}
 
 	clear(): void {
-		try {
-			fs.rmSync(this.file, { force: true })
-			fs.rmSync(`${this.file}.1`, { force: true })
-		} catch {
-			// 文件不存在是常态
-		}
+		this.queue = this.queue
+			.catch(() => undefined)
+			.then(async () => {
+				await this.io.remove(this.file)
+				await this.io.remove(`${this.file}.1`)
+			})
+			.catch(() => {
+				// 文件不存在是常态
+			})
 	}
 
-	#rotateIfNeeded(): void {
+	async flush(): Promise<void> {
+		await this.queue
+	}
+
+	async #rotateIfNeeded(): Promise<void> {
+		if (this.rotated) return
+		const stat = await this.io.stat(this.file)
+		if (!stat || stat.size <= MAX_BYTES) return
 		try {
-			const stat = fs.statSync(this.file)
-			if (stat.size <= MAX_BYTES) return
-			const old = `${this.file}.1`
-			fs.rmSync(old, { force: true })
-			fs.renameSync(this.file, old)
+			await this.io.remove(`${this.file}.1`)
+			await this.io.rename(this.file, `${this.file}.1`)
+			this.rotated = true
 		} catch {
-			// 首次写入时文件不存在
+			// 轮转失败就继续追加，不阻塞记录
 		}
 	}
 }
