@@ -252,7 +252,7 @@ export class ReaderView extends ItemView {
 			if (target?.closest('a, button, .grove-toolbar, .grove-annotation')) return
 			const sel = document.getSelection()
 			if (sel && !sel.isCollapsed) return
-			this.readerEl.toggleClass('is-bar-open', !this.readerEl.hasClass('is-bar-open'))
+			this.#toggleMobileBar()
 		})
 
 		const toolbar = root.createDiv('grove-toolbar')
@@ -803,7 +803,7 @@ export class ReaderView extends ItemView {
 			if (target?.closest('a, button, .grove-annotation')) return
 			const sel = doc.getSelection()
 			if (sel && !sel.isCollapsed) return
-			this.readerEl.toggleClass('is-bar-open', !this.readerEl.hasClass('is-bar-open'))
+			this.#toggleMobileBar()
 		})
 
 		doc.addEventListener('pointerup', (ev: PointerEvent) => {
@@ -1168,6 +1168,16 @@ export class ReaderView extends ItemView {
 		} catch {
 			return null
 		}
+	}
+
+	/** 手机端：直接改 inline transform，绕开 CSS 选择器差异 */
+	#toggleMobileBar(): void {
+		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
+		if (!bar) return
+		// 用 dataset 记状态：读 style.transform 会被浏览器规范化成 translateY(0px)，比较不可靠
+		const open = bar.dataset.barOpen === '1'
+		bar.dataset.barOpen = open ? '0' : '1'
+		bar.style.transform = open ? '' : 'translateY(0)'
 	}
 
 	#hostCoords(range: Range): { x: number; y: number } {
