@@ -3,7 +3,7 @@ import type GroveReaderPlugin from './main'
 import { FolderPromptModal, FolderSuggest, ConfirmModal, OpLogModal, TemplateEditModal } from './modals'
 import { APP_NAME, BACKUP_FOLDER_NAME, DEFAULT_SHELF_DISPLAY } from './types'
 import type { GroveSettings } from './types'
-import { isAbsolutePath } from './util'
+import { basenameOf, isAbsolutePath } from './util'
 import { LOGO_OPTIONS } from './logos'
 
 type SettingsTab = 'appearance' | 'shelf' | 'reading' | 'data'
@@ -174,7 +174,16 @@ export class GroveSettingTab extends PluginSettingTab {
 
 		// —— 隐藏的书 ——
 		containerEl.createEl('h3', { text: '隐藏与恢复' })
-		const hiddenCount = this.plugin.settings.hiddenBooks?.length ?? 0
+		const hiddenBooks = this.plugin.settings.hiddenBooks ?? []
+		const hiddenCount = hiddenBooks.length
+		if (hiddenCount) {
+			// 列出书名，别只给一个数字：恢复时才知道自己在恢复什么
+			const hiddenList = containerEl.createDiv('grove-hidden-books')
+			for (const p of hiddenBooks) {
+				const title = this.plugin.shelfCache.get(p)?.title || basenameOf(p)
+				hiddenList.createDiv('grove-hidden-book').setText(title)
+			}
+		}
 		new Setting(containerEl)
 			.setName('从书架移除的书籍')
 			.setDesc(hiddenCount

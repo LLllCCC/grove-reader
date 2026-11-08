@@ -1,3 +1,4 @@
+import { showAnnMenu } from './annMenu'
 import { ItemView, Menu, MenuItem, Notice, TFile, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import {
@@ -849,25 +850,16 @@ export class ReaderView extends ItemView {
 		const a = this.data?.annotations.find(x => x.cfi === detail.value)
 		if (!a) return
 		this.#revealInSidebar(a)
-		const menu = new Menu()
-		menu.addItem(item => item.setTitle('编辑评论').setIcon('message-square').onClick(() => this.#editComment(a)))
-		menu.addItem(item => {
-			// setSubmenu 运行时存在但未包含在官方类型定义中
-			const sub = (item.setTitle('更改颜色').setIcon('palette') as unknown as { setSubmenu(): Menu }).setSubmenu()
-			for (const c of HIGHLIGHT_COLORS) {
-				sub.addItem((ci: MenuItem) => ci.setTitle(c.name).onClick(() => void this.#changeColor(a, c.key)))
-			}
+		const point = this.#hostCoords(detail.range)
+		showAnnMenu({ clientX: point.x, clientY: point.y }, a.color, {
+			onEditComment: () => this.#editComment(a),
+			onChangeColor: (color: string) => void this.#changeColor(a, color),
+			onCopyText: () => {
+				void navigator.clipboard.writeText(a.text).then(() => new Notice('Grove Reader：已复制'))
+			},
+			onSendToCanvas: () => void this.plugin.exportToCanvas(this, [a.id]),
+			onDelete: () => this.#confirmDelete(a),
 		})
-		menu.addSeparator()
-		menu.addItem(item =>
-			item.setTitle('发送到 Canvas').setIcon('layout-dashboard').onClick(() => void this.plugin.exportToCanvas(this, [a.id])))
-		menu.addItem(item =>
-			item.setTitle('复制原文').setIcon('copy').onClick(() => {
-				void navigator.clipboard.writeText(a.text)
-				new Notice('Grove Reader：已复制')
-			}))
-		menu.addItem(item => item.setTitle('删除批注').setIcon('trash-2').onClick(() => this.#confirmDelete(a)))
-		menu.showAtPosition(this.#hostCoords(detail.range))
 	}
 
 	// ------------------------------------------------------------------

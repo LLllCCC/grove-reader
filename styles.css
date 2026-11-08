@@ -2946,3 +2946,16 @@
 	box-shadow: none !important;
 	outline: none !important;
 }
+
+/* 隐藏书籍列表 */
+.grove-hidden-books {
+	margin: 4px 0 10px;
+	padding: 6px 10px;
+	border-left: 2px solid var(--background-modifier-border);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-hidden-book {
+	padding: 2px 0;
+}
