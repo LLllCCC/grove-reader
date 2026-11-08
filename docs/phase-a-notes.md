@@ -42,7 +42,8 @@
 ### A 的实施顺序
 
 1. ✅（2026-11-08）`stats / oplog / lists / debugLog`：改为注入 `PlatformIO`，`await load()` 预载进内存，写入走 `writeJsonFile`（临时文件 + 原子改名）。桌面端行为与 API 不变，冒烟通过；真实数据验证 7 本统计 / 4 条操作记录 / 1 个书单。
-2. `bookshelf / search`：
+2. ✅（2026-11-08）`search`：全局批注索引改为读 `BookStore` 内存数据（`buildSearchIndex(books, bookExists)`），不再扫 `data/books`；冒烟覆盖书名清洗与命中过滤。
+   **待做** `bookshelf`：
    - `ShelfCache` 改走 PlatformIO（JSON + 封面目录）。
    - 目录扫描改用 `app.vault.getFiles()`，不再自己 `readdir`；移动端禁用库外绝对路径。
    - 全局批注检索直接读 `BookStore` 内存缓存，不再扫 books 目录。
