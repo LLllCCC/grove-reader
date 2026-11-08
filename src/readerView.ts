@@ -1,4 +1,4 @@
-import { ItemView, Menu, MenuItem, Notice, TFile, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
+import { Platform, ItemView, Menu, MenuItem, Notice, TFile, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import {
 	Annotation,
@@ -244,6 +244,16 @@ export class ReaderView extends ItemView {
 		const root = this.contentEl
 		root.empty()
 		root.addClass('grove-content')
+
+		// 手机没有 hover：点正文切换工具栏显隐
+		this.registerDomEvent(root, 'click', (ev: MouseEvent) => {
+			if (!Platform.isMobile) return
+			const target = ev.target as HTMLElement | null
+			if (target?.closest('a, button, .grove-toolbar, .grove-annotation')) return
+			const sel = document.getSelection()
+			if (sel && !sel.isCollapsed) return
+			root.toggleClass('is-bar-open', !root.hasClass('is-bar-open'))
+		})
 
 		const toolbar = root.createDiv('grove-toolbar')
 

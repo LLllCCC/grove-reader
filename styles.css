@@ -3018,3 +3018,8 @@ body.is-mobile .grove-jump-return {
 body.is-mobile .grove-jump-return {
 	bottom: calc(16px + 64px);
 }
+
+/* 移动端：点正文切换工具栏（没有 hover） */
+body.is-mobile .grove-reader.is-bar-open .grove-toolbar {
+	transform: translateY(0);
+}
