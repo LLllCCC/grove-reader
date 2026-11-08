@@ -125,6 +125,29 @@ export default class GroveReaderPlugin extends Plugin {
 		this.stats = new StatsStore(joinPath(this.dataRoot, 'data', 'stats.json'), io)
 		await this.stats.load()
 
+		// 移动端从后台回来时，Syncthing 可能刚同步完；主动对一遍磁盘
+		this.registerDomEvent(document, 'visibilitychange', () => {
+			if (document.hidden) return
+			void this.reloadAllBooks()
+		})
+
+		// 外部同步（Syncthing 等）改动批注 JSON 时，重新读进内存并刷新界面
+		this.registerEvent(this.app.vault.on('modify', file => {
+			if (!(file instanceof TFile) || file.extension !== 'json') return
+			if (!this.store.hasBookId(file.basename)) return
+			void this.store.reloadFromDisk(file.basename).then(updated => {
+				if (!updated) return
+				for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_READER)) {
+					const v = leaf.view as unknown as { refreshAnnotations?: () => void }
+					v.refreshAnnotations?.()
+				}
+				for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_TEXT)) {
+					const v = leaf.view as unknown as { refreshAnnotations?: () => void }
+					v.refreshAnnotations?.()
+				}
+			})
+		}))
+
 		this.registerView(VIEW_TYPE_GROVE_READER, leaf => new ReaderView(leaf, this))
 		this.registerView(VIEW_TYPE_GROVE_BOOKSHELF, leaf => new BookshelfView(leaf, this))
 		this.registerView(VIEW_TYPE_GROVE_TEXT, leaf => new TextView(leaf, this))
@@ -1123,6 +1146,20 @@ export default class GroveReaderPlugin extends Plugin {
 			if (fm && fm['grove-book'] === bookId) return child
 		}
 		return null
+	}
+
+	/** 重新读入全部批注数据（外部同步后调用），并刷新已打开的阅读视图 */
+	async reloadAllBooks(): Promise<void> {
+		for (const p of this.store.listBookPaths()) {
+			const id = this.store.bookId(p)
+			await this.store.reloadFromDisk(id)
+		}
+		for (const type of [VIEW_TYPE_GROVE_READER, VIEW_TYPE_GROVE_TEXT]) {
+			for (const leaf of this.app.workspace.getLeavesOfType(type)) {
+				const v = leaf.view as unknown as { refreshAnnotations?: () => void }
+				v.refreshAnnotations?.()
+			}
+		}
 	}
 
 	/** 从阅读笔记回写批注：先算差异、弹窗勾选，再写数据（不改笔记本身） */

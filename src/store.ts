@@ -107,6 +107,25 @@ export class BookStore {
 		return out
 	}
 
+	/** 这本书的数据是否在内存里（按 bookId 判断，给外部文件变更监听用） */
+	hasBookId(id: string): boolean {
+		return this.cache.has(id)
+	}
+
+	/** 外部（Syncthing 等）改动 JSON 后重新读入内存，返回是否真的更新了 */
+	async reloadFromDisk(id: string): Promise<boolean> {
+		const file = this.fileFor(id)
+		if (!(await this.io.exists(file))) return false
+		// 自己刚写完的文件不要立刻回读，否则会和排队中的写入打架
+		const pending = this.writes.get(id)
+		if (pending) await pending.catch(() => undefined)
+		const data = await this.#readWithRepair(id, file)
+		if (!data) return false
+		this.#normalize(data)
+		this.cache.set(id, data)
+		return true
+	}
+
 	hasDataFor(vaultPath: string): boolean {
 		return this.cache.has(this.bookId(vaultPath))
 	}
