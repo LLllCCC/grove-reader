@@ -55,6 +55,7 @@ PDF 作为第二阶段：如果 pdf.js worker 在移动 WebView 上无法跑通�
 4. 数据格式 `data/books/*.json` 不变。若必须变更，写迁移 + 保留回滚路径，并说明。
 5. 删除/覆盖类操作沿用现有确认弹窗、插件回收站、滚动备份机制；不要新造一套。
 6. 提交按阶段拆分，分支 `feature/mobile`，不要直接改主分支。
+7. **不要运行 `npm run deploy`**：`scripts/install-vault.mjs` 会把产物复制进 `D:\Obsidian\.obsidian\plugins\grove-reader`。需要部署验证时，改用一个独立的测试库路径，或手工把产物拷到测试库。
 
 ## 5. 测试环境
 

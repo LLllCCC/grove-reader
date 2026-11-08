@@ -38,7 +38,7 @@ if (process.argv.includes('--login')) {
 	const prompt = [
 		'阅读 docs/mobile-port.md（Grove Reader 移动端适配任务书），按阶段 A 开始实施。',
 		'先给出分阶段计划与改动文件清单，再动手；每个阶段结束跑 npm run build 与 npm run smoke。',
-		'不要修改 D:\\Obsidian 主库，测试用独立库；分支 feature/mobile。',
+		'不要修改 D:\\Obsidian 主库，也不要运行 npm run deploy（它会把产物写进主库）；测试用独立库，分支 feature/mobile。',
 	].join('\n')
 
 	// 账号可用的模型叫 Sonus（`--list-models` 只有它）；不传 -m 时默认 "auto" 会报不可用
