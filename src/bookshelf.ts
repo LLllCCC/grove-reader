@@ -9,6 +9,7 @@ import type GroveReaderPlugin from './main'
 import { FORMAT_LABELS, ShelfBookInfo, isReaderExt, isShelfExt } from './types'
 import { basenameOf, cleanBookTitle, duplicateKeyOf, formatAuthor, formatBytes, formatDuration, formatLanguageMap, isAbsolutePath, relativeTime, stripNumericTitlePrefix, stripTitleAuthor, truncate } from './util'
 import { readPdfShelfInfo } from './pdfThumbnail'
+import { PlatformIO, joinPath, readJsonFile, writeJsonFile } from './platformIO'
 import { BookInfoModal, ConfirmModal, CoverUrlModal, DeleteBookModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
 import type { BookInfoValues } from './modals'
 import type { BookList } from './lists'
@@ -113,36 +114,37 @@ export class ShelfCache {
 	private file: string
 	private coversDir: string
 	private data: ShelfCacheFile = { version: 1, entries: {} }
-	private saveTimer: NodeJS.Timeout | null = null
-	/** 封面 dataURL 缓存：卡片每次刷新都会取封面，避免反复同步读盘 + base64 */
+	private saveTimer: ReturnType<typeof setTimeout> | null = null
+	private queue: Promise<void> = Promise.resolve()
+	/** 封面 dataURL 缓存：卡片每次刷新都会取封面，避免反复读盘 + base64 */
 	private coverCache = new Map<string, string | null>()
 	private coverCacheChars = 0
+	private io: PlatformIO
 
-	constructor(rootDir: string) {
-		this.file = pathModule.join(rootDir, 'data', 'shelf.json')
-		this.coversDir = pathModule.join(rootDir, 'data', 'covers')
+	constructor(rootDir: string, io: PlatformIO) {
+		this.io = io
+		this.file = joinPath(rootDir, 'data', 'shelf.json')
+		this.coversDir = joinPath(rootDir, 'data', 'covers')
 	}
 
-	load(): void {
-		try {
-			const parsed = JSON.parse(fs.readFileSync(this.file, 'utf-8')) as ShelfCacheFile
-			if (parsed && typeof parsed === 'object' && parsed.entries) {
-				this.data = parsed
-				// 旧缓存里带数字前缀/下载站后缀的书名一次性洗掉；手动改过的不动
-				let changed = false
-				for (const entry of Object.values(this.data.entries)) {
-					if (!entry.title || entry.manualMeta) continue
-					const next = stripTitleAuthor(cleanBookTitle(stripNumericTitlePrefix(entry.title)), entry.author ?? '')
-					if (next !== entry.title) {
-						entry.title = next
-						changed = true
-					}
+	/** 启动时读缓存并把所有封面预热进内存，之后 coverDataUrl() 全程同步 */
+	async load(): Promise<void> {
+		const parsed = await readJsonFile<ShelfCacheFile>(this.io, this.file)
+		if (parsed && typeof parsed === 'object' && parsed.entries) {
+			this.data = parsed
+			// 旧缓存里带数字前缀/下载站后缀的书名一次性洗掉；手动改过的不动
+			let changed = false
+			for (const entry of Object.values(this.data.entries)) {
+				if (!entry.title || entry.manualMeta) continue
+				const next = stripTitleAuthor(cleanBookTitle(stripNumericTitlePrefix(entry.title)), entry.author ?? '')
+				if (next !== entry.title) {
+					entry.title = next
+					changed = true
 				}
-				if (changed) this.saveSoon()
 			}
-		} catch {
-			// 首次或损坏时使用空缓存
+			if (changed) this.saveSoon()
 		}
+		await this.#preloadCovers()
 	}
 
 	get(path: string): ShelfEntry | undefined {
@@ -169,11 +171,9 @@ export class ShelfCache {
 	removeCover(filename?: string): void {
 		if (!filename) return
 		this.#deleteCoverCache(filename)
-		try {
-			fs.rmSync(pathModule.join(this.coversDir, filename), { force: true })
-		} catch {
+		void this.io.remove(joinPath(this.coversDir, filename)).catch(() => {
 			// 封面可能已被手动删除
-		}
+		})
 	}
 
 	private saveSoon(): void {
@@ -189,25 +189,23 @@ export class ShelfCache {
 			clearTimeout(this.saveTimer)
 			this.saveTimer = null
 		}
-		try {
-			fs.mkdirSync(pathModule.dirname(this.file), { recursive: true })
-			const tmp = `${this.file}.tmp`
-			fs.writeFileSync(tmp, JSON.stringify(this.data), 'utf-8')
-			fs.renameSync(tmp, this.file)
-		} catch (e) {
-			console.error('[Grove Reader] 书架缓存写入失败', e)
-		}
+		const snapshot = this.data
+		this.queue = this.queue
+			.catch(() => undefined)
+			.then(() => writeJsonFile(this.io, this.file, snapshot))
+			.catch(e => {
+				console.error('[Grove Reader] 书架缓存写入失败', e)
+			})
+	}
+
+	async flush(): Promise<void> {
+		await this.queue
 	}
 
 	async saveCover(bookId: string, blob: Blob): Promise<string | undefined> {
 		try {
-			fs.mkdirSync(this.coversDir, { recursive: true })
 			const ext = blob.type.includes('png') ? 'png' : blob.type.includes('gif') ? 'gif' : 'jpg'
-			const name = `${bookId}.${ext}`
-			const buf = Buffer.from(await blob.arrayBuffer())
-			fs.writeFileSync(pathModule.join(this.coversDir, name), buf)
-			this.#deleteCoverCache(name)
-			return name
+			return await this.#writeCover(`${bookId}.${ext}`, await blob.arrayBuffer(), blob.type)
 		} catch (e) {
 			console.error('[Grove Reader] 封面保存失败', e)
 			return undefined
@@ -217,14 +215,9 @@ export class ShelfCache {
 	/** 用户手动选择的本地图片作为封面 */
 	async saveCustomCover(bookId: string, file: File): Promise<string | undefined> {
 		try {
-			fs.mkdirSync(this.coversDir, { recursive: true })
 			const lower = file.name.toLowerCase()
 			const ext = lower.endsWith('.png') ? 'png' : lower.endsWith('.gif') ? 'gif' : lower.endsWith('.webp') ? 'webp' : 'jpg'
-			const name = `${bookId}-custom.${ext}`
-			const buf = Buffer.from(await file.arrayBuffer())
-			fs.writeFileSync(pathModule.join(this.coversDir, name), buf)
-			this.#deleteCoverCache(name)
-			return name
+			return await this.#writeCover(`${bookId}-custom.${ext}`, await file.arrayBuffer(), file.type)
 		} catch (e) {
 			console.error('[Grove Reader] 自定义封面保存失败', e)
 			return undefined
@@ -234,15 +227,8 @@ export class ShelfCache {
 	/** 从网络图片字节保存自定义封面 */
 	async saveCustomCoverFromBuffer(bookId: string, data: ArrayBuffer, mime: string): Promise<string | undefined> {
 		try {
-			fs.mkdirSync(this.coversDir, { recursive: true })
-			const ext = mime.includes('png') ? 'png'
-				: mime.includes('gif') ? 'gif'
-				: mime.includes('webp') ? 'webp'
-				: 'jpg'
-			const name = `${bookId}-custom.${ext}`
-			fs.writeFileSync(pathModule.join(this.coversDir, name), Buffer.from(data))
-			this.#deleteCoverCache(name)
-			return name
+			const ext = mime.includes('png') ? 'png' : mime.includes('gif') ? 'gif' : mime.includes('webp') ? 'webp' : 'jpg'
+			return await this.#writeCover(`${bookId}-custom.${ext}`, data, mime)
 		} catch (e) {
 			console.error('[Grove Reader] 网络封面保存失败', e)
 			return undefined
@@ -257,27 +243,45 @@ export class ShelfCache {
 			this.coverCache.set(filename, cached)
 			return cached
 		}
-		let url: string | null = null
+		// 启动后新增的封面：后台补进缓存，本次先返回 null
+		void this.#loadCover(filename)
+		return null
+	}
+
+	async #writeCover(name: string, data: ArrayBuffer, mime: string): Promise<string> {
+		await this.io.mkdir(this.coversDir)
+		await this.io.writeBinary(joinPath(this.coversDir, name), data)
+		this.#deleteCoverCache(name)
+		this.#putCover(name, `data:${mime || mimeOf(name)};base64,${arrayBufferToBase64(data)}`)
+		return name
+	}
+
+	async #preloadCovers(): Promise<void> {
+		for (const entry of Object.values(this.data.entries)) {
+			if (entry.cover) await this.#loadCover(entry.cover)
+		}
+	}
+
+	async #loadCover(filename: string): Promise<void> {
+		if (this.coverCache.has(filename)) return
 		try {
-			const buf = fs.readFileSync(pathModule.join(this.coversDir, filename))
-			const mime = filename.endsWith('.png') ? 'image/png'
-				: filename.endsWith('.gif') ? 'image/gif'
-				: filename.endsWith('.webp') ? 'image/webp'
-				: 'image/jpeg'
-			url = `data:${mime};base64,${buf.toString('base64')}`
+			const buf = await this.io.readBinary(joinPath(this.coversDir, filename))
+			this.#putCover(filename, `data:${mimeOf(filename)};base64,${arrayBufferToBase64(buf)}`)
 		} catch {
-			url = null
+			this.#putCover(filename, null)
 		}
-		if (url !== null && url.length <= 2_000_000) {
-			while (this.coverCache.size >= MAX_CACHED_COVERS || this.coverCacheChars + url.length > MAX_CACHED_COVER_CHARS) {
-				const oldest = this.coverCache.keys().next().value as string | undefined
-				if (oldest === undefined) break
-				this.#deleteCoverCache(oldest)
-			}
-			this.coverCache.set(filename, url)
-			this.coverCacheChars += url.length
+	}
+
+	#putCover(filename: string, url: string | null): void {
+		if (url !== null && url.length > MAX_CACHED_COVER_CHARS) return
+		this.#deleteCoverCache(filename)
+		while (this.coverCache.size >= MAX_CACHED_COVERS || this.coverCacheChars + (url?.length ?? 0) > MAX_CACHED_COVER_CHARS) {
+			const oldest = this.coverCache.keys().next().value as string | undefined
+			if (oldest === undefined) break
+			this.#deleteCoverCache(oldest)
 		}
-		return url
+		this.coverCache.set(filename, url)
+		if (url) this.coverCacheChars += url.length
 	}
 
 	#deleteCoverCache(filename: string): void {
@@ -285,6 +289,23 @@ export class ShelfCache {
 		if (cached) this.coverCacheChars -= cached.length
 		this.coverCache.delete(filename)
 	}
+}
+
+function mimeOf(filename: string): string {
+	if (filename.endsWith('.png')) return 'image/png'
+	if (filename.endsWith('.gif')) return 'image/gif'
+	if (filename.endsWith('.webp')) return 'image/webp'
+	return 'image/jpeg'
+}
+
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+	const bytes = new Uint8Array(buf)
+	let binary = ''
+	const chunk = 0x8000
+	for (let i = 0; i < bytes.length; i += chunk) {
+		binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+	}
+	return btoa(binary)
 }
 
 // ------------------------------------------------------------------

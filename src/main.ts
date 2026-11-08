@@ -105,8 +105,8 @@ export default class GroveReaderPlugin extends Plugin {
 				new Notice('Grove Reader：批注数据保存失败（文件可能被 iCloud/杀软锁定），稍后会自动重试')
 			}
 		}
-		this.shelfCache = new ShelfCache(this.dataRoot)
-		this.shelfCache.load()
+		this.shelfCache = new ShelfCache(this.dataRoot, io)
+		await this.shelfCache.load()
 		this.lists = new ListsStore(this.dataRoot, io)
 		await this.lists.load()
 		this.stats = new StatsStore(joinPath(this.dataRoot, 'data', 'stats.json'), io)
