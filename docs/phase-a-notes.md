@@ -52,3 +52,14 @@
 5. 去掉 `manifest.isDesktopOnly`，推到独立测试库（`/sdcard/Documents/GroveTest`，不加入 Syncthing），真机跑完整链路。
 
 关键原则：**不要用一份移动构建覆盖电脑库里的插件**——手机上的 Obsidian 库与电脑通过 Syncthing 双向同步，直接装会反向覆盖 `D://Obsidian//.obsidian//plugins//grove-reader`。测试库必须独立。
+
+### bookshelf.ts 改造要点（下一步，未动工）
+
+1. `ShelfCache`：构造函数加 `PlatformIO`；`load()` 改 async（`readJsonFile`）；`saveNow()` 改排队 `writeJsonFile`；`flush()` 供卸载。
+2. 封面：
+   - 写入（`setCover`/`importCover` 等）改 `io.writeBinary`，写完立刻把 dataURL 塞进 `coverCache`，界面无等待。
+   - 读取：`load()` 里异步预热所有封面（17 本，几十 KB），`coverDataUrl()` 保持同步读缓存；移动端不需要再读盘。
+3. `scanBookFolders(folders, vaultBase)`：改为接收 `app.vault.getFiles()` 的路径数组，按文件夹前缀 + 扩展名过滤；绝对路径文件夹仅在桌面端用 fs 兜底（移动端忽略并提示）。
+4. `fs.statSync(...).size` → `app.vault.getAbstractFileByPath(rel) as TFile` 的 `stat.size`（同步）。
+5. `fs.existsSync(abs)` → 库内用 `getAbstractFileByPath`，库外用 `isAbsolutePath` + 桌面端 fs。
+6. 改完 `bookshelf.ts` 后，`main.ts` 的 `new ShelfCache(...)` 要传 io，并 `await shelfCache.load()`。
