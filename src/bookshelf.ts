@@ -500,13 +500,6 @@ export class BookshelfView extends ItemView {
 		}
 
 		const allPaths = this.#scan(folders)
-		if (Platform.isMobile) {
-			// 临时诊断：把扫描输入落到库根，方便 adb 拉取
-			const files = this.app.vault.getFiles().map(f => f.path)
-			void this.app.vault.adapter.write('grove-diag.json', JSON.stringify({
-				folders, total: files.length, matched: allPaths.length, sample: files.slice(0, 8),
-			}, null, 2))
-		}
 		this.#migrateStaleEntries(allPaths)
 		// 从书架移除但保留文件的书籍：仍在磁盘上，只是不显示
 		const hidden = new Set(plugin.settings.hiddenBooks ?? [])
