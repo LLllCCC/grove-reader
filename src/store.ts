@@ -1,33 +1,44 @@
-import fs from 'node:fs'
-import path from 'node:path'
 import { BookData, DATA_VERSION } from './types'
+import { PlatformIO, baseName, joinPath, stripExt } from './platformIO'
 import { basenameOf, bookIdFor, cleanBookTitle, stripNumericTitlePrefix, stripTitleAuthor } from './util'
 
 const BACKUP_INTERVAL_MS = 10 * 60 * 1000
 
 /**
- * 批注数据存储：每本书一个 JSON 文件，写入采用「临时文件 + 原子重命名」，
- * 覆盖前按时间间隔滚动备份，主文件损坏时自动从备份恢复。
+ * 批注数据存储：每本书一个 JSON 文件。
+ *
+ * 读：启动时 `preload()` 把 data/books 下的 JSON 一次性读进内存，之后 `load()` 是纯内存查表，
+ * 视图层与命令层不需要改成 async。
+ * 写：`save()` 立即更新内存并按书排队落盘（临时文件 + 原子重命名，覆盖前滚动备份）。
+ *      桌面走 Node fs，移动端走 vault.adapter —— 具体实现由 PlatformIO 决定。
  */
 export class BookStore {
 	/** 保存失败时的回调（主进程用于弹 Notice） */
 	onError?: (e: Error) => void
 
+	private cache = new Map<string, BookData>()
+	/** 每本书一条写入链，保证顺序，避免并发写同一文件 */
+	private writes = new Map<string, Promise<void>>()
+	private loaded = false
+	/** 预载失败时暂停写入：宁可弹错，也不能用空数据覆盖磁盘上的批注 */
+	private preloadError: Error | null = null
+
 	constructor(
 		public rootDir: string,
 		public maxBackups: number,
+		private io: PlatformIO,
 	) {}
 
 	private get booksDir(): string {
-		return path.join(this.rootDir, 'data', 'books')
+		return joinPath(this.rootDir, 'data', 'books')
 	}
 
 	private fileFor(id: string): string {
-		return path.join(this.booksDir, `${id}.json`)
+		return joinPath(this.booksDir, `${id}.json`)
 	}
 
 	private backupsDir(id: string): string {
-		return path.join(this.rootDir, 'data', 'backups', id)
+		return joinPath(this.rootDir, 'data', 'backups', id)
 	}
 
 	bookId(vaultPath: string): string {
@@ -38,88 +49,103 @@ export class BookStore {
 		return { version: DATA_VERSION, bookPath: vaultPath, title: '', author: '', annotations: [] }
 	}
 
+	/** 读取全部批注数据；必须在打开任何书之前 await 一次 */
+	async preload(): Promise<void> {
+		if (this.loaded) return
+		this.loaded = true
+		try {
+			await this.io.mkdir(this.booksDir)
+		} catch {
+			// 目录已存在
+		}
+		await this.#cleanStaleTmp()
+		let files: string[] = []
+		try {
+			const listed = await this.io.list(this.booksDir)
+			files = listed.files.filter(f => f.endsWith('.json'))
+		} catch (e) {
+			this.preloadError = e instanceof Error ? e : new Error(String(e))
+			console.error('[Grove Reader] 批注数据预载失败，已暂停写入', e)
+			this.onError?.(this.preloadError)
+			return
+		}
+		for (const file of files) {
+			const id = stripExt(baseName(file))
+			const data = await this.#readWithRepair(id, file)
+			if (!data) continue
+			this.#normalize(data)
+			this.cache.set(id, data)
+		}
+	}
+
 	load(vaultPath: string): BookData {
 		const id = this.bookId(vaultPath)
-		fs.mkdirSync(this.booksDir, { recursive: true })
-		this.#cleanStaleTmp()
-		let file = this.fileFor(id)
-		if (!fs.existsSync(file)) {
-			// 书被移动/重命名后 bookId 变了：按 bookPath 扫描找回旧数据
-			const recovered = this.#recoverByBookPath(id, vaultPath)
-			if (recovered) file = recovered
-		}
-		if (fs.existsSync(file)) {
-			const data = this.#readWithRepair(id, file)
-			if (data) {
-				if (data.bookPath !== vaultPath) data.bookPath = vaultPath
-				this.#normalize(data)
-				return data
+		const cached = this.cache.get(id)
+		if (cached) {
+			if (cached.bookPath !== vaultPath) {
+				cached.bookPath = vaultPath
+				this.save(cached)
 			}
+			return cached
 		}
+		// 书被移动/重命名后 bookId 变了：从内存里按 bookPath / 唯一文件名找回
+		const recovered = this.#recoverInCache(id, vaultPath)
+		if (recovered) return recovered
 		return this.fresh(vaultPath)
 	}
 
 	getPathForBookId(id: string): string | null {
-		const file = this.fileFor(id)
-		if (!fs.existsSync(file)) return null
-		try {
-			const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as { bookPath?: unknown }
-			return typeof data?.bookPath === 'string' ? data.bookPath : null
-		} catch {
-			return null
-		}
+		return this.cache.get(id)?.bookPath ?? null
 	}
 
 	/** 所有已有批注数据的书籍路径（批量维护、刷新笔记用） */
 	listBookPaths(): string[] {
-		try {
-			const out: string[] = []
-			for (const f of fs.readdirSync(this.booksDir)) {
-				if (!f.endsWith('.json')) continue
-				try {
-					const d = JSON.parse(fs.readFileSync(path.join(this.booksDir, f), 'utf-8')) as BookData
-					if (typeof d?.bookPath === 'string' && d.bookPath) out.push(d.bookPath)
-				} catch {
-					// 单个文件坏掉不影响其余书籍
-				}
-			}
-			return out
-		} catch {
-			return []
+		const out: string[] = []
+		for (const data of this.cache.values()) {
+			if (typeof data.bookPath === 'string' && data.bookPath) out.push(data.bookPath)
 		}
+		return out
 	}
 
 	hasDataFor(vaultPath: string): boolean {
-		return fs.existsSync(this.fileFor(this.bookId(vaultPath)))
+		return this.cache.has(this.bookId(vaultPath))
 	}
 
-	/** 书改名/移动后把批注 JSON 迁到新路径 ID 下；新旧任一侧缺数据或新路径已有数据则不动 */
+	/** 书改名/移动后把批注数据迁到新路径 ID 下；新旧任一侧缺数据或新路径已有数据则不动 */
 	migrateData(oldPath: string, newPath: string): void {
 		const oldId = this.bookId(oldPath)
 		const newId = this.bookId(newPath)
 		if (oldId === newId) return
-		const oldFile = this.fileFor(oldId)
-		const newFile = this.fileFor(newId)
-		if (!fs.existsSync(oldFile) || fs.existsSync(newFile)) return
-		try {
-			fs.renameSync(oldFile, newFile)
-			const data = this.#readWithRepair(newId, newFile)
-			if (data) {
-				data.bookPath = newPath
-				this.#saveInner(data)
+		const data = this.cache.get(oldId)
+		if (!data || this.cache.has(newId)) return
+		this.cache.delete(oldId)
+		data.bookPath = newPath
+		this.cache.set(newId, data)
+		void (async () => {
+			try {
+				await this.io.mkdir(this.booksDir)
+				await this.io.rename(this.fileFor(oldId), this.fileFor(newId))
+			} catch (e) {
+				console.error('[Grove Reader] 批注数据迁移失败', e)
 			}
-		} catch (e) {
-			console.error('[Grove Reader] 批注数据迁移失败', e)
-		}
+			this.save(data)
+		})()
 	}
 
 	save(data: BookData): void {
-		try {
-			this.#saveInner(data)
-		} catch (e) {
-			// 保存永不抛出（iCloud/杀软锁文件是常态环境），错误经回调上报
-			this.onError?.(e instanceof Error ? e : new Error(String(e)))
+		if (this.preloadError) {
+			// 读不到旧数据时不要写：否则会用一份空数据覆盖掉磁盘上的批注
+			return
 		}
+		this.#normalize(data)
+		const id = this.bookId(data.bookPath)
+		this.cache.set(id, data)
+		this.#enqueue(id, data)
+	}
+
+	/** 等待所有排队中的写入落盘（视图关闭、插件卸载、测试断言前调用） */
+	async flush(): Promise<void> {
+		await Promise.all([...this.writes.values()])
 	}
 
 	/** 清掉某本书记录的笔记路径（笔记已删除时用），不动批注 */
@@ -133,37 +159,53 @@ export class BookStore {
 	/** 删除某本书的全部批注数据与自动备份（书籍文件由调用方处理） */
 	delete(vaultPath: string): void {
 		const id = this.bookId(vaultPath)
-		try {
-			fs.rmSync(this.fileFor(id), { force: true })
-		} catch (e) {
-			console.error('[Grove Reader] 删除批注数据失败', e)
-		}
-		try {
-			fs.rmSync(this.backupsDir(id), { recursive: true, force: true })
-		} catch {
-			// 没有备份目录是常态
-		}
+		this.cache.delete(id)
+		void (async () => {
+			try {
+				await this.io.remove(this.fileFor(id))
+			} catch (e) {
+				console.error('[Grove Reader] 删除批注数据失败', e)
+			}
+			try {
+				await this.io.removeDir(this.backupsDir(id))
+			} catch {
+				// 没有备份目录是常态
+			}
+		})()
 	}
 
-	#saveInner(data: BookData): void {
-		this.#normalize(data)
-		const id = this.bookId(data.bookPath)
-		fs.mkdirSync(this.booksDir, { recursive: true })
+	#enqueue(id: string, data: BookData): void {
+		const prev = this.writes.get(id) ?? Promise.resolve()
+		const next = prev
+			.catch(() => undefined)
+			.then(() => this.#persist(id, data))
+			.catch(e => {
+				// 保存永不抛出（iCloud/杀软锁文件是常态环境），错误经回调上报
+				this.onError?.(e instanceof Error ? e : new Error(String(e)))
+			})
+		this.writes.set(id, next)
+		void next.finally(() => {
+			if (this.writes.get(id) === next) this.writes.delete(id)
+		})
+	}
+
+	async #persist(id: string, data: BookData): Promise<void> {
+		await this.io.mkdir(this.booksDir)
 		const file = this.fileFor(id)
 		const tmp = `${file}.tmp`
-		fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8')
-		if (fs.existsSync(file)) this.#maybeBackup(id, file)
+		await this.io.write(tmp, JSON.stringify(data, null, 2))
+		if (await this.io.exists(file)) await this.#maybeBackup(id, file)
 		try {
-			fs.renameSync(tmp, file)
+			await this.io.rename(tmp, file)
 		} catch {
 			// iCloud 同步/杀软可能锁定目标导致 rename 被拒（EPERM）：
 			// 降级为拷贝写入（失去原子性但保证数据落盘）
 			try {
-				fs.copyFileSync(tmp, file)
-				fs.rmSync(tmp, { force: true })
+				await this.io.copy(tmp, file)
+				await this.io.remove(tmp)
 			} catch (copyErr) {
 				try {
-					fs.rmSync(tmp, { force: true })
+					await this.io.remove(tmp)
 				} catch {
 					// ignore
 				}
@@ -185,54 +227,51 @@ export class BookStore {
 		if (typeof data.templateId !== 'string' || !data.templateId) delete data.templateId
 	}
 
-	#recoverByBookPath(id: string, vaultPath: string): string | null {
-		let exact: string | null = null
+	/** 在内存里按 bookPath / 唯一文件名找回旧 ID 的数据，并把它挂到新 ID 下 */
+	#recoverInCache(id: string, vaultPath: string): BookData | null {
+		let exactKey: string | null = null
 		const byName: string[] = []
-		try {
-			for (const name of fs.readdirSync(this.booksDir)) {
-				if (!name.endsWith('.json')) continue
-				const candidate = path.join(this.booksDir, name)
-				try {
-					const data = JSON.parse(fs.readFileSync(candidate, 'utf-8')) as { bookPath?: unknown }
-					if (typeof data?.bookPath !== 'string') continue
-					if (data.bookPath === vaultPath) {
-						exact = candidate
-						break
-					}
-					if (basenameOf(data.bookPath) === basenameOf(vaultPath)) byName.push(candidate)
-				} catch {
-					// 跳过无法解析的文件
-				}
+		for (const [key, data] of this.cache) {
+			if (typeof data.bookPath !== 'string') continue
+			if (data.bookPath === vaultPath) {
+				exactKey = key
+				break
 			}
-		} catch {
-			return null
+			if (basenameOf(data.bookPath) === basenameOf(vaultPath)) byName.push(key)
 		}
-		// 文件名匹配仅在唯一命中时使用，避免误认领
-		const chosen = exact ?? (byName.length === 1 ? byName[0] : null)
+		const chosen = exactKey ?? (byName.length === 1 ? byName[0] : null)
 		if (!chosen) return null
-		try {
-			const target = this.fileFor(id)
-			fs.renameSync(chosen, target)
-			return target
-		} catch {
-			return null
-		}
+		const data = this.cache.get(chosen)
+		if (!data) return null
+		this.cache.delete(chosen)
+		data.bookPath = vaultPath
+		this.cache.set(id, data)
+		// 文件改名放到后台，读路径不等 IO
+		void (async () => {
+			try {
+				await this.io.rename(this.fileFor(chosen), this.fileFor(id))
+			} catch {
+				// 旧文件可能已被移走，不影响内存数据
+			}
+			this.save(data)
+		})()
+		return data
 	}
 
-	#readWithRepair(id: string, file: string): BookData | null {
+	async #readWithRepair(id: string, file: string): Promise<BookData | null> {
 		try {
-			return JSON.parse(fs.readFileSync(file, 'utf-8')) as BookData
+			return JSON.parse(await this.io.read(file)) as BookData
 		} catch {
 			// 主文件损坏：移开留档，再尝试从最新备份恢复
 			try {
-				fs.renameSync(file, `${file}.corrupt-${Date.now()}`)
+				await this.io.rename(file, `${file}.corrupt-${Date.now()}`)
 			} catch {
 				// ignore
 			}
-			for (const backup of this.#listBackups(id)) {
+			for (const backup of await this.#listBackups(id)) {
 				try {
-					const data = JSON.parse(fs.readFileSync(backup, 'utf-8')) as BookData
-					fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf-8')
+					const data = JSON.parse(await this.io.read(backup)) as BookData
+					await this.io.write(file, JSON.stringify(data, null, 2))
 					return data
 				} catch {
 					continue
@@ -242,28 +281,25 @@ export class BookStore {
 		}
 	}
 
-	#listBackups(id: string): string[] {
+	async #listBackups(id: string): Promise<string[]> {
 		try {
-			const dir = this.backupsDir(id)
-			return fs.readdirSync(dir)
-				.filter(n => n.endsWith('.json'))
-				.sort()
-				.reverse()
-				.map(n => path.join(dir, n))
+			const listed = await this.io.list(this.backupsDir(id))
+			return listed.files.filter(f => f.endsWith('.json')).sort().reverse()
 		} catch {
 			return []
 		}
 	}
 
 	/** 清理进程被杀留下的陈旧 .tmp（写入后被杀会残留在 books 目录）；只动一天以上的，避免误删正在写的 */
-	#cleanStaleTmp(): void {
+	async #cleanStaleTmp(): Promise<void> {
 		try {
+			const listed = await this.io.list(this.booksDir)
 			const now = Date.now()
-			for (const name of fs.readdirSync(this.booksDir)) {
-				if (!name.endsWith('.tmp')) continue
-				const p = path.join(this.booksDir, name)
+			for (const file of listed.files) {
+				if (!file.endsWith('.tmp')) continue
 				try {
-					if (now - fs.statSync(p).mtimeMs > 24 * 60 * 60 * 1000) fs.rmSync(p, { force: true })
+					const stat = await this.io.stat(file)
+					if (stat && now - stat.mtime > 24 * 60 * 60 * 1000) await this.io.remove(file)
 				} catch {
 					// ignore
 				}
@@ -273,22 +309,24 @@ export class BookStore {
 		}
 	}
 
-	#maybeBackup(id: string, file: string): void {
+	async #maybeBackup(id: string, file: string): Promise<void> {
 		if (this.maxBackups <= 0) return
-		const backups = this.#listBackups(id)
+		const backups = await this.#listBackups(id)
 		const latest = backups[0]
 		if (latest) {
 			try {
-				if (Date.now() - fs.statSync(latest).mtimeMs < BACKUP_INTERVAL_MS) return
+				const stat = await this.io.stat(latest)
+				if (stat && Date.now() - stat.mtime < BACKUP_INTERVAL_MS) return
 			} catch {
 				// 备份文件状态异常则继续写新备份
 			}
 		}
-		fs.mkdirSync(this.backupsDir(id), { recursive: true })
-		fs.copyFileSync(file, path.join(this.backupsDir(id), `${Date.now()}.json`))
-		for (const stale of this.#listBackups(id).slice(this.maxBackups)) {
+		await this.io.mkdir(this.backupsDir(id))
+		await this.io.copy(file, joinPath(this.backupsDir(id), `${Date.now()}.json`))
+		const after = await this.#listBackups(id)
+		for (const stale of after.slice(this.maxBackups)) {
 			try {
-				fs.unlinkSync(stale)
+				await this.io.remove(stale)
 			} catch {
 				// ignore
 			}

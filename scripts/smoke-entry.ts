@@ -3,6 +3,7 @@ import path from 'node:path'
 import os from 'node:os'
 import assert from 'node:assert'
 import { BookStore } from '../src/store'
+import { DesktopIO } from '../src/desktopIO'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, NOTE_BEGIN, NOTE_END, renderNoteTemplate } from '../src/notes'
 import { StatsStore, todayKey } from '../src/stats'
 import { BookData } from '../src/types'
@@ -10,8 +11,14 @@ import { compareCfi, formatDuration, relativeTime } from '../src/util'
 import { applySync, normalizeExcerpt, parseNoteEntries, planSync } from '../src/noteSync'
 import { appendCards, buildCardText, emptyCanvas, parseCanvas, serializeCanvas, shortTitle } from '../src/canvas'
 
+async function main(): Promise<void> {
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-data-'))
-const store = new BookStore(tmp, 2)
+const store = new BookStore(tmp, 2, new DesktopIO())
+await store.preload()
+const save = async (d: BookData): Promise<void> => {
+	store.save(d)
+	await store.flush()
+}
 const bookPath = 'Books/林间漫步.epub'
 
 // 1. 首次 load → fresh
@@ -32,24 +39,31 @@ d1.annotations.push({
 	sectionIndex: 0,
 	chapter: '第一章',
 })
-store.save(d1)
+await save(d1)
 const d2 = store.load(bookPath)
 assert.equal(d2.annotations.length, 1)
 assert.equal(d2.annotations[0].note, '想法')
 
 // 3. 再存一次（写入备份），随后破坏主文件 → 从备份自动恢复
-store.save(d2)
+await save(d2)
 const id = store.bookId(bookPath)
 const mainFile = path.join(tmp, 'data', 'books', `${id}.json`)
 assert.ok(fs.existsSync(mainFile))
 fs.writeFileSync(mainFile, '{corrupted json!', 'utf-8')
-const d3 = store.load(bookPath)
+// 新实例启动时才会扫描磁盘并修复，模拟重启
+const store2 = new BookStore(tmp, 2, new DesktopIO())
+await store2.preload()
+const save2 = async (d: BookData): Promise<void> => {
+	store2.save(d)
+	await store2.flush()
+}
+const d3 = store2.load(bookPath)
 assert.equal(d3.annotations.length, 1, '损坏后应从备份恢复')
 assert.equal(fs.readFileSync(mainFile, 'utf-8').slice(0, 1), '{')
 
 // 4. 书籍移动（basename 不变）→ 按 bookPath 扫描找回
-store.save({ ...d3, bookPath })
-const moved = store.load('Other/林间漫步.epub')
+await save2({ ...d3, bookPath })
+const moved = store2.load('Other/林间漫步.epub')
 assert.equal(moved.annotations.length, 1, '移动后应找回旧数据')
 assert.equal(moved.bookPath, 'Other/林间漫步.epub')
 
@@ -152,28 +166,31 @@ assert.equal((fixed2.match(new RegExp(NOTE_END.replace(/[.*+?^${}()|[\]\\]/g, '\
 
 // 11. maxBackups = 0：完全不写备份
 const tmp0 = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-nobackup-'))
-const store0 = new BookStore(tmp0, 0)
+const store0 = new BookStore(tmp0, 0, new DesktopIO())
+await store0.preload()
 const p0 = 'Zero/备份关闭.epub'
 const s0 = store0.load(p0)
 s0.title = 't'
 store0.save(s0)
+await store0.flush()
 store0.save(store0.load(p0))
+await store0.flush()
 const backups0 = path.join(tmp0, 'data', 'backups', store0.bookId(p0))
 assert.ok(!fs.existsSync(backups0) || fs.readdirSync(backups0).length === 0, 'maxBackups=0 不应留下备份')
 
 // 12. 陈旧 .tmp 清理：超过一天的删，一天内的留
 const tmpT = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-tmp-'))
-const storeT = new BookStore(tmpT, 2)
 const pT = 'Tmp/清理测试.epub'
-storeT.load(pT)
 const booksDirT = path.join(tmpT, 'data', 'books')
+fs.mkdirSync(booksDirT, { recursive: true })
 const staleTmp = path.join(booksDirT, 'deadbeef.json.tmp')
 fs.writeFileSync(staleTmp, '{}', 'utf-8')
 const old = new Date(Date.now() - 25 * 60 * 60 * 1000)
 fs.utimesSync(staleTmp, old, old)
 const freshTmp = path.join(booksDirT, 'alive.json.tmp')
 fs.writeFileSync(freshTmp, '{}', 'utf-8')
-storeT.load(pT)
+const storeT = new BookStore(tmpT, 2, new DesktopIO())
+await storeT.preload()
 assert.ok(!fs.existsSync(staleTmp), '超过一天的 .tmp 应被清理')
 assert.ok(fs.existsSync(freshTmp), '一天内的 .tmp 不应被误删')
 
@@ -350,3 +367,9 @@ assert.equal(shortTitle('枪炮、病菌与钢铁（全新版本，重磅上市�
 assert.equal(shortTitle('置身事内：中国政府与经济发展'), '置身事内')
 
 console.log('SMOKE OK')
+}
+
+main().catch(e => {
+	console.error(e)
+	process.exit(1)
+})

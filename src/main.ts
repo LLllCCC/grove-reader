@@ -38,6 +38,7 @@ import { isReaderExt, isShelfExt } from './types'
 import { usageDocMarkdown, USAGE_DOC_NAME } from './usageDoc'
 import { LOGO_OPTIONS, logoById } from './logos'
 import { OpLog } from './oplog'
+import { createPlatformIO } from './platformFactory'
 import { DebugLog } from './debugLog'
 import { buildHealthReport, healthCleanupCount, HealthReport } from './health'
 import { TrashStore } from './trash'
@@ -89,7 +90,9 @@ export default class GroveReaderPlugin extends Plugin {
 			this.oplog.add('回收站清理', `自动清理 ${purged} 项`)
 			this.debug('trash', 'purge expired', { count: purged })
 		}
-		this.store = new BookStore(this.dataRoot, this.settings.maxBackups)
+		const io = await createPlatformIO(this.app)
+		this.store = new BookStore(this.dataRoot, this.settings.maxBackups, io)
+		await this.store.preload()
 		let lastSaveErrorAt = 0
 		this.store.onError = e => {
 			console.error('[Grove Reader] 批注数据保存失败', e)
@@ -142,7 +145,8 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	onunload(): void {
-		// 各视图的 onClose 会负责落盘与销毁渲染器
+		// 各视图的 onClose 会负责落盘与销毁渲染器；这里再兜一层排队中的批注写入
+		void this.store?.flush()
 		this.stats?.saveNow()
 		this.oplog?.saveNow()
 	}
