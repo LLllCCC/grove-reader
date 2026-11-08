@@ -2935,3 +2935,14 @@
 	font-size: var(--font-ui-smaller);
 	white-space: nowrap;
 }
+
+/* 主题会给 input:focus 加边框/背景：嵌在自定义容器里就变成「框里套框」 */
+.grove-shelf-search input,
+.grove-shelf-search input:hover,
+.grove-shelf-search input:focus,
+.grove-shelf-search input:focus-visible {
+	border: none !important;
+	background: transparent !important;
+	box-shadow: none !important;
+	outline: none !important;
+}
