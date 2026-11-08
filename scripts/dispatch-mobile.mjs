@@ -41,9 +41,12 @@ if (process.argv.includes('--login')) {
 		'不要修改 D:\\Obsidian 主库，测试用独立库；分支 feature/mobile。',
 	].join('\n')
 
-	const args = [CLI_JS, '-p', prompt, '-w', repo, '--permission-mode', 'accept_edits']
+	// 账号可用的模型叫 Sonus（`--list-models` 只有它）；不传 -m 时默认 "auto" 会报不可用
+	const model = process.env.QODER_MODEL || 'Sonus'
+	const args = [CLI_JS, '-m', model, '-p', prompt, '-w', repo, '--permission-mode', 'accept_edits']
 
 	console.log('▶ Qoder CLI:', CLI_JS)
+	console.log('▶ 模型:', model)
 	console.log('▶ 工作目录:', repo)
 	console.log('▶ 任务书: docs/mobile-port.md\n')
 
