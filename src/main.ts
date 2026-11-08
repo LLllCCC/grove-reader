@@ -128,6 +128,9 @@ export default class GroveReaderPlugin extends Plugin {
 		// 手机上 Obsidian 对外部同步的文件不一定发 modify 事件；定时对一遍盘（17 个小文件，很轻）
 		this.registerInterval(window.setInterval(() => void this.reloadAllBooks(), 15000))
 
+		// 手机上 Obsidian 对外部同步的文件不一定发 modify 事件；定时对一遍盘（17 个小文件，很轻）
+		this.registerInterval(window.setInterval(() => void this.reloadAllBooks(), 15000))
+
 		// 移动端从后台回来时，Syncthing 可能刚同步完；主动对一遍磁盘
 		this.registerDomEvent(document, 'visibilitychange', () => {
 			if (document.hidden) return
