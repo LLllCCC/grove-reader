@@ -252,7 +252,7 @@ export class ReaderView extends ItemView {
 			if (target?.closest('a, button, .grove-toolbar, .grove-annotation')) return
 			const sel = document.getSelection()
 			if (sel && !sel.isCollapsed) return
-			root.toggleClass('is-bar-open', !root.hasClass('is-bar-open'))
+			this.readerEl.toggleClass('is-bar-open', !this.readerEl.hasClass('is-bar-open'))
 		})
 
 		const toolbar = root.createDiv('grove-toolbar')
@@ -796,6 +796,16 @@ export class ReaderView extends ItemView {
 			this.wheelDocs.add(doc)
 			doc.addEventListener('wheel', (we: WheelEvent) => this.#onWheel(we), { passive: false })
 		}
+		// EPUB 正文在 iframe 里，点击不会冒泡到宿主，必须单独在 doc 上监听
+		doc.addEventListener('click', (ev: MouseEvent) => {
+			if (!Platform.isMobile) return
+			const target = ev.target as HTMLElement | null
+			if (target?.closest('a, button, .grove-annotation')) return
+			const sel = doc.getSelection()
+			if (sel && !sel.isCollapsed) return
+			this.readerEl.toggleClass('is-bar-open', !this.readerEl.hasClass('is-bar-open'))
+		})
+
 		doc.addEventListener('pointerup', (ev: PointerEvent) => {
 			const t = ev.target
 			if (t instanceof Element && t.closest('.grove-sel-popup')) return
