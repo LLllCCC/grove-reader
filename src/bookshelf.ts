@@ -443,7 +443,10 @@ export class BookshelfView extends ItemView {
 				this.#applySearch()
 			}, 120)
 		})
-		this.sortSelect = this.toolsEl.createEl('select', { cls: 'dropdown' })
+		// 排序单独包一层并带「排序」字样：否则它和搜索框长得一样，容易被当成第二个搜索框
+		const sortWrap = this.toolsEl.createDiv('grove-shelf-sort')
+		sortWrap.createSpan('grove-shelf-sort-label').setText('排序')
+		this.sortSelect = sortWrap.createEl('select', { cls: 'dropdown' })
 		for (const [key, label] of SORT_OPTIONS) this.sortSelect.createEl('option', { value: key, text: label })
 		this.sortSelect.value = this.plugin.settings.shelfSort
 		this.sortSelect.addEventListener('change', () => {

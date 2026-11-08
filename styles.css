@@ -2913,3 +2913,25 @@
 	flex: 1;
 	min-width: 0;
 }
+
+/* 书架排序：和搜索框区分开，避免看起来像第二个输入框 */
+.grove-shelf-tools {
+	flex-wrap: nowrap;
+}
+
+.grove-shelf-search {
+	min-width: 0;
+}
+
+.grove-shelf-sort {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: none;
+}
+
+.grove-shelf-sort-label {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	white-space: nowrap;
+}
