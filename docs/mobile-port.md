@@ -2,7 +2,7 @@
 
 > 这份文档是交给 Qoder（或其它编码智能体）的完整交接说明。动手前先读 README.md 与 `src/`，不要凭猜测改结构。
 >
-> 派发前先在本机终端完成一次 `qodercli login`；`node scripts/dispatch-mobile.mjs` 会先检查登录状态。
+> 派发前先在仓库根目录执行一次 `node scripts/dispatch-mobile.mjs --login` 完成 Qoder CLI 授权；`node scripts/dispatch-mobile.mjs` 会先检查登录状态。
 
 ## 1. 背景
 
