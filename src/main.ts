@@ -314,7 +314,20 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	loadSearchIndex(): SearchDoc[] {
-		return buildSearchIndex(this.dataRoot, this.vaultBase)
+		const books = this.store.listBookPaths().map(p => this.store.load(p))
+		return buildSearchIndex(books, p => this.#bookFileExists(p))
+	}
+
+	/** 书还在不在：库内走 vault 索引，库外绝对路径只在桌面端查磁盘 */
+	#bookFileExists(path: string): boolean {
+		if (isAbsolutePath(path)) {
+			try {
+				return fs.existsSync(path)
+			} catch {
+				return false
+			}
+		}
+		return this.app.vault.getAbstractFileByPath(path) !== null
 	}
 
 	showSearch(): void {

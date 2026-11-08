@@ -10,6 +10,7 @@ import { StatsStore, todayKey } from '../src/stats'
 import { BookData } from '../src/types'
 import { bookIdFor, compareCfi, formatDuration, relativeTime } from '../src/util'
 import { applySync, normalizeExcerpt, parseNoteEntries, planSync } from '../src/noteSync'
+import { buildSearchIndex, searchDocs } from '../src/search'
 import { appendCards, buildCardText, emptyCanvas, parseCanvas, serializeCanvas, shortTitle } from '../src/canvas'
 
 async function main(): Promise<void> {
@@ -375,6 +376,20 @@ for (const c of ['Grove Reader/书籍/枪炮.epub', 'Books/a b/c.epub', '中文/
 	assert.equal(bookIdFor(c), expected, 'sha1 不一致: ' + c)
 }
 assert.equal(bookIdFor('中文/路径 with space.epub'), bookIdFor('中文/路径 with space.epub'))
+
+// 26. 全局检索索引从内存数据生成，不再扫目录
+const idx = buildSearchIndex(
+	[{ version: 1, bookPath: 'Books/a.epub', title: '书名A（作者）', author: '作者', annotations: [
+		{ id: 'x', cfi: 'epubcfi(/6/2)', text: '关键词命中', color: 'yellow', note: '备注', createdAt: 1, updatedAt: 2 },
+		{ id: 'y', cfi: 'epubcfi(/6/4)', text: '另一段', color: 'yellow', createdAt: 1, updatedAt: 1 },
+	] }],
+	p => p === 'Books/a.epub',
+)
+assert.equal(idx.length, 2)
+assert.equal(idx[0].bookTitle, '书名A')
+assert.equal(idx[0].bookExists, true)
+assert.equal(searchDocs(idx, '关键词').length, 1)
+assert.equal(searchDocs(idx, '关键词', { onlyNotes: true }).length, 1)
 
 console.log('SMOKE OK')
 }

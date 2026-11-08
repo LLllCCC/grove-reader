@@ -1,7 +1,5 @@
-import fs from 'node:fs'
-import pathModule from 'node:path'
-import { Annotation, HIGHLIGHT_COLORS, colorName } from './types'
-import { bookIdFor, cleanBookTitle, isAbsolutePath, stripTitleAuthor } from './util'
+import { Annotation, BookData, HIGHLIGHT_COLORS, colorName } from './types'
+import { basenameOf, bookIdFor, cleanBookTitle, stripTitleAuthor } from './util'
 
 export interface SearchDoc {
 	bookPath: string
@@ -18,35 +16,22 @@ export interface SearchOptions {
 	onlyNotes?: boolean
 }
 
-export function buildSearchIndex(dataRoot: string, vaultBase: string): SearchDoc[] {
-	const booksDir = pathModule.join(dataRoot, 'data', 'books')
-	let names: string[] = []
-	try {
-		names = fs.readdirSync(booksDir).filter(n => n.endsWith('.json'))
-	} catch {
-		return []
-	}
+/**
+ * 全局批注索引直接由 BookStore 的内存数据生成，不再扫 data/books 目录：
+ * 移动端没有 Node fs，而且启动时已经全部载入内存，没必要再读一遍盘。
+ */
+export function buildSearchIndex(books: BookData[], bookExists: (path: string) => boolean): SearchDoc[] {
 	const docs: SearchDoc[] = []
-	for (const name of names) {
-		let data: {
-			bookPath?: string
-			title?: string
-			author?: string
-			notePath?: string
-			annotations?: Annotation[]
-		}
-		try {
-			data = JSON.parse(fs.readFileSync(pathModule.join(booksDir, name), 'utf-8'))
-		} catch {
-			continue
-		}
+	for (const data of books) {
 		const bookPath = typeof data.bookPath === 'string' ? data.bookPath : ''
-		const abs = bookPath ? (isAbsolutePath(bookPath) ? bookPath : pathModule.join(vaultBase, bookPath)) : ''
-		const bookExists = !!abs && fs.existsSync(abs)
+		if (!bookPath) continue
 		const author = typeof data.author === 'string' ? data.author : ''
-		const bookTitle = stripTitleAuthor(cleanBookTitle((typeof data.title === 'string' && data.title.trim())
-			|| (bookPath ? pathModule.basename(bookPath).replace(/\.[^.]+$/, '') : '未命名')), author)
-		const bookId = bookPath ? bookIdFor(bookPath) : ''
+		const bookTitle = stripTitleAuthor(
+			cleanBookTitle((typeof data.title === 'string' && data.title.trim()) || basenameOf(bookPath).replace(/\.[^.]+$/, '')),
+			author,
+		)
+		const bookId = bookIdFor(bookPath)
+		const exists = bookExists(bookPath)
 		for (const raw of Array.isArray(data.annotations) ? data.annotations : []) {
 			if (!raw || typeof raw.text !== 'string') continue
 			const annotation: Annotation = {
@@ -59,15 +44,7 @@ export function buildSearchIndex(dataRoot: string, vaultBase: string): SearchDoc
 				createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : 0,
 				updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : 0,
 			}
-			docs.push({
-				bookPath,
-				bookTitle,
-				author,
-				bookId,
-				notePath: data.notePath,
-				bookExists,
-				annotation,
-			})
+			docs.push({ bookPath, bookTitle, author, bookId, notePath: data.notePath, bookExists: exists, annotation })
 		}
 	}
 	return docs
