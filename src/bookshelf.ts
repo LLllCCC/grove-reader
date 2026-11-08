@@ -5,7 +5,6 @@ import { makeBook } from '../lib/foliate-js/view.js'
 import type GroveReaderPlugin from './main'
 import { FORMAT_LABELS, ShelfBookInfo, isReaderExt, isShelfExt } from './types'
 import { basenameOf, cleanBookTitle, duplicateKeyOf, formatAuthor, formatBytes, formatDuration, formatLanguageMap, isAbsolutePath, relativeTime, stripNumericTitlePrefix, stripTitleAuthor, truncate } from './util'
-import { readPdfShelfInfo } from './pdfThumbnail'
 import { PlatformIO, joinPath, readJsonFile, writeJsonFile } from './platformIO'
 import { BookInfoModal, ConfirmModal, CoverUrlModal, DeleteBookModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
 import type { BookInfoValues } from './modals'
@@ -1185,7 +1184,10 @@ export class BookshelfView extends ItemView {
 			// 这种情况也要触发解析补封面
 			if (!existing || force || existing.mtime !== mtime || (!existing.cover && !existing.failed)) {
 				try {
+					// 手机端不解析 PDF：pdfjs 与库外读文件都依赖桌面能力
+					if (Platform.isMobile) throw new Error('mobile: skip pdf shelf info')
 					const bytes = await plugin.readBookBytes(path)
+					const { readPdfShelfInfo } = await import('./pdfThumbnail')
 					const info = await readPdfShelfInfo(bytes, 300, rel => plugin.pdfjsAssetUrl(rel))
 					if (info.title) title = cleanBookTitle(stripNumericTitlePrefix(info.title))
 					if (info.author) author = info.author
