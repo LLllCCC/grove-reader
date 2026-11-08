@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import os from 'node:os'
 import assert from 'node:assert'
@@ -7,7 +8,7 @@ import { DesktopIO } from '../src/desktopIO'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, NOTE_BEGIN, NOTE_END, renderNoteTemplate } from '../src/notes'
 import { StatsStore, todayKey } from '../src/stats'
 import { BookData } from '../src/types'
-import { compareCfi, formatDuration, relativeTime } from '../src/util'
+import { bookIdFor, compareCfi, formatDuration, relativeTime } from '../src/util'
 import { applySync, normalizeExcerpt, parseNoteEntries, planSync } from '../src/noteSync'
 import { appendCards, buildCardText, emptyCanvas, parseCanvas, serializeCanvas, shortTitle } from '../src/canvas'
 
@@ -365,6 +366,13 @@ assert.ok(threw, '坏文件应抛错而不是清空')
 // 24. 卡片抬头取短书名，别让整段副标题占满第一行
 assert.equal(shortTitle('枪炮、病菌与钢铁（全新版本，重磅上市）'), '枪炮、病菌与钢铁')
 assert.equal(shortTitle('置身事内：中国政府与经济发展'), '置身事内')
+
+// 25. 纯 JS SHA-1 必须与 node:crypto 完全一致（书 id 变了会认不回旧数据）
+for (const c of ['Grove Reader/书籍/枪炮.epub', 'Books/a b/c.epub', '中文/路径 with space.epub', 'a'.repeat(200)]) {
+	const expected = createHash('sha1').update(c.replace(/\\/g, '/')).digest('hex')
+	assert.equal(bookIdFor(c), expected, 'sha1 不一致: ' + c)
+}
+assert.equal(bookIdFor('中文/路径 with space.epub'), bookIdFor('中文/路径 with space.epub'))
 
 console.log('SMOKE OK')
 }

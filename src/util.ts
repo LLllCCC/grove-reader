@@ -1,12 +1,82 @@
-import { createHash, randomBytes } from 'node:crypto'
+/**
+ * 纯 JS 的 SHA-1：桌面端原本用 node:crypto，但移动端没有 Node，
+ * 而 bookIdFor 必须同步且结果与历史数据完全一致（书 id 就是它以
+ * 前算出来的），所以干脆两端统一用这份实现。
+ */
+function sha1Hex(message: string): string {
+	const data = new TextEncoder().encode(message)
+	const bitLen = data.length * 8
+	const total = (((data.length + 8) >> 6) + 1) << 6
+	const buf = new Uint8Array(total)
+	buf.set(data)
+	buf[data.length] = 0x80
+	const view = new DataView(buf.buffer)
+	view.setUint32(total - 8, Math.floor(bitLen / 0x100000000), false)
+	view.setUint32(total - 4, bitLen >>> 0, false)
 
-/** 由库内路径计算书籍数据的稳定 ID */
+	let h0 = 0x67452301
+	let h1 = 0xefcdab89
+	let h2 = 0x98badcfe
+	let h3 = 0x10325476
+	let h4 = 0xc3d2e1f0
+	const w = new Uint32Array(80)
+
+	for (let i = 0; i < total; i += 64) {
+		for (let t = 0; t < 16; t++) w[t] = view.getUint32(i + t * 4, false)
+		for (let t = 16; t < 80; t++) w[t] = rotl(w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16], 1)
+
+		let a = h0
+		let b = h1
+		let c = h2
+		let d = h3
+		let e = h4
+		for (let t = 0; t < 80; t++) {
+			let f: number
+			let k: number
+			if (t < 20) {
+				f = (b & c) | (~b & d)
+				k = 0x5a827999
+			} else if (t < 40) {
+				f = b ^ c ^ d
+				k = 0x6ed9eba1
+			} else if (t < 60) {
+				f = (b & c) | (b & d) | (c & d)
+				k = 0x8f1bbcdc
+			} else {
+				f = b ^ c ^ d
+				k = 0xca62c1d6
+			}
+			const tmp = (rotl(a, 5) + f + e + k + w[t]) >>> 0
+			e = d
+			d = c
+			c = rotl(b, 30)
+			b = a
+			a = tmp
+		}
+		h0 = (h0 + a) >>> 0
+		h1 = (h1 + b) >>> 0
+		h2 = (h2 + c) >>> 0
+		h3 = (h3 + d) >>> 0
+		h4 = (h4 + e) >>> 0
+	}
+
+	return [h0, h1, h2, h3, h4].map(x => x.toString(16).padStart(8, '0')).join('')
+}
+
+function rotl(x: number, n: number): number {
+	return ((x << n) | (x >>> (32 - n))) >>> 0
+}
+
+/** 由库内路径计算书籍数据的稳定 ID（结果与旧版 node:crypto 完全一致） */
 export function bookIdFor(vaultPath: string): string {
-	return createHash('sha1').update(vaultPath.replace(/\\/g, '/')).digest('hex')
+	return sha1Hex(vaultPath.replace(/\\/g, '/'))
 }
 
 export function randomId(): string {
-	return randomBytes(8).toString('hex')
+	const bytes = new Uint8Array(8)
+	// 渲染进程与移动端 WebView 都有 Web Crypto；Node 18+ 也有
+	globalThis.crypto.getRandomValues(bytes)
+	return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
 }
 
 export function sanitizeFileName(name: string): string {
