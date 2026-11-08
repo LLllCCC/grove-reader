@@ -41,7 +41,7 @@
 
 ### A 的实施顺序
 
-1. `stats / oplog / lists / debugLog`：桌面端**动态 import**（`await import('./stats')`），移动端不构造；字段改为可选，调用点用 `?.` 兜底。类型用 `import type`，避免运行时加载。
+1. ✅（2026-11-08）`stats / oplog / lists / debugLog`：改为注入 `PlatformIO`，`await load()` 预载进内存，写入走 `writeJsonFile`（临时文件 + 原子改名）。桌面端行为与 API 不变，冒烟通过；真实数据验证 7 本统计 / 4 条操作记录 / 1 个书单。
 2. `bookshelf / search`：
    - `ShelfCache` 改走 PlatformIO（JSON + 封面目录）。
    - 目录扫描改用 `app.vault.getFiles()`，不再自己 `readdir`；移动端禁用库外绝对路径。
