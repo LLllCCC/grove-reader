@@ -75,3 +75,19 @@
 | `trash.ts` / `health.ts` | `node:fs` / `node:path` | 回收站与体检改 PlatformIO；手机端可先隐藏入口，B 阶段再补 |
 
 顺序建议：`trash/health`（小）→ `pdfView`（动态注册）→ `main.ts`（最后、最大）→ 改 `isDesktopOnly` → 独立测试库真机验证。
+
+## 里程碑 A 的策略调整（2026-11-08 19:15）
+
+手机端不追求功能齐全，因此 `trash / health / pdfView` **不做 PlatformIO 迁移**，改为"桌面端才动态加载"：
+
+- `trash`（回收站）、`health`（数据体检）：只在桌面初始化，手机端不构造、入口不显示。
+- `pdfView`：注册视图时判断平台，手机端不注册，打开 PDF 给提示。
+- 这样改动集中在 `main.ts` 的初始化与命令注册处，不用重写这三个模块。
+
+于是 A 阶段真正的阻塞只剩 **`main.ts` 顶层 `node:fs/path`（89 处）**：
+1. 把备份导出、数据迁移、库外字节读取搬到新文件 `desktopFs.ts`（只在桌面动态 import）；
+2. 库内读写改 `io`；
+3. `pathModule.join` 换 `joinPath`；
+4. 顺带把 `trash/health/pdfView` 的 import 改成 `await import(...)`。
+
+完成后才能改 `isDesktopOnly`。
