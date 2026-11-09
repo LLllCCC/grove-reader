@@ -1,4 +1,4 @@
-import { ItemView, Notice, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
+import { ItemView, Notice, Platform, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import {
 	Annotation,
@@ -226,6 +226,14 @@ export class TextView extends ItemView {
 
 	#buildDom(): void {
 		const root = this.contentEl
+		root.addClass('grove-content')
+		this.registerDomEvent(root, 'click', (event: MouseEvent) => {
+			if (!Platform.isMobile && !Platform.isMobileApp) return
+			const target = event.target as HTMLElement | null
+			if (target?.closest('a, button, input, select, .grove-toolbar, .grove-annotation, .grove-sel-popup')) return
+			if (window.getSelection()?.toString()) return
+			this.#toggleMobileBar()
+		})
 		const toolbar = root.createDiv('grove-toolbar')
 
 		const tocWrap = toolbar.createDiv('grove-toc')
@@ -393,6 +401,9 @@ export class TextView extends ItemView {
 		const sideHead = this.sidebarEl.createDiv('grove-sidebar-head')
 		this.annCountEl = sideHead.createSpan('grove-ann-count')
 		this.annCountEl.setText('0 个批注')
+		const closeSidebar = sideHead.createEl('button', { cls: 'clickable-icon grove-sidebar-close', attr: { 'aria-label': '关闭批注栏', title: '关闭批注栏' } })
+		setIcon(closeSidebar, 'x')
+		closeSidebar.addEventListener('click', () => this.sidebarEl.classList.add('grove-hidden'))
 
 		// 正文全文搜索：与 EPUB 阅读器同一套 DOM/CSS，收起时不占空间
 		const fullTextSearch = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })
@@ -557,7 +568,7 @@ export class TextView extends ItemView {
 		this.#buildToc()
 		this.#renderSidebar()
 		this.#renderPage()
-		this.sidebarEl.classList.toggle('grove-hidden', !this.plugin.settings.openSidebarWithBook)
+		this.sidebarEl.classList.toggle('grove-hidden', this.plugin.isMobile || !this.plugin.settings.openSidebarWithBook)
 	}
 
 	/** 扫描全文里的「第X章 / 序章 / 番外」作为目录；只取行首、长度有限的短行 */
@@ -1445,6 +1456,10 @@ export class TextView extends ItemView {
 		}
 		const pageStart = this.pageStarts[this.page] ?? 0
 		this.pending = { start: pageStart + localStart, end: pageStart + localStart + raw.length, text: trimmed }
+		if (this.plugin.isMobile) {
+			this.#hidePopup()
+			return
+		}
 		this.#showPopup(range)
 	}
 
@@ -1542,6 +1557,14 @@ export class TextView extends ItemView {
 	#hidePopup(): void {
 		this.popup?.remove()
 		this.popup = null
+	}
+
+	#toggleMobileBar(): void {
+		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
+		if (!bar) return
+		const open = bar.dataset.barOpen === '1'
+		bar.dataset.barOpen = open ? '0' : '1'
+		bar.style.transform = open ? '' : 'translateY(0)'
 	}
 
 	#onTextClick(e: MouseEvent): void {

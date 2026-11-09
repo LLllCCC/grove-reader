@@ -129,6 +129,7 @@ export class ReaderView extends ItemView {
 	private touchStart: { x: number; y: number } | null = null
 	private sliderActive = false
 	private popup: HTMLElement | null = null
+	private popupTimer: number | null = null
 	private popupCloser: ((e: MouseEvent) => void) | null = null
 	/** 跳转后的「返回原位置」浮条 */
 	private jumpReturnEl: HTMLElement | null = null
@@ -159,7 +160,7 @@ export class ReaderView extends ItemView {
 	private fullTextSearchTaskId = 0
 	private wheelAccum = 0
 	private wheelLast = 0
-	private wheelDocs = new WeakSet<Document>()
+	private wheelDocs = new Map<Document, number>()
 	private clearBtnEl!: HTMLButtonElement
 	private filterDotEls = new Map<string, HTMLElement>()
 	private annItemEls = new Map<string, HTMLElement>()
@@ -336,6 +337,9 @@ export class ReaderView extends ItemView {
 		const sideHead = this.sidebarEl.createDiv('grove-sidebar-head')
 		this.annCountEl = sideHead.createSpan('grove-ann-count')
 		this.annCountEl.setText('0 个批注')
+		const closeSidebar = sideHead.createEl('button', { cls: 'clickable-icon grove-sidebar-close', attr: { 'aria-label': '关闭批注栏', title: '关闭批注栏' } })
+		setIcon(closeSidebar, 'x')
+		closeSidebar.addEventListener('click', () => this.sidebarEl.classList.add('grove-hidden'))
 
 
 		const fullTextSearch = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })
@@ -485,7 +489,7 @@ export class ReaderView extends ItemView {
 			}
 			this.#resetSidebarFilters()
 			this.#renderSidebar()
-			this.sidebarEl.classList.toggle('grove-hidden', !this.plugin.settings.openSidebarWithBook)
+			this.sidebarEl.classList.toggle('grove-hidden', this.plugin.isMobile || !this.plugin.settings.openSidebarWithBook)
 		} catch (e) {
 			console.error('[Grove Reader] 打开书籍失败', e)
 			this.#showEmpty(`打开失败：${e instanceof Error ? e.message : String(e)}`)
@@ -794,7 +798,7 @@ export class ReaderView extends ItemView {
 		const { doc, index } = (e as CustomEvent<{ doc: Document; index: number }>).detail
 		// EPUB 正文在 iframe 里，滚轮事件不会冒泡到外层阅读区
 		if (!this.wheelDocs.has(doc)) {
-			this.wheelDocs.add(doc)
+			this.wheelDocs.set(doc, index)
 			doc.addEventListener('wheel', (we: WheelEvent) => this.#onWheel(we), { passive: false })
 			doc.addEventListener('touchstart', (event: TouchEvent) => {
 				const touch = event.changedTouches[0]
@@ -939,7 +943,13 @@ export class ReaderView extends ItemView {
 			return
 		}
 		this.pending = { cfi, text: text.trim(), index }
-		this.#showPopup(doc, range, point)
+		if (this.plugin.isMobile) {
+			this.#hidePopup()
+			this.popupTimer = window.setTimeout(() => {
+				this.popupTimer = null
+				if (this.pending) this.#showPopup(doc, range, point)
+			}, 650)
+		} else this.#showPopup(doc, range, point)
 	}
 
 	#clearPending(): void {
@@ -1091,6 +1101,10 @@ export class ReaderView extends ItemView {
 	}
 
 	#hidePopup(): void {
+		if (this.popupTimer !== null) {
+			window.clearTimeout(this.popupTimer)
+			this.popupTimer = null
+		}
 		if (this.popupCloser) {
 			document.removeEventListener('mousedown', this.popupCloser, true)
 			this.popupCloser = null
@@ -1100,7 +1114,7 @@ export class ReaderView extends ItemView {
 	}
 
 	async #createHighlightFromPending(color: string): Promise<void> {
-		const pending = this.pending
+		const pending = this.pending ?? this.#readCurrentSelection()
 		if (!pending) {
 			new Notice('Grove Reader：请先在正文中划选文字')
 			return
@@ -1135,7 +1149,7 @@ export class ReaderView extends ItemView {
 	}
 
 	async #commentOnPending(): Promise<void> {
-		const pending = this.pending
+		const pending = this.pending ?? this.#readCurrentSelection()
 		if (!pending) {
 			new Notice('Grove Reader：请先在正文中划选文字')
 			return
@@ -1163,6 +1177,23 @@ export class ReaderView extends ItemView {
 			}
 		}
 		this.#editComment(a)
+	}
+
+	#readCurrentSelection(): PendingSelection | null {
+		for (const [doc, index] of this.wheelDocs) {
+			const selection = doc.getSelection()
+			if (!selection || selection.isCollapsed || !selection.rangeCount) continue
+			const range = selection.getRangeAt(0)
+			const text = selection.toString().replace(/\r/g, '').trim()
+			if (!text) continue
+			if (!this.foliate) continue
+			try {
+				return { cfi: this.foliate.getCFI(index, range), text, index }
+			} catch {
+				continue
+			}
+		}
+		return null
 	}
 
 	async #drawAnnotation(a: Annotation): Promise<void> {

@@ -1645,7 +1645,6 @@
 }
 
 /* ---------- 閱讀區空間優化 ---------- */
-.workspace-leaf-content:has(.grove-content) .view-header,
 .workspace-leaf-content:has(.grove-pdf-content) .view-header {
 	display: none;
 }
@@ -2995,33 +2994,18 @@
 	align-self: center;
 }
 
-/* 移动端：翻页按钮避开 Obsidian 自己的底部悬浮栏 */
-body.is-mobile .grove-page-btns {
-	bottom: calc(16px + 64px);
-	opacity: 1;
-	pointer-events: auto;
+/* 移动端隐藏阅读视图内部工具栏；使用 Obsidian 原生标题栏与选区菜单 */
+body.is-mobile .grove-content > .grove-toolbar {
+	display: none;
 }
 
-/* 移动端：翻页按钮避开 Obsidian 自己的底部悬浮栏 */
 body.is-mobile .grove-page-btns {
-	bottom: calc(16px + 64px);
-	opacity: 1;
-	pointer-events: auto;
+	display: none;
 }
 
 /* 移动端：回跳胶囊同样避开 Obsidian 底部悬浮栏 */
 body.is-mobile .grove-jump-return {
 	bottom: calc(16px + 64px);
-}
-
-/* 移动端：回跳胶囊同样避开 Obsidian 底部悬浮栏 */
-body.is-mobile .grove-jump-return {
-	bottom: calc(16px + 64px);
-}
-
-/* 移动端：点正文切换工具栏（没有 hover） */
-body.is-mobile .grove-reader.is-bar-open .grove-toolbar {
-	transform: translateY(0);
 }
 
 /* 移动端：点正文切换工具栏（没有 hover） */
