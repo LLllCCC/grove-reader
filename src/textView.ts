@@ -78,6 +78,7 @@ export class TextView extends ItemView {
 	private loadingPath = ''
 	private pendingCfi: string | null = null
 	private lastWheel = 0
+	private touchStart: { x: number; y: number } | null = null
 	private saveTimer: number | null = null
 
 	private pending: TextSelection | null = null
@@ -331,6 +332,22 @@ export class TextView extends ItemView {
 		this.trackEl = this.scrollEl.createDiv({ cls: 'grove-text-track' })
 		this.textEl = this.trackEl.createDiv({ cls: 'grove-text-content' })
 		this.registerDomEvent(this.scrollEl, 'wheel', e => this.#onWheel(e), { passive: false })
+		this.registerDomEvent(this.scrollEl, 'touchstart', e => {
+			const touch = e.changedTouches[0]
+			if (touch) this.touchStart = { x: touch.clientX, y: touch.clientY }
+		}, { passive: true })
+		this.registerDomEvent(this.scrollEl, 'touchend', e => {
+			const start = this.touchStart
+			this.touchStart = null
+			const touch = e.changedTouches[0]
+			if (!start || !touch || this.popup || !this.sidebarEl.hasClass('grove-hidden')) return
+			if (window.getSelection()?.toString()) return
+			const dx = touch.clientX - start.x
+			const dy = touch.clientY - start.y
+			if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.25) return
+			if (dx < 0) this.nextPage()
+			else this.prevPage()
+		}, { passive: true })
 
 		// 划选 → 弹条；点击已有高亮 → 批注菜单
 		this.registerDomEvent(this.scrollEl, 'mouseup', () =>
