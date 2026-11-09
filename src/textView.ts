@@ -237,15 +237,15 @@ export class TextView extends ItemView {
 		})
 		const toolbar = root.createDiv('grove-toolbar')
 		if (Platform.isMobile || Platform.isMobileApp) {
-			const handle = root.createEl('button', {
-				cls: 'grove-mobile-toolbar-handle grove-hidden',
+			const handle = toolbar.createEl('button', {
+				cls: 'grove-mobile-toolbar-close',
 				attr: { type: 'button', 'aria-label': '收起阅读工具栏', title: '收起工具栏' },
 			})
 			handle.addEventListener('click', (event) => {
 				event.stopPropagation()
 				this.#setMobileBarOpen(false)
 			})
-			handle.createSpan()
+			handle.setText('收起')
 			this.mobileToolbarHandle = handle
 		}
 
@@ -1580,8 +1580,13 @@ export class TextView extends ItemView {
 		if (!bar) return
 		bar.dataset.barOpen = open ? '1' : '0'
 		bar.classList.toggle('is-mobile-bar-open', open)
-		this.mobileToolbarHandle?.toggleClass('grove-hidden', !open)
+		this.mobileToolbarHandle?.classList.toggle('is-visible', open)
 		bar.style.setProperty('transform', open ? 'translateY(0)' : 'translateY(calc(-100% + 18px))', 'important')
+		if (open) {
+			window.setTimeout(() => {
+				if (bar.dataset.barOpen === '1' && bar.isConnected) this.mobileToolbarHandle?.classList.add('is-visible')
+			}, 250)
+		}
 	}
 
 	#onTextClick(e: MouseEvent): void {

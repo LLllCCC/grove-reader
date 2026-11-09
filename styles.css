@@ -3037,41 +3037,23 @@ body.is-mobile .grove-content > .grove-toolbar {
 	z-index: 60;
 }
 
-.grove-mobile-toolbar-handle {
+.grove-mobile-toolbar-close {
 	display: none !important;
 }
 
-body.is-mobile .grove-mobile-toolbar-handle {
-	position: absolute;
-	display: flex !important;
+body.is-mobile .grove-toolbar .grove-mobile-toolbar-close.is-visible {
+	display: inline-flex !important;
 	align-items: center;
 	justify-content: center;
-	left: 50%;
-	top: 46px;
-	transform: translateX(-50%);
-	width: 44px;
-	min-height: 18px;
-	margin: 0;
-	padding: 0;
-	border: 0;
-	border-radius: 0 0 12px 12px;
-	background: var(--background-secondary);
-	box-shadow: 0 3px 8px rgba(0, 0, 0, .18);
-	cursor: pointer;
-}
-
-body.is-mobile .grove-mobile-toolbar-handle span {
-	width: 28px;
-	height: 3px;
-	border-radius: 3px;
-	background: var(--text-muted);
+	flex: none;
+	min-height: 34px;
+	padding: 0 12px;
+	margin-left: auto;
+	font-size: var(--font-ui-small);
+	white-space: nowrap;
 }
 
 body.is-mobile .grove-content.is-bar-open > .grove-toolbar,
 body.is-mobile .grove-reader.is-bar-open .grove-toolbar {
 	transform: translateY(0);
-}
-
-body.is-mobile .grove-mobile-toolbar-handle:not(.grove-hidden) {
-	top: 46px;
 }
