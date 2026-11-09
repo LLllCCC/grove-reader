@@ -126,6 +126,7 @@ export class ReaderView extends ItemView {
 	private pending: PendingSelection | null = null
 	private saveTimer: number | null = null
 	private lastSavedCfi: string | null = null
+	private touchStart: { x: number; y: number } | null = null
 	private sliderActive = false
 	private popup: HTMLElement | null = null
 	private popupCloser: ((e: MouseEvent) => void) | null = null
@@ -795,6 +796,22 @@ export class ReaderView extends ItemView {
 		if (!this.wheelDocs.has(doc)) {
 			this.wheelDocs.add(doc)
 			doc.addEventListener('wheel', (we: WheelEvent) => this.#onWheel(we), { passive: false })
+			doc.addEventListener('touchstart', (event: TouchEvent) => {
+				const touch = event.changedTouches[0]
+				if (touch) this.touchStart = { x: touch.clientX, y: touch.clientY }
+			}, { passive: true })
+			doc.addEventListener('touchend', (event: TouchEvent) => {
+				const start = this.touchStart
+				this.touchStart = null
+				const touch = event.changedTouches[0]
+				if (!start || !touch || this.popup || !this.sidebarEl.classList.contains('grove-hidden')) return
+				if (doc.getSelection()?.toString()) return
+				const dx = touch.clientX - start.x
+				const dy = touch.clientY - start.y
+				if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.25) return
+				if (dx < 0) this.nextPage()
+				else this.prevPage()
+			}, { passive: true })
 		}
 		// EPUB 正文在 iframe 里，点击不会冒泡到宿主，必须单独在 doc 上监听
 		doc.addEventListener('click', (ev: MouseEvent) => {

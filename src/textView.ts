@@ -332,11 +332,11 @@ export class TextView extends ItemView {
 		this.trackEl = this.scrollEl.createDiv({ cls: 'grove-text-track' })
 		this.textEl = this.trackEl.createDiv({ cls: 'grove-text-content' })
 		this.registerDomEvent(this.scrollEl, 'wheel', e => this.#onWheel(e), { passive: false })
-		this.registerDomEvent(this.scrollEl, 'touchstart', e => {
+		this.registerDomEvent(this.scrollEl, 'touchstart', (e: TouchEvent) => {
 			const touch = e.changedTouches[0]
 			if (touch) this.touchStart = { x: touch.clientX, y: touch.clientY }
 		}, { passive: true })
-		this.registerDomEvent(this.scrollEl, 'touchend', e => {
+		this.registerDomEvent(this.scrollEl, 'touchend', (e: TouchEvent) => {
 			const start = this.touchStart
 			this.touchStart = null
 			const touch = e.changedTouches[0]
