@@ -271,7 +271,7 @@ export class TextView extends ItemView {
 		}
 
 		const commentBtn = toolbar.createEl('button', {
-			cls: 'clickable-icon grove-icon-btn',
+			cls: 'clickable-icon grove-icon-btn grove-appear-button',
 			attr: { 'aria-label': '为划选文字添加评论' },
 		})
 		setIcon(commentBtn, 'message-square-plus')
@@ -328,7 +328,7 @@ export class TextView extends ItemView {
 		this.registerDomEvent(this.contentEl, 'click', e => {
 			if (this.appearPanelEl.hasClass('grove-hidden')) return
 			const t = e.target
-			if (t instanceof Element && !t.closest('.grove-appear-panel') && !t.closest('.grove-icon-btn')) {
+			if (t instanceof Element && !t.closest('.grove-appear-panel') && !t.closest('.grove-appear-button')) {
 				this.appearPanelEl.addClass('grove-hidden')
 			}
 		}, { capture: true })
@@ -1466,6 +1466,9 @@ export class TextView extends ItemView {
 	#clearPending(): void {
 		this.pending = null
 		this.#hidePopup()
+		this.contentEl.classList.remove('is-bar-open')
+		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
+		if (bar) bar.dataset.barOpen = '0'
 	}
 
 	#showPopup(range: Range): void {
@@ -1564,7 +1567,7 @@ export class TextView extends ItemView {
 		if (!bar) return
 		const open = bar.dataset.barOpen === '1'
 		bar.dataset.barOpen = open ? '0' : '1'
-		bar.style.transform = open ? '' : 'translateY(0)'
+		this.contentEl.classList.toggle('is-bar-open', !open)
 	}
 
 	#onTextClick(e: MouseEvent): void {

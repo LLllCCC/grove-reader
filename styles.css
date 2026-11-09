@@ -131,6 +131,12 @@
 	border-bottom: 1px solid var(--background-modifier-border);
 	font-weight: 600;
 	flex: none;
+	display: flex;
+	align-items: center;
+}
+
+.grove-sidebar-close {
+	margin-left: auto;
 }
 
 .grove-ann-list {
@@ -767,6 +773,16 @@
 	display: none;
 }
 
+body.is-mobile .grove-appear-panel {
+	position: fixed;
+	top: max(58px, calc(env(safe-area-inset-top) + 58px));
+	left: 8px;
+	right: 8px;
+	width: auto;
+	max-height: calc(100dvh - 140px);
+	z-index: 80;
+}
+
 .grove-appear-row {
 	display: flex;
 	align-items: center;
@@ -1009,8 +1025,8 @@
 
 .grove-shelf-tools {
 	display: flex;
-	align-items: center;
 	gap: 8px;
+	align-items: center;
 	flex: none;
 }
 
@@ -2994,11 +3010,6 @@
 	align-self: center;
 }
 
-/* 移动端隐藏阅读视图内部工具栏；使用 Obsidian 原生标题栏与选区菜单 */
-body.is-mobile .grove-content > .grove-toolbar {
-	display: none;
-}
-
 body.is-mobile .grove-page-btns {
 	display: none;
 }
@@ -3008,7 +3019,16 @@ body.is-mobile .grove-jump-return {
 	bottom: calc(16px + 64px);
 }
 
-/* 移动端：点正文切换工具栏（没有 hover） */
-body.is-mobile .grove-reader.is-bar-open .grove-toolbar {
+/* 移动端：工具栏从 Obsidian 标题栏下方展开 */
+body.is-mobile .grove-content > .grove-toolbar {
+	top: 0;
+	bottom: auto;
+	transform: translateY(calc(-100% - 8px));
+	padding-top: 4px;
+	z-index: 40;
+}
+
+body.is-mobile .grove-reader.is-bar-open .grove-toolbar,
+body.is-mobile .grove-content.is-bar-open > .grove-toolbar {
 	transform: translateY(0);
 }

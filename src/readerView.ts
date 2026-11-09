@@ -251,6 +251,10 @@ export class ReaderView extends ItemView {
 		this.registerDomEvent(root, 'click', (ev: MouseEvent) => {
 			if (!Platform.isMobile) return
 			const target = ev.target as HTMLElement | null
+			if (!this.appearPanelEl?.classList.contains('grove-hidden') && !target?.closest('.grove-appear-panel') && !target?.closest('.grove-appear-button')) {
+				this.appearPanelEl.addClass('grove-hidden')
+				return
+			}
 			if (target?.closest('a, button, .grove-toolbar, .grove-annotation')) return
 			const sel = document.getSelection()
 			if (sel && !sel.isCollapsed) return
@@ -296,7 +300,7 @@ export class ReaderView extends ItemView {
 
 		toolbar.createDiv('grove-flex-spacer')
 
-		const appearBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '阅读外观（字体 / 背景 / 行距）' } })
+		const appearBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn grove-appear-button', attr: { 'aria-label': '阅读外观（字体 / 背景 / 行距）' } })
 		setIcon(appearBtn, 'type')
 		appearBtn.addEventListener('click', e => {
 			e.stopPropagation()
@@ -316,7 +320,7 @@ export class ReaderView extends ItemView {
 		this.registerDomEvent(this.contentEl, 'click', e => {
 			const t = e.target
 			if (this.appearPanelEl.classList.contains('grove-hidden')) return
-			if (t instanceof Element && !t.closest('.grove-appear-panel')) this.appearPanelEl.addClass('grove-hidden')
+			if (t instanceof Element && !t.closest('.grove-appear-panel') && !t.closest('.grove-appear-button')) this.appearPanelEl.addClass('grove-hidden')
 		}, { capture: true })
 
 		const body = root.createDiv('grove-body')
@@ -822,6 +826,7 @@ export class ReaderView extends ItemView {
 			if (!Platform.isMobile) return
 			const target = ev.target as HTMLElement | null
 			if (target?.closest('a, button, .grove-annotation')) return
+			if (!this.appearPanelEl.classList.contains('grove-hidden')) this.appearPanelEl.addClass('grove-hidden')
 			const sel = doc.getSelection()
 			if (sel && !sel.isCollapsed) return
 			this.#toggleMobileBar()
@@ -945,16 +950,16 @@ export class ReaderView extends ItemView {
 		this.pending = { cfi, text: text.trim(), index }
 		if (this.plugin.isMobile) {
 			this.#hidePopup()
-			this.popupTimer = window.setTimeout(() => {
-				this.popupTimer = null
-				if (this.pending) this.#showPopup(doc, range, point)
-			}, 650)
+			this.popupTimer = null
 		} else this.#showPopup(doc, range, point)
 	}
 
 	#clearPending(): void {
 		this.pending = null
 		this.#hidePopup()
+		this.contentEl.classList.remove('is-bar-open')
+		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
+		if (bar) bar.dataset.barOpen = '0'
 	}
 
 	#showPopup(_doc: Document, range: Range, point?: { x: number; y: number }): void {
@@ -1068,9 +1073,10 @@ export class ReaderView extends ItemView {
 		left = Math.max(8, Math.min(left, window.innerWidth - size.width - 8))
 		// 贴在选区上方：用包围盒顶边（多行时即首行）算，间距 6px；
 		// 上方放不下（选区贴着页顶）才落到下方
+		const safeTop = this.plugin.isMobile ? 64 : 8
 		let top = anchorTop - size.height - 6
-		if (top < 8) top = Math.min(lastBottom + 6, window.innerHeight - size.height - 8)
-		top = Math.max(8, top)
+		if (top < safeTop) top = Math.min(lastBottom + 6, window.innerHeight - size.height - 8)
+		top = Math.max(safeTop, Math.min(top, window.innerHeight - size.height - 8))
 		popup.style.left = `${Math.round(left)}px`
 		popup.style.top = `${Math.round(top)}px`
 
@@ -1225,7 +1231,7 @@ export class ReaderView extends ItemView {
 		// 用 dataset 记状态：读 style.transform 会被浏览器规范化成 translateY(0px)，比较不可靠
 		const open = bar.dataset.barOpen === '1'
 		bar.dataset.barOpen = open ? '0' : '1'
-		bar.style.transform = open ? '' : 'translateY(0)'
+		this.contentEl.classList.toggle('is-bar-open', !open)
 	}
 
 	#hostCoords(range: Range): { x: number; y: number } {

@@ -457,7 +457,7 @@ export class BookshelfView extends ItemView {
 		})
 
 		// 书架右上角三个动作：添加文件夹 / 重新扫描 / 阅读统计
-		const actions = this.toolsEl.createDiv('grove-shelf-tools-actions')
+		const actions = this.listsEl.createDiv('grove-shelf-tools-actions')
 		const action = (icon: string, label: string, onClick: () => void): void => {
 			const btn = actions.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': label, title: label } })
 			setIcon(btn, icon)
