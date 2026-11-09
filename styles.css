@@ -1015,12 +1015,20 @@ body.is-mobile .grove-appear-panel {
 	min-height: 1em;
 }
 
+.grove-shelf-list-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: none;
+}
+
 .grove-shelf-lists {
 	display: flex;
 	align-items: center;
 	gap: 6px;
 	flex-wrap: wrap;
-	flex: none;
+	flex: 1;
+	min-width: 0;
 }
 
 .grove-shelf-tools {
@@ -3021,14 +3029,49 @@ body.is-mobile .grove-jump-return {
 
 /* 移动端：工具栏从 Obsidian 标题栏下方展开 */
 body.is-mobile .grove-content > .grove-toolbar {
+	display: flex !important;
 	top: 0;
 	bottom: auto;
-	transform: translateY(calc(-100% - 8px));
+	transform: translateY(calc(-100% + 18px));
 	padding-top: 4px;
-	z-index: 40;
+	z-index: 60;
 }
 
-body.is-mobile .grove-reader.is-bar-open .grove-toolbar,
-body.is-mobile .grove-content.is-bar-open > .grove-toolbar {
+.grove-mobile-toolbar-handle {
+	display: none !important;
+}
+
+body.is-mobile .grove-mobile-toolbar-handle {
+	position: absolute;
+	display: flex !important;
+	align-items: center;
+	justify-content: center;
+	left: 50%;
+	top: 46px;
+	transform: translateX(-50%);
+	width: 44px;
+	min-height: 18px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 0 0 12px 12px;
+	background: var(--background-secondary);
+	box-shadow: 0 3px 8px rgba(0, 0, 0, .18);
+	cursor: pointer;
+}
+
+body.is-mobile .grove-mobile-toolbar-handle span {
+	width: 28px;
+	height: 3px;
+	border-radius: 3px;
+	background: var(--text-muted);
+}
+
+body.is-mobile .grove-content.is-bar-open > .grove-toolbar,
+body.is-mobile .grove-reader.is-bar-open .grove-toolbar {
 	transform: translateY(0);
+}
+
+body.is-mobile .grove-mobile-toolbar-handle:not(.grove-hidden) {
+	top: 46px;
 }

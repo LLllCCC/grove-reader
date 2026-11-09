@@ -353,6 +353,7 @@ function listHue(id: string): number {
 
 export class BookshelfView extends ItemView {
 	private gridEl!: HTMLElement
+	private listsRowEl!: HTMLElement
 	private listsEl!: HTMLElement
 	/** 'all' = 全部，'none' = 未分类，其余为书单 id */
 	private listFilter = 'all'
@@ -398,7 +399,8 @@ export class BookshelfView extends ItemView {
 		this.registerDomEvent(root, 'scroll', () => this.#hideTooltip(), true)
 		this.registerDomEvent(window, 'resize', () => this.#hideTooltip())
 
-		this.listsEl = root.createDiv('grove-shelf-lists')
+		this.listsRowEl = root.createDiv('grove-shelf-list-row')
+		this.listsEl = this.listsRowEl.createDiv('grove-shelf-lists')
 		this.#renderTools(root)
 		this.continueEl = root.createDiv('grove-shelf-continue grove-hidden')
 		this.gridEl = root.createDiv('grove-shelf-grid')
@@ -457,7 +459,7 @@ export class BookshelfView extends ItemView {
 		})
 
 		// 书架右上角三个动作：添加文件夹 / 重新扫描 / 阅读统计
-		const actions = this.listsEl.createDiv('grove-shelf-tools-actions')
+		const actions = this.listsRowEl.createDiv('grove-shelf-tools-actions')
 		const action = (icon: string, label: string, onClick: () => void): void => {
 			const btn = actions.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': label, title: label } })
 			setIcon(btn, icon)

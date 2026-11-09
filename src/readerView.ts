@@ -147,6 +147,7 @@ export class ReaderView extends ItemView {
 	private slider!: HTMLInputElement
 	private progressLabel!: HTMLElement
 	private appearPanelEl!: HTMLElement
+	private mobileToolbarHandle: HTMLElement | null = null
 
 	private sidebarQuery = ''
 	private sidebarColor: string | null = null
@@ -247,9 +248,9 @@ export class ReaderView extends ItemView {
 		root.empty()
 		root.addClass('grove-content')
 
-		// 手机没有 hover：点正文切换工具栏显隐
+		// 手机没有 hover：点正文只展开；收起交给顶边把手，避免阅读点击误收起
 		this.registerDomEvent(root, 'click', (ev: MouseEvent) => {
-			if (!Platform.isMobile) return
+			if (!this.plugin.isMobile) return
 			const target = ev.target as HTMLElement | null
 			if (!this.appearPanelEl?.classList.contains('grove-hidden') && !target?.closest('.grove-appear-panel') && !target?.closest('.grove-appear-button')) {
 				this.appearPanelEl.addClass('grove-hidden')
@@ -258,10 +259,22 @@ export class ReaderView extends ItemView {
 			if (target?.closest('a, button, .grove-toolbar, .grove-annotation')) return
 			const sel = document.getSelection()
 			if (sel && !sel.isCollapsed) return
-			this.#toggleMobileBar()
+			this.#setMobileBarOpen(true)
 		})
 
 		const toolbar = root.createDiv('grove-toolbar')
+		if (this.plugin.isMobile) {
+			const handle = root.createEl('button', {
+				cls: 'grove-mobile-toolbar-handle grove-hidden',
+				attr: { type: 'button', 'aria-label': '收起阅读工具栏', title: '收起工具栏' },
+			})
+			handle.addEventListener('click', (event) => {
+				event.stopPropagation()
+				this.#setMobileBarOpen(false)
+			})
+			handle.createSpan()
+			this.mobileToolbarHandle = handle
+		}
 
 		const tocWrap = toolbar.createDiv('grove-toc')
 		this.tocSelect = tocWrap.createEl('select', { cls: 'dropdown grove-toc-select' })
@@ -823,14 +836,32 @@ export class ReaderView extends ItemView {
 		}
 		// EPUB 正文在 iframe 里，点击不会冒泡到宿主，必须单独在 doc 上监听
 		doc.addEventListener('click', (ev: MouseEvent) => {
-			if (!Platform.isMobile) return
+			if (!this.plugin.isMobile) return
 			const target = ev.target as HTMLElement | null
 			if (target?.closest('a, button, .grove-annotation')) return
-			if (!this.appearPanelEl.classList.contains('grove-hidden')) this.appearPanelEl.addClass('grove-hidden')
+			if (!this.appearPanelEl.classList.contains('grove-hidden')) {
+				this.appearPanelEl.addClass('grove-hidden')
+				return
+			}
 			const sel = doc.getSelection()
 			if (sel && !sel.isCollapsed) return
-			this.#toggleMobileBar()
+			this.#setMobileBarOpen(true)
 		})
+		if (this.plugin.isMobile) {
+			doc.addEventListener('touchstart', (event: TouchEvent) => {
+				const touch = event.changedTouches[0]
+				if (touch) this.touchStart = { x: touch.clientX, y: touch.clientY }
+			}, { passive: true })
+			doc.addEventListener('touchend', (event: TouchEvent) => {
+				const start = this.touchStart
+				this.touchStart = null
+				const touch = event.changedTouches[0]
+				const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
+				if (!start || !touch || bar?.dataset.barOpen !== '1') return
+				const dy = touch.clientY - start.y
+				if (dy < -44 && Math.abs(dy) > Math.abs(touch.clientX - start.x) * 1.2) this.#setMobileBarOpen(false)
+			}, { passive: true })
+		}
 
 		doc.addEventListener('pointerup', (ev: PointerEvent) => {
 			const t = ev.target
@@ -1224,14 +1255,14 @@ export class ReaderView extends ItemView {
 		}
 	}
 
-	/** 手机端：直接改 inline transform，绕开 CSS 选择器差异 */
-	#toggleMobileBar(): void {
+	/** 手机端：同步状态与内联样式，避免被主题规则覆盖 */
+	#setMobileBarOpen(open: boolean): void {
 		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
 		if (!bar) return
-		// 用 dataset 记状态：读 style.transform 会被浏览器规范化成 translateY(0px)，比较不可靠
-		const open = bar.dataset.barOpen === '1'
-		bar.dataset.barOpen = open ? '0' : '1'
-		this.contentEl.classList.toggle('is-bar-open', !open)
+		bar.dataset.barOpen = open ? '1' : '0'
+		bar.classList.toggle('is-mobile-bar-open', open)
+		this.mobileToolbarHandle?.toggleClass('grove-hidden', !open)
+		bar.style.setProperty('transform', open ? 'translateY(0)' : 'translateY(calc(-100% + 18px))', 'important')
 	}
 
 	#hostCoords(range: Range): { x: number; y: number } {

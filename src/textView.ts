@@ -102,6 +102,7 @@ export class TextView extends ItemView {
 	private nextBtn!: HTMLButtonElement
 	private encodingSelect!: HTMLSelectElement
 	private appearPanelEl!: HTMLElement
+	private mobileToolbarHandle: HTMLElement | null = null
 	private sidebarEl!: HTMLElement
 	private annListEl!: HTMLElement
 	private annCountEl!: HTMLElement
@@ -232,9 +233,21 @@ export class TextView extends ItemView {
 			const target = event.target as HTMLElement | null
 			if (target?.closest('a, button, input, select, .grove-toolbar, .grove-annotation, .grove-sel-popup')) return
 			if (window.getSelection()?.toString()) return
-			this.#toggleMobileBar()
+			this.#setMobileBarOpen(true)
 		})
 		const toolbar = root.createDiv('grove-toolbar')
+		if (Platform.isMobile || Platform.isMobileApp) {
+			const handle = root.createEl('button', {
+				cls: 'grove-mobile-toolbar-handle grove-hidden',
+				attr: { type: 'button', 'aria-label': '收起阅读工具栏', title: '收起工具栏' },
+			})
+			handle.addEventListener('click', (event) => {
+				event.stopPropagation()
+				this.#setMobileBarOpen(false)
+			})
+			handle.createSpan()
+			this.mobileToolbarHandle = handle
+		}
 
 		const tocWrap = toolbar.createDiv('grove-toc')
 		// 本书章节上千条，原生下拉框难用，改成「按钮 + 可搜索目录面板」
@@ -1562,12 +1575,13 @@ export class TextView extends ItemView {
 		this.popup = null
 	}
 
-	#toggleMobileBar(): void {
+	#setMobileBarOpen(open: boolean): void {
 		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
 		if (!bar) return
-		const open = bar.dataset.barOpen === '1'
-		bar.dataset.barOpen = open ? '0' : '1'
-		this.contentEl.classList.toggle('is-bar-open', !open)
+		bar.dataset.barOpen = open ? '1' : '0'
+		bar.classList.toggle('is-mobile-bar-open', open)
+		this.mobileToolbarHandle?.toggleClass('grove-hidden', !open)
+		bar.style.setProperty('transform', open ? 'translateY(0)' : 'translateY(calc(-100% + 18px))', 'important')
 	}
 
 	#onTextClick(e: MouseEvent): void {
