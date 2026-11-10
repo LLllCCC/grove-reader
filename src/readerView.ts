@@ -264,15 +264,18 @@ export class ReaderView extends ItemView {
 
 		const toolbar = root.createDiv('grove-toolbar')
 		if (this.plugin.isMobile) {
+			// 初始收起：工具栏只剩顶部一条窄条，窄条本身就是一个大的「展开」热区
+			toolbar.dataset.barOpen = '0'
 			const handle = toolbar.createEl('button', {
 				cls: 'grove-mobile-toolbar-close',
-				attr: { type: 'button', 'aria-label': '收起阅读工具栏', title: '收起工具栏' },
+				attr: { type: 'button', 'aria-label': '展开阅读工具栏', title: '展开 / 收起工具栏' },
 			})
 			handle.addEventListener('click', (event) => {
+				event.preventDefault()
 				event.stopPropagation()
-				this.#setMobileBarOpen(false)
+				this.#setMobileBarOpen(toolbar.dataset.barOpen !== '1')
 			})
-			handle.setText('收起')
+			handle.setText('工具栏')
 			this.mobileToolbarHandle = handle
 		}
 
@@ -881,9 +884,15 @@ export class ReaderView extends ItemView {
 	#onRelocate = (e: Event): void => {
 		const d = (e as CustomEvent<RelocateDetail>).detail
 		// 阅读统计：位置变化计一次「翻页」（首次定位是基线，不计）
-		if (d.location && d.location.current !== this.lastStatsLoc) {
-			if (this.lastStatsLoc !== null) this.plugin.statsPageTurn(this.bookPath)
+		const moved = !!d.location && d.location.current !== this.lastStatsLoc
+		if (d.location) {
+			if (moved && this.lastStatsLoc !== null) this.plugin.statsPageTurn(this.bookPath)
 			this.lastStatsLoc = d.location.current
+		}
+		// 手机端：翻页或滚动换了位置就自动收起工具栏，别让它一直挡正文（拖进度条时不收）
+		if (moved && this.plugin.isMobile && !this.sliderActive) {
+			const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
+			if (bar?.dataset.barOpen === '1') this.#setMobileBarOpen(false)
 		}
 		const percent = Math.round((d.fraction ?? 0) * 100)
 		this.progressLabel.setText(
@@ -991,6 +1000,9 @@ export class ReaderView extends ItemView {
 		this.contentEl.classList.remove('is-bar-open')
 		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
 		if (bar) bar.dataset.barOpen = '0'
+		// 手机端状态是「dataset + class + 文案 + 内联样式」一整套，必须整体复位，
+		// 否则会出现记录说已收起、画面还开着的假死状态。
+		if (this.plugin.isMobile) this.#setMobileBarOpen(false)
 	}
 
 	#showPopup(_doc: Document, range: Range, point?: { x: number; y: number }): void {
@@ -1255,19 +1267,24 @@ export class ReaderView extends ItemView {
 		}
 	}
 
-	/** 手机端：同步状态与内联样式，避免被主题规则覆盖 */
+	/**
+	 * 手机端工具栏开合。收起态是一条 20px 窄条（只露「工具栏」按钮），展开态是单行可横滑工具栏。
+	 * 状态只认 dataset.barOpen 一处，class / 文案 / 内联样式都由它派生，避免两套状态打架。
+	 */
 	#setMobileBarOpen(open: boolean): void {
 		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
 		if (!bar) return
 		bar.dataset.barOpen = open ? '1' : '0'
 		bar.classList.toggle('is-mobile-bar-open', open)
-		this.mobileToolbarHandle?.classList.toggle('is-visible', open)
-		bar.style.setProperty('transform', open ? 'translateY(0)' : 'translateY(calc(-100% + 18px))', 'important')
-		if (open) {
-			window.setTimeout(() => {
-				if (bar.dataset.barOpen === '1' && bar.isConnected) this.mobileToolbarHandle?.classList.add('is-visible')
-			}, 250)
+		this.contentEl.classList.toggle('is-bar-open', open)
+		const handle = this.mobileToolbarHandle
+		if (handle) {
+			handle.setText(open ? '收起' : '工具栏')
+			handle.setAttribute('aria-label', open ? '收起阅读工具栏' : '展开阅读工具栏')
 		}
+		// 高度由 CSS 的 [data-bar-open] 决定；这里压掉主题可能加的位移，保证两种状态都贴顶
+		bar.style.setProperty('transform', 'translateY(0)', 'important')
+		if (open) bar.scrollLeft = 0
 	}
 
 	#hostCoords(range: Range): { x: number; y: number } {

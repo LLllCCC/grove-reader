@@ -3027,33 +3027,117 @@ body.is-mobile .grove-jump-return {
 	bottom: calc(16px + 64px);
 }
 
-/* 移动端：工具栏从 Obsidian 标题栏下方展开 */
+/* 移动端：工具栏贴顶。收起态是一条 20px 窄条（整条可点，提示「工具栏」）；
+   展开态是一条 44px 单行工具栏，控件横向滑动，开合按钮 sticky 钉在左侧不跑掉。
+   注意：不要再改回 flex-wrap: wrap + 末项 margin-left:auto，手机上会折成三行且把按钮挤出屏幕。 */
 body.is-mobile .grove-content > .grove-toolbar {
 	display: flex !important;
+	flex-wrap: nowrap !important;
+	align-items: center;
+	gap: 6px;
 	top: 0;
 	bottom: auto;
-	transform: translateY(calc(-100% + 18px));
-	padding-top: 4px;
+	left: 0;
+	right: 0;
+	height: 20px;
+	min-height: 20px;
+	padding: 0 6px;
+	overflow-x: auto;
+	overflow-y: hidden;
+	overscroll-behavior-x: contain;
+	scrollbar-width: none;
+	border-bottom: none;
+	box-shadow: none;
+	background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+	transform: none !important;
+	transition: height 0.16s ease;
 	z-index: 60;
 }
 
-.grove-mobile-toolbar-close {
+body.is-mobile .grove-content > .grove-toolbar::-webkit-scrollbar {
+	display: none;
+}
+
+body.is-mobile .grove-toolbar[data-bar-open='1'] {
+	height: 44px;
+	min-height: 44px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
+	background: var(--background-primary);
+}
+
+body.is-mobile .grove-toolbar > * {
+	flex: 0 0 auto;
+}
+
+/* 手机窄屏上这两样只占宽度不干活，直接不显示 */
+body.is-mobile .grove-toolbar .grove-flex-spacer,
+body.is-mobile .grove-toolbar .grove-sep {
 	display: none !important;
 }
 
-body.is-mobile .grove-toolbar .grove-mobile-toolbar-close.is-visible {
+body.is-mobile .grove-toolbar .grove-progress {
+	flex: 0 0 auto;
+	width: 118px;
+	min-width: 0;
+}
+
+body.is-mobile .grove-toolbar .grove-toc {
+	flex: 0 0 auto;
+	max-width: 42vw;
+}
+
+body.is-mobile .grove-toolbar .grove-toc-select,
+body.is-mobile .grove-toolbar .grove-toc-btn {
+	max-width: 42vw;
+}
+
+/* 开合按钮：收起态独占整条窄条（点哪儿都能开），展开态钉在最左不随横滑滑走 */
+body.is-mobile .grove-toolbar .grove-mobile-toolbar-close {
 	display: inline-flex !important;
 	align-items: center;
 	justify-content: center;
-	flex: none;
-	min-height: 34px;
-	padding: 0 12px;
-	margin-left: auto;
-	font-size: var(--font-ui-small);
+	position: sticky;
+	left: 0;
+	z-index: 2;
+	flex: 0 0 auto;
+	height: 100%;
+	min-height: 0;
+	margin: 0;
+	padding: 0;
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
+	background: transparent;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	letter-spacing: 0.1em;
 	white-space: nowrap;
 }
 
-body.is-mobile .grove-content.is-bar-open > .grove-toolbar,
-body.is-mobile .grove-reader.is-bar-open .grove-toolbar {
-	transform: translateY(0);
+body.is-mobile .grove-toolbar[data-bar-open='0'] .grove-mobile-toolbar-close {
+	width: 100%;
+	background: transparent;
 }
+
+body.is-mobile .grove-toolbar[data-bar-open='0'] .grove-mobile-toolbar-close::before {
+	content: '▾';
+	margin-right: 4px;
+	font-size: 9px;
+	letter-spacing: 0;
+}
+
+body.is-mobile .grove-toolbar[data-bar-open='0'] > *:not(.grove-mobile-toolbar-close) {
+	display: none !important;
+}
+
+body.is-mobile .grove-toolbar[data-bar-open='1'] .grove-mobile-toolbar-close {
+	height: 30px;
+	padding: 0 10px;
+	border-radius: 6px;
+	background: var(--background-primary);
+	color: var(--text-muted);
+	box-shadow: 4px 0 8px -4px rgba(0, 0, 0, 0.25);
+	letter-spacing: 0;
+}
+

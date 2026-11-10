@@ -237,15 +237,17 @@ export class TextView extends ItemView {
 		})
 		const toolbar = root.createDiv('grove-toolbar')
 		if (Platform.isMobile || Platform.isMobileApp) {
+			toolbar.dataset.barOpen = '0'
 			const handle = toolbar.createEl('button', {
 				cls: 'grove-mobile-toolbar-close',
-				attr: { type: 'button', 'aria-label': '收起阅读工具栏', title: '收起工具栏' },
+				attr: { type: 'button', 'aria-label': '展开阅读工具栏', title: '展开 / 收起工具栏' },
 			})
 			handle.addEventListener('click', (event) => {
+				event.preventDefault()
 				event.stopPropagation()
-				this.#setMobileBarOpen(false)
+				this.#setMobileBarOpen(toolbar.dataset.barOpen !== '1')
 			})
-			handle.setText('收起')
+			handle.setText('工具栏')
 			this.mobileToolbarHandle = handle
 		}
 
@@ -1348,6 +1350,7 @@ export class TextView extends ItemView {
 		if (this.screen < this.screenCount - 1) {
 			this.screen += 1
 			this.#applyScreen()
+			this.#collapseMobileBar()
 			return
 		}
 		if (this.page >= this.pages.length - 1) return
@@ -1356,12 +1359,14 @@ export class TextView extends ItemView {
 		this.gotoLastScreen = false
 		this.pendingOffset = null
 		this.#renderPage()
+		this.#collapseMobileBar()
 	}
 
 	prevPage(): void {
 		if (this.screen > 0) {
 			this.screen -= 1
 			this.#applyScreen()
+			this.#collapseMobileBar()
 			return
 		}
 		if (this.page <= 0) return
@@ -1370,6 +1375,14 @@ export class TextView extends ItemView {
 		this.gotoLastScreen = true
 		this.pendingOffset = null
 		this.#renderPage()
+		this.#collapseMobileBar()
+	}
+
+	/** 手机端：翻页后自动收起工具栏，避免一直挡住正文 */
+	#collapseMobileBar(): void {
+		if (!Platform.isMobile && !Platform.isMobileApp) return
+		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
+		if (bar?.dataset.barOpen === '1') this.#setMobileBarOpen(false)
 	}
 
 	/** 鼠标滚轮固定翻页（分页模式下滚轮不再滚动正文） */
@@ -1482,6 +1495,7 @@ export class TextView extends ItemView {
 		this.contentEl.classList.remove('is-bar-open')
 		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
 		if (bar) bar.dataset.barOpen = '0'
+		if (Platform.isMobile || Platform.isMobileApp) this.#setMobileBarOpen(false)
 	}
 
 	#showPopup(range: Range): void {
@@ -1580,13 +1594,14 @@ export class TextView extends ItemView {
 		if (!bar) return
 		bar.dataset.barOpen = open ? '1' : '0'
 		bar.classList.toggle('is-mobile-bar-open', open)
-		this.mobileToolbarHandle?.classList.toggle('is-visible', open)
-		bar.style.setProperty('transform', open ? 'translateY(0)' : 'translateY(calc(-100% + 18px))', 'important')
-		if (open) {
-			window.setTimeout(() => {
-				if (bar.dataset.barOpen === '1' && bar.isConnected) this.mobileToolbarHandle?.classList.add('is-visible')
-			}, 250)
+		this.contentEl.classList.toggle('is-bar-open', open)
+		const handle = this.mobileToolbarHandle
+		if (handle) {
+			handle.setText(open ? '收起' : '工具栏')
+			handle.setAttribute('aria-label', open ? '收起阅读工具栏' : '展开阅读工具栏')
 		}
+		bar.style.setProperty('transform', 'translateY(0)', 'important')
+		if (open) bar.scrollLeft = 0
 	}
 
 	#onTextClick(e: MouseEvent): void {
