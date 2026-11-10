@@ -169,6 +169,11 @@ export default class GroveReaderPlugin extends Plugin {
 		this.registerExtensions(SUPPORTED_BOOK_EXTS, VIEW_TYPE_GROVE_READER)
 		// 用 Grove 打开某本书：?book=<bookId> 走批注数据，?path=<库内路径> 直接按路径打开
 		this.registerObsidianProtocolHandler('grove', params => {
+			// ?view=shelf 直接打开书架（手机上没有好用的入口，笔记里也能一键跳转）
+			if (params['view'] === 'shelf') {
+				void this.openBookshelf()
+				return
+			}
 			const byPath = params['path'] ?? ''
 			if (byPath) {
 				void this.openBookByPath(byPath, params['cfi'] ?? undefined)

@@ -115,6 +115,8 @@ export class ShelfCache {
 	/** 封面 dataURL 缓存：卡片每次刷新都会取封面，避免反复读盘 + base64 */
 	private coverCache = new Map<string, string | null>()
 	private coverCacheChars = 0
+	/** 封面是否已经预热过（由书架首次渲染触发，避免启动就全量读盘） */
+	private coversLoaded = false
 	private io: PlatformIO
 
 	constructor(rootDir: string, io: PlatformIO) {
@@ -123,7 +125,11 @@ export class ShelfCache {
 		this.coversDir = joinPath(rootDir, 'data', 'covers')
 	}
 
-	/** 启动时读缓存并把所有封面预热进内存，之后 coverDataUrl() 全程同步 */
+	/**
+	 * 读缓存。封面不在这里预热——书架没打开时（比如直接进阅读页），
+	 * 逐个读封面再转 base64 纯属白烧启动时间和内存。
+	 * 需要封面时由 ensureCoversLoaded() 触发一次。
+	 */
 	async load(): Promise<void> {
 		const parsed = await readJsonFile<ShelfCacheFile>(this.io, this.file)
 		if (parsed && typeof parsed === 'object' && parsed.entries) {
@@ -140,6 +146,12 @@ export class ShelfCache {
 			}
 			if (changed) this.saveSoon()
 		}
+	}
+
+	/** 书架首次渲染前调用一次；之后再调是空操作 */
+	async ensureCoversLoaded(): Promise<void> {
+		if (this.coversLoaded) return
+		this.coversLoaded = true
 		await this.#preloadCovers()
 	}
 
@@ -253,9 +265,12 @@ export class ShelfCache {
 	}
 
 	async #preloadCovers(): Promise<void> {
+		// 只预热缓存装得下的那部分：多读进来的会被 LRU 立刻淘汰，白读一次盘
+		const names = new Set<string>()
 		for (const entry of Object.values(this.data.entries)) {
-			if (entry.cover) await this.#loadCover(entry.cover)
+			if (entry.cover) names.add(entry.cover)
 		}
+		for (const name of [...names].slice(0, MAX_CACHED_COVERS)) await this.#loadCover(name)
 	}
 
 	async #loadCover(filename: string): Promise<void> {
@@ -366,6 +381,8 @@ export class BookshelfView extends ItemView {
 	private searchInput!: HTMLInputElement
 	private sortSelect!: HTMLSelectElement
 	private cardEls = new Map<string, HTMLElement>()
+	/** 每次刷新自增：分批补卡片时用它判断这批是否已经过期 */
+	private renderToken = 0
 	private searchTimer: number | null = null
 	private refreshTimer: number | null = null
 	/** 目录扫描缓存：手动刷新 / 文件夹变更 / 库内增删改名时递增 */
@@ -483,6 +500,9 @@ export class BookshelfView extends ItemView {
 	async refresh(opts: { rescan?: boolean } = {}): Promise<void> {
 		const { plugin } = this
 		if (!this.gridEl) return
+		this.renderToken++
+		// 封面在第一次渲染书架时才预热（挂机直接进阅读页时不必为封面读盘）
+		await plugin.shelfCache.ensureCoversLoaded()
 		this.#hideTooltip()
 		if (opts.rescan) this.scanToken++
 		this.cardEls.clear()
@@ -537,13 +557,46 @@ export class BookshelfView extends ItemView {
 			return
 		}
 
-		const tasks: Array<() => Promise<void>> = []
-		for (const p of this.#sortPaths(inList, stats)) {
-			const card = this.#renderCard(p, stats.get(p), dupes.get(p))
-			tasks.push(() => this.#ensureEntry(p, card))
-		}
+		const pathsForCards = this.#sortPaths(inList, stats)
+		const tasks = this.#renderCardsInBatches(0, pathsForCards, stats, dupes)
 		this.#applySearch()
 		void this.#runQueue(tasks, 2).then(() => this.#applySearch())
+		if (pathsForCards.length > this.#batchSize()) this.#scheduleRestBatches(pathsForCards, stats, dupes)
+	}
+
+	/** 手机上一屏放不了几张，分批建卡片，首屏更快出图 */
+	#batchSize(): number {
+		return this.plugin.isMobile ? 36 : 120
+	}
+
+	#renderCardsInBatches(
+		start: number,
+		paths: string[],
+		stats: Map<string, ShelfBookInfo>,
+		dupes: Map<string, string[]>,
+	): Array<() => Promise<void>> {
+		const tasks: Array<() => Promise<void>> = []
+		for (const p of paths.slice(start, start + this.#batchSize())) {
+			const card = this.#renderCard(p, stats.get(p), dupes.get(p))
+			// 分批补卡片时搜索词可能还在生效，先按当前搜索词隐藏，避免闪一下再消失
+			if (!this.#matches(p, this.plugin.shelfSearch)) card.addClass('is-hidden')
+			tasks.push(() => this.#ensureEntry(p, card))
+		}
+		return tasks
+	}
+
+	/** 首批之后剩下的卡片：空闲时逐批补上，避免一次性建几百个 DOM 节点 */
+	#scheduleRestBatches(paths: string[], stats: Map<string, ShelfBookInfo>, dupes: Map<string, string[]>): void {
+		const token = this.renderToken
+		let next = this.#batchSize()
+		const step = (): void => {
+			if (token !== this.renderToken) return // 已被新的刷新取代
+			const tasks = this.#renderCardsInBatches(next, paths, stats, dupes)
+			next += this.#batchSize()
+			void this.#runQueue(tasks, 2).then(() => this.#applySearch())
+			if (next < paths.length) window.setTimeout(step, 0)
+		}
+		window.setTimeout(step, 0)
 	}
 
 	/** 扫描结果按「文件夹列表 + token」缓存：搜索/排序刷新不再走磁盘 */
