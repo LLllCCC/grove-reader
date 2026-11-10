@@ -1494,10 +1494,6 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	promptMigrateDataFolder(): void {
-		if (this.isMobile) {
-			new Notice(`${APP_NAME}：手机端暂不支持迁移数据文件夹`)
-			return
-		}
 		new FolderPromptModal(
 			this.app,
 			'迁移数据文件夹',
@@ -1506,12 +1502,8 @@ export default class GroveReaderPlugin extends Plugin {
 		).open()
 	}
 
-	/** 复制 data/ 到新的库内目录；不删旧数据，重启后生效（复制本身需要 Node fs） */
+	/** 复制 data/ 到新的库内目录；不删旧数据，重启后生效（PlatformIO，手机端同样可用） */
 	async migrateDataFolder(targetFolder: string): Promise<void> {
-		if (this.isMobile) {
-			new Notice(`${APP_NAME}：手机端暂不支持迁移数据文件夹`)
-			return
-		}
 		const folder = targetFolder.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
 		if (!folder) {
 			new Notice(`${APP_NAME}：请填写库内文件夹路径`)
@@ -1526,13 +1518,9 @@ export default class GroveReaderPlugin extends Plugin {
 			return
 		}
 		const sourceRoot = this.dataRoot
-		const targetRoot = joinPath(this.vaultBase, normalizePath(folder))
-		const desktop = this.desktopFs
-		if (!desktop) {
-			new Notice(`${APP_NAME}：手机端暂不支持迁移数据文件夹`)
-			return
-		}
-		const check = desktop.checkMigrateTarget({ vaultBase: this.vaultBase, sourceRoot, folder })
+		const targetRoot = this.vaultBase ? joinPath(this.vaultBase, normalizePath(folder)) : normalizePath(folder)
+		const { checkMigrateTarget, migrateDataFolder } = await import('./backup')
+		const check = await checkMigrateTarget(this.io, sourceRoot, targetRoot)
 		if (!check.ok) {
 			new Notice(`${APP_NAME}：${check.message}`)
 			return
@@ -1545,7 +1533,7 @@ export default class GroveReaderPlugin extends Plugin {
 				void (async () => {
 					try {
 						new Notice(`${APP_NAME}：正在复制数据…`)
-						const result = await desktop.migrateDataFolder({ vaultBase: this.vaultBase, sourceRoot, folder })
+						const result = await migrateDataFolder(this.io, sourceRoot, targetRoot)
 						this.settings.dataFolder = folder
 						await this.saveSettings()
 						this.oplog.add('迁移数据文件夹', `${sourceRoot} → ${targetRoot}；${result.books} 份批注`)
@@ -1596,28 +1584,21 @@ export default class GroveReaderPlugin extends Plugin {
 	 * 把全部批注/书架数据导出到库内普通文件夹（随库同步，删除/重装插件都不受影响）。
 	 * 批注 JSON 的权威副本仍在插件 data/ 下；这里是可带走的保险副本，防插件目录被误删。
 	 * 设置 backupTargetDir 时额外复制一份过去（同盘备份防不了磁盘故障）。
-	 * 实际复制交给 desktopFs（Node fs），手机端不可用。
+	 * 复制走 PlatformIO（backup.ts），桌面与手机同一套逻辑。
 	 */
 	async exportDataBackup(): Promise<void> {
-		if (this.isMobile) {
-			new Notice('Grove Reader：手机端暂不支持备份导出')
-			return
-		}
-		if (!this.vaultBase) {
-			new Notice('Grove Reader：无法定位库目录，备份失败')
-			return
-		}
 		// 刷盘挂起的写入，保证导出的是最新状态
 		this.shelfCache.saveNow()
 		this.lists.saveNow()
 		const rel = this.backupFolderRel()
+		const root = this.vaultBase ? joinPath(this.vaultBase, rel) : joinPath(rel)
 		try {
-			const { exportDataBackup } = await import('./desktopFs')
+			const { exportDataBackup } = await import('./backup')
 			const result = await exportDataBackup({
-				vaultBase: this.vaultBase,
+				io: this.io,
+				root,
 				dataRoot: this.dataRoot,
 				pluginDir: this.pluginDir,
-				rel,
 				target: this.settings.backupTargetDir?.trim() || undefined,
 			})
 			if (result.status === 'blocked') {
