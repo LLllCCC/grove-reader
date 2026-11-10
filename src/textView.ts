@@ -1492,7 +1492,6 @@ export class TextView extends ItemView {
 	#clearPending(): void {
 		this.pending = null
 		this.#hidePopup()
-		this.contentEl.classList.remove('is-bar-open')
 		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
 		if (bar) bar.dataset.barOpen = '0'
 		if (Platform.isMobile || Platform.isMobileApp) this.#setMobileBarOpen(false)
@@ -1593,8 +1592,6 @@ export class TextView extends ItemView {
 		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
 		if (!bar) return
 		bar.dataset.barOpen = open ? '1' : '0'
-		bar.classList.toggle('is-mobile-bar-open', open)
-		this.contentEl.classList.toggle('is-bar-open', open)
 		const handle = this.mobileToolbarHandle
 		if (handle) {
 			handle.setText(open ? '收起' : '工具栏')

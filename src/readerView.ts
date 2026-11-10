@@ -1000,10 +1000,9 @@ export class ReaderView extends ItemView {
 	#clearPending(): void {
 		this.pending = null
 		this.#hidePopup()
-		this.contentEl.classList.remove('is-bar-open')
 		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
 		if (bar) bar.dataset.barOpen = '0'
-		// 手机端状态是「dataset + class + 文案 + 内联样式」一整套，必须整体复位，
+		// 手机端状态是「dataset + 文案 + 内联样式」一整套，必须整体复位，
 		// 否则会出现记录说已收起、画面还开着的假死状态。
 		if (this.plugin.isMobile) this.#setMobileBarOpen(false)
 	}
@@ -1278,8 +1277,6 @@ export class ReaderView extends ItemView {
 		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
 		if (!bar) return
 		bar.dataset.barOpen = open ? '1' : '0'
-		bar.classList.toggle('is-mobile-bar-open', open)
-		this.contentEl.classList.toggle('is-bar-open', open)
 		const handle = this.mobileToolbarHandle
 		if (handle) {
 			handle.setText(open ? '收起' : '工具栏')
