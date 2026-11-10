@@ -3181,3 +3181,24 @@ body.is-mobile .grove-toolbar[data-bar-open='1'] .grove-mobile-toolbar-close {
 	letter-spacing: 0;
 }
 
+
+/* 手机端 PDF：没有 hover，工具栏不能靠悬停滑出，直接占位成一行可横滑 */
+body.is-mobile .grove-pdf-content > .grove-toolbar {
+	position: static;
+	transform: none;
+	flex-wrap: nowrap;
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: none;
+	height: 44px;
+	min-height: 44px;
+	flex: none;
+}
+
+body.is-mobile .grove-pdf-content > .grove-toolbar::-webkit-scrollbar {
+	display: none;
+}
+
+body.is-mobile .grove-pdf-content > .grove-toolbar > * {
+	flex: 0 0 auto;
+}

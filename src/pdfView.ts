@@ -1,13 +1,12 @@
 import './pdfjsPolyfill'
 import { ItemView, Notice, TFile, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
-import pathModule from 'node:path'
-import { open as openFile, stat as statFile, type FileHandle } from 'node:fs/promises'
 import * as pdfjsLib from 'pdfjs-dist'
 import type { PDFDocumentProxy, PDFWorker } from 'pdfjs-dist'
 import type GroveReaderPlugin from './main'
 import { Annotation, BookData, HIGHLIGHT_COLORS, VIEW_TYPE_GROVE_PDF, colorCss } from './types'
 import { CommentModal, ConfirmModal } from './modals'
 import { basenameOf, isAbsolutePath, normalizeSelectionText, randomId, truncate } from './util'
+import { joinPath } from './platformIO'
 
 /** 常量定义在 types.ts（main.ts 不 import 本模块也要能判断 PDF 视图），这里保持原导出名 */
 export { VIEW_TYPE_GROVE_PDF }
@@ -86,45 +85,51 @@ const MAX_CANVAS_PIXELS = 2 ** 23
 const MAX_SEARCH_CACHE_CHARS = 1_000_000
 const MAX_SEARCH_RESULTS = 5_000
 
-class LocalFilePdfRangeTransport extends pdfjsLib.PDFDataRangeTransport {
-	private readonly fileHandle: Promise<FileHandle>
+/** 随机读取 PDF 字节；桌面端由 node:fs 实现，手机端不启用（整文件读入）。 */
+interface RangeReader {
+	read(begin: number, end: number): Promise<Uint8Array>
+	close(): void
+}
+
+class PdfRangeTransport extends pdfjsLib.PDFDataRangeTransport {
 	private aborted = false
 	bytesRequested = 0
 	requestCount = 0
 	bytesDelivered = 0
 
-	constructor(filePath: string, length: number) {
+	constructor(
+		private reader: RangeReader,
+		length: number,
+	) {
 		super(length, null, false)
-		this.fileHandle = openFile(filePath, 'r')
 	}
 
 	requestDataRange(begin: number, end: number): void {
 		if (this.aborted) return
 		this.requestCount++
 		this.bytesRequested += end - begin
-		void this.fileHandle.then(async handle => {
-			const chunk = new Uint8Array(end - begin)
-			let offset = 0
-			while (offset < chunk.length && !this.aborted) {
-				const { bytesRead } = await handle.read(chunk, offset, chunk.length - offset, begin + offset)
-				if (bytesRead <= 0) throw new Error(`PDF 文件读取提前结束（${begin + offset}/${end}）`)
-				offset += bytesRead
-			}
-			if (!this.aborted) {
+		void this.reader
+			.read(begin, end)
+			.then(chunk => {
+				if (this.aborted) return
 				this.bytesDelivered += chunk.byteLength
 				this.onDataRange(begin, chunk)
-			}
-		}).catch(error => {
-			if (this.aborted) return
-			console.error('[Grove Reader] PDF 分段读取失败', error)
-			this.onDataRange(begin, new Uint8Array(0))
-		})
+			})
+			.catch(error => {
+				if (this.aborted) return
+				console.error('[Grove Reader] PDF 分段读取失败', error)
+				this.onDataRange(begin, new Uint8Array(0))
+			})
 	}
 
 	abort(): void {
 		if (this.aborted) return
 		this.aborted = true
-		void this.fileHandle.then(handle => handle.close()).catch(() => { })
+		try {
+			this.reader.close()
+		} catch {
+			// ignore
+		}
 	}
 }
 
@@ -134,8 +139,10 @@ export class PdfView extends ItemView {
 
 	private pdfDoc: PdfDocProxy | null = null
 	private pdfWorker: PDFWorker | null = null
+	/** 手机端用 Blob URL 加载 pdf.worker，关闭时需要释放 */
+	private workerBlobUrl: string | null = null
 	private pdfLoadingTask: ReturnType<typeof pdfjsLib.getDocument> | null = null
-	private pdfRangeTransport: LocalFilePdfRangeTransport | null = null
+	private pdfRangeTransport: PdfRangeTransport | null = null
 	private data: BookData | null = null
 	private loadedPath: string | null = null
 	private pendingCfi: string | null = null
@@ -360,6 +367,8 @@ export class PdfView extends ItemView {
 		})
 
 		this.sidebarEl = body.createDiv('grove-sidebar')
+		// 手机窄屏：批注栏默认收起，把宽度让给页面（打开成功后还会按设置再校一次）
+		if (this.plugin.isMobile) this.sidebarEl.classList.add('grove-hidden')
 		const sideHead = this.sidebarEl.createDiv('grove-sidebar-head')
 		this.annCountEl = sideHead.createSpan('grove-ann-count')
 		this.annCountEl.setText('0 个批注')
@@ -444,7 +453,7 @@ export class PdfView extends ItemView {
 			// wasm 解码资源（以及 cmaps / standard_fonts）；缺资源时页面会渲染成空白
 			// worker：经 MessageChannel 直连 worker 侧处理器，作用域限于本文档，
 			// 不污染 globalThis（曾毒化 Obsidian 原生 PDF 视图，详见开发全记录）
-			const workerSrc = this.plugin.pdfjsAssetUrl('pdf.worker.mjs')
+			const workerSrc = await this.#resolveWorkerSrc()
 			if (!workerSrc) throw new Error('PDF.js worker resource is unavailable')
 			;(pdfjsLib.GlobalWorkerOptions as unknown as { workerSrc: string }).workerSrc = workerSrc
 			this.pdfWorker = new pdfjsLib.PDFWorker()
@@ -455,14 +464,33 @@ export class PdfView extends ItemView {
 			const localPath = isAbsolutePath(target)
 				? target
 				: this.plugin.vaultBase
-					? pathModule.join(this.plugin.vaultBase, target)
-					: null
+					? joinPath(this.plugin.vaultBase, target)
+					: ''
 			let useRangeTransport = false
-			if (localPath) {
+			// 桌面：本地文件按 range 分段读，几百 MB 的扫描书也不会一次性进内存。
+			// 手机没有 node:fs，走下面的 vault.readBinary 整文件读（大文件直接拒绝）。
+			if (localPath && !this.plugin.isMobile) {
 				try {
-					const fileInfo = await statFile(localPath)
+					const fsp = await import('node:fs/promises')
+					const fileInfo = await fsp.stat(localPath)
 					if (fileInfo.isFile()) {
-						const rangeTransport = new LocalFilePdfRangeTransport(localPath, fileInfo.size)
+						const handle = await fsp.open(localPath, 'r')
+						const reader: RangeReader = {
+							async read(begin, end) {
+								const chunk = new Uint8Array(end - begin)
+								let offset = 0
+								while (offset < chunk.length) {
+									const { bytesRead } = await handle.read(chunk, offset, chunk.length - offset, begin + offset)
+									if (bytesRead <= 0) throw new Error(`PDF 文件读取提前结束（${begin + offset}/${end}）`)
+									offset += bytesRead
+								}
+								return chunk
+							},
+							close() {
+								void handle.close().catch(() => undefined)
+							},
+						}
+						const rangeTransport = new PdfRangeTransport(reader, fileInfo.size)
 						this.pdfRangeTransport = rangeTransport
 						docParams.range = rangeTransport
 						docParams.rangeChunkSize = 512 * 1024
@@ -471,15 +499,22 @@ export class PdfView extends ItemView {
 						useRangeTransport = true
 					}
 				} catch {
-					// 非本地文件或无法读取文件信息时，退回 Obsidian vault 的二进制读取接口
+					// 读不到本地文件或非桌面环境：退回 vault 的二进制读取接口
 				}
 			}
 			if (!useRangeTransport) {
+				if (this.plugin.isMobile) {
+					const file = this.app.vault.getAbstractFileByPath(target)
+					const mb = file instanceof TFile ? file.stat.size / (1024 * 1024) : 0
+					if (mb > 64) throw new Error(`这个 PDF 有 ${Math.round(mb)}MB，手机内存放不下，请到桌面端打开`)
+				}
 				const buf = await this.plugin.readBookBytes(target)
 				docParams.data = new Uint8Array(buf)
 			}
 			const wasmUrl = this.plugin.pdfjsAssetUrl('wasm/')
-			if (wasmUrl) {
+			// 手机端 getResourcePath 给的是 /storage/... 文件路径，fetch 不到；
+			// 这类可选资源（wasm 解码 / cmaps / 标准字体）先跳过，需要时再走 Blob
+			if (wasmUrl && /^(https?|app|capacitor):/i.test(wasmUrl)) {
 				docParams.wasmUrl = wasmUrl
 				docParams.cMapUrl = this.plugin.pdfjsAssetUrl('cmaps/')
 				docParams.cMapPacked = true
@@ -552,7 +587,7 @@ export class PdfView extends ItemView {
 			this.#loadFilterState()
 			this.searchInput.value = this.sidebarQuery
 			this.#renderSidebar()
-			this.sidebarEl.classList.toggle('grove-hidden', !this.plugin.settings.openSidebarWithBook)
+			this.sidebarEl.classList.toggle('grove-hidden', this.plugin.isMobile || !this.plugin.settings.openSidebarWithBook)
 		} catch (e) {
 			console.error('[Grove Reader] 打开 PDF 失败', e)
 			await this.#teardown()
@@ -616,7 +651,27 @@ export class PdfView extends ItemView {
 				// ignore
 			}
 		}
+		if (this.workerBlobUrl) {
+			URL.revokeObjectURL(this.workerBlobUrl)
+			this.workerBlobUrl = null
+		}
+	}
 
+	/** 手机端 resourcePath 是 /storage/... 文件路径，Worker 加载不了；把 worker 读成 Blob URL 再用 */
+	async #resolveWorkerSrc(): Promise<string | null> {
+		const direct = this.plugin.pdfjsAssetUrl('pdf.worker.mjs')
+		if (!this.plugin.isMobile) return direct
+		const dir = this.plugin.manifest.dir
+		if (!dir) return direct
+		try {
+			const buf = await this.app.vault.adapter.readBinary(`${dir}/pdfjs/pdf.worker.mjs`)
+			if (this.workerBlobUrl) URL.revokeObjectURL(this.workerBlobUrl)
+			this.workerBlobUrl = URL.createObjectURL(new Blob([buf], { type: 'text/javascript' }))
+			return this.workerBlobUrl
+		} catch (e) {
+			console.warn('[Grove Reader] 读取 pdf.worker 失败，退回资源路径', e)
+			return direct
+		}
 	}
 
 	#updateHeaderTitle(): void {

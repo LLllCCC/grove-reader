@@ -161,16 +161,21 @@ export default class GroveReaderPlugin extends Plugin {
 		this.registerView(VIEW_TYPE_GROVE_READER, leaf => new ReaderView(leaf, this))
 		this.registerView(VIEW_TYPE_GROVE_BOOKSHELF, leaf => new BookshelfView(leaf, this))
 		this.registerView(VIEW_TYPE_GROVE_TEXT, leaf => new TextView(leaf, this))
-		// PDF 视图依赖 Node fs / pdfjs 的 worker，只在桌面端注册；手机端打开 PDF 给提示
-		if (!this.isMobile) {
-			const { PdfView } = await import('./pdfView')
-			this.registerView(VIEW_TYPE_GROVE_PDF, leaf => new PdfView(leaf, this))
-		}
+		// PDF 视图：桌面走本地文件的 range 读取，手机退化为整文件读入内存（大文件会拒绝）
+		const { PdfView } = await import('./pdfView')
+		this.registerView(VIEW_TYPE_GROVE_PDF, leaf => new PdfView(leaf, this))
 		// 注册扩展名：电子书文件会显示在文件列表中，点击直接用阅读器打开
 		// 注意：pdf 不注册——保持 Obsidian 原生双击行为，PDF 经书架/协议进入插件
 		this.registerExtensions(SUPPORTED_BOOK_EXTS, VIEW_TYPE_GROVE_READER)
-		this.registerObsidianProtocolHandler('grove', params =>
-			void this.openByBookId(params['book'] ?? '', params['cfi'] ?? ''))
+		// 用 Grove 打开某本书：?book=<bookId> 走批注数据，?path=<库内路径> 直接按路径打开
+		this.registerObsidianProtocolHandler('grove', params => {
+			const byPath = params['path'] ?? ''
+			if (byPath) {
+				void this.openBookByPath(byPath, params['cfi'] ?? undefined)
+				return
+			}
+			void this.openByBookId(params['book'] ?? '', params['cfi'] ?? '')
+		})
 		// 文件列表里的 TXT 也提供「用 Grove Reader 打开」，自动识别 GBK/GB18030
 		this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
 			if (file instanceof TFile && file.extension.toLowerCase() === 'txt') {
@@ -713,10 +718,6 @@ export default class GroveReaderPlugin extends Plugin {
 
 	/** 在 Grove Reader 内打开 PDF（专用视图：渲染 + 文字层划选批注） */
 	async #openPdfBook(bookPath: string, cfi?: string): Promise<void> {
-		if (this.isMobile) {
-			new Notice(`${APP_NAME}：手机端暂不支持 PDF 阅读，请用系统的 PDF 应用打开`)
-			return
-		}
 		const existing = this.app.workspace
 			.getLeavesOfType(VIEW_TYPE_GROVE_PDF)
 			.find(leaf => this.#isPdfView(leaf.view) && leaf.view.bookPath === bookPath)
@@ -782,17 +783,20 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	/**
-	 * pdfjs 运行时资源（wasm / cmaps / standard_fonts）的访问 URL。
-	 * 资源随插件分发在插件目录 pdfjs/ 下，经库资源协议暴露给渲染进程。
+	 * pdfjs 运行时资源（wasm / cmaps / standard_fonts / worker）的访问 URL。
+	 * 资源随插件分发在插件目录 pdfjs/ 下；桌面 FileSystemAdapter 与手机 CapacitorAdapter
+	 * 都提供 getResourcePath，因此两端都能拿到可 fetch 的 URL。
 	 */
 	pdfjsAssetUrl(rel: string): string | null {
-		if (this.isMobile) return null
 		const adapter = this.app.vault.adapter
-		if (!(adapter instanceof FileSystemAdapter)) return null
 		const full = normalizePath(`${this.manifest.dir || joinPath('.obsidian', 'plugins', this.manifest.id)}/pdfjs/${rel}`)
-		let base = adapter.getResourcePath(full).split('?')[0]
-		if (!base.endsWith('/')) base += '/'
-		return base
+		try {
+			let base = adapter.getResourcePath(full).split('?')[0]
+			if (!base.endsWith('/')) base += '/'
+			return base
+		} catch {
+			return null
+		}
 	}
 
 	/**
