@@ -228,6 +228,13 @@ export class TextView extends ItemView {
 	#buildDom(): void {
 		const root = this.contentEl
 		root.addClass('grove-content')
+		// TEMP DEBUG 浮层
+		if (!document.getElementById('grove-dbg')) {
+			const dbg = document.createElement('div')
+			dbg.id = 'grove-dbg'
+			dbg.style.cssText = 'position:fixed;left:4px;bottom:78px;z-index:2147483647;background:rgba(0,0,0,.85);color:#0f0;font:11px/1.4 monospace;padding:4px 6px;border-radius:4px;max-width:92vw;white-space:pre-wrap;pointer-events:none'
+			document.body.appendChild(dbg)
+		}
 		this.registerDomEvent(root, 'click', (event: MouseEvent) => {
 			if (!Platform.isMobile && !Platform.isMobileApp) return
 			const target = event.target as HTMLElement | null
@@ -363,11 +370,18 @@ export class TextView extends ItemView {
 			const start = this.touchStart
 			this.touchStart = null
 			const touch = e.changedTouches[0]
-			if (!start || !touch || this.popup || !this.sidebarEl.hasClass('grove-hidden')) return
-			if (window.getSelection()?.toString()) return
+			const dbg = document.getElementById('grove-dbg')
+			const put = (msg: string): void => {
+				if (dbg) dbg.textContent = msg
+			}
+			if (!start || !touch) { put('bail: no start/touch'); return }
+			if (this.popup) { put('bail: popup'); return }
+			if (!this.sidebarEl.hasClass('grove-hidden')) { put('bail: sidebar open'); return }
+			if (window.getSelection()?.toString()) { put('bail: selection'); return }
 			const dx = touch.clientX - start.x
 			const dy = touch.clientY - start.y
-			if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.25) return
+			put(`dx=${Math.round(dx)} dy=${Math.round(dy)}`)
+			if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.25) { put(`thumb: dx=${Math.round(dx)} dy=${Math.round(dy)}`); return }
 			if (dx < 0) this.nextPage()
 			else this.prevPage()
 		}, { passive: true })
