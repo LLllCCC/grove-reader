@@ -84,3 +84,20 @@ adb shell "am start -a android.intent.action.VIEW -d 'obsidian://open?vault=Obsi
 仍留的口子：扫描版 PDF 的 wasm 资源在手机端跳过（resourcePath 是文件路径，
 fetch 不到）；TXT 主文档选区「松手消失」未解，但 PDF 能正常选中，说明问题在
 TXT 视图自身而非 Obsidian 全局——这是下一步的关键线索。
+
+## TXT 选区消失：自激刷新死循环（已修）
+
+**闭环**：`#applyScreen()` → `#touchLocation()` 无条件更新 updatedAt 并写盘 →
+`vault.modify` → `reloadFromDisk()` 不比内容就返回 true → `refreshAnnotations()`
+→ `#renderPage()`（`textEl.empty()`）→ 选区没了 → 又一次 applyScreen → 再写盘。
+
+**修法**：
+1. `store` 记 `lastWritten`，回读内容与刚写的一致直接返回 false；
+2. `#touchLocation` 位置没变不写盘；
+3. `refreshAnnotations` 有活动选区时推迟 1.2s。
+
+**验证**：调试浮层（`?debugsel=1`）里 renderPage 不再重复、选区存活 3.2s+；
+静止 10s 批注 JSON mtime 不动。冒烟加 `reloadFromDisk` 去重用例。
+
+排查手法记一笔：给 `#renderPage` 打点带上 `new Error().stack` 的调用帧，
+一眼看出是 `refreshAnnotations` 在循环——比读代码猜快得多。调试入口用完即删。
