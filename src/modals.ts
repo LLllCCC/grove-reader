@@ -733,19 +733,19 @@ export class TrashModal extends Modal {
 	}
 
 	onOpen(): void {
-		this.render()
+		void this.render()
 	}
 
-	private render(): void {
+	private async render(): Promise<void> {
 		const { contentEl } = this
 		contentEl.empty()
 		contentEl.createEl('h3', { text: '回收站' })
 		const trash = this.plugin.trash
 		if (!trash) {
-			contentEl.createEl('p', { text: '手机端暂不支持回收站。' })
+			contentEl.createEl('p', { text: '回收站暂不可用。' })
 			return
 		}
-		const entries = trash.list()
+		const entries = await trash.list()
 		contentEl.createEl('p', {
 			cls: 'setting-item-description',
 			text: `删除的书籍、笔记、批注和封面会先放在这里，保留 ${trash.retentionDays()} 天。恢复会放回原路径；原位置已有同名文件时会拒绝恢复。`,
@@ -768,7 +768,7 @@ export class TrashModal extends Modal {
 					void (async () => {
 						try {
 							await this.plugin.restoreTrash(entry.id)
-							this.render()
+							void this.render()
 						} catch (e) {
 							new Notice(e instanceof Error ? e.message : String(e))
 						}
@@ -777,8 +777,8 @@ export class TrashModal extends Modal {
 				const purge = actions.createEl('button', { text: '永久删除', cls: 'mod-warning' })
 				purge.addEventListener('click', () => {
 					new ConfirmModal(this.app, `永久删除《${entry.title || '这本书'}》？将同时删除回收站里的原文件、笔记和批注，无法恢复。`, () => {
-						this.plugin.purgeTrash(entry.id)
-						this.render()
+						void this.plugin.purgeTrash(entry.id)
+						void this.render()
 					}).open()
 				})
 			}
@@ -789,8 +789,8 @@ export class TrashModal extends Modal {
 			const empty = buttons.createEl('button', { text: '清空回收站', cls: 'mod-warning' })
 			empty.addEventListener('click', () => {
 				new ConfirmModal(this.app, `清空回收站里的 ${entries.length} 项？将永久删除，无法恢复。`, () => {
-					this.plugin.emptyTrash()
-					this.render()
+					void this.plugin.emptyTrash()
+					void this.render()
 				}).open()
 			})
 		}

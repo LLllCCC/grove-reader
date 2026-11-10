@@ -1,6 +1,5 @@
-import fs from 'node:fs'
-import pathModule from 'node:path'
 import { cleanBookTitle, isAbsolutePath, stripTitleAuthor } from './util'
+import { joinPath, PlatformIO, readJsonFile } from './platformIO'
 
 export interface MissingBook {
 	file: string
@@ -14,6 +13,8 @@ export interface MissingNote {
 	bookPath: string
 	notePath: string
 	title: string
+	/** 原书还在、只是笔记被挪走/删掉了——这类才算可安全清理 */
+	bookExists: boolean
 }
 
 export interface HealthReport {
@@ -28,28 +29,15 @@ export interface HealthReport {
 	brokenNoteIds: Array<{ note: string; id: string }>
 }
 
-function resolve(vaultBase: string, p: string): string {
-	return isAbsolutePath(p) ? p : pathModule.join(vaultBase, p)
-}
-
-function walkMarkdown(dir: string, out: string[] = []): string[] {
-	try {
-		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-			const full = pathModule.join(dir, entry.name)
-			if (entry.isDirectory()) walkMarkdown(full, out)
-			else if (entry.isFile() && entry.name.endsWith('.md')) out.push(full)
-		}
-	} catch {
-		// 目录不存在
-	}
-	return out
-}
-
-/**
- * 只读体检：检查批注 JSON、笔记、书架缓存、书单、统计之间的引用是否还对得上。
- * 不修改任何文件；清理动作由调用方决定。
- */
-export function buildHealthReport(vaultBase: string, dataRoot: string, notesFolder: string): HealthReport {	const booksDir = pathModule.join(dataRoot, 'data', 'books')
+/** 只读体检：检查批注 JSON、笔记、书架缓存、书单、统计之间的引用是否还对得上。
+ *  走 PlatformIO，桌面与手机同一套逻辑（手机端 vaultPath 传空串，路径本身是库内相对路径）。 */
+export async function buildHealthReport(
+	io: PlatformIO,
+	vaultPath: string,
+	dataRoot: string,
+	notesFolder: string,
+): Promise<HealthReport> {
+	const booksDir = joinPath(dataRoot, 'data', 'books')
 	const report: HealthReport = {
 		jsonCount: 0,
 		annotationCount: 0,
@@ -62,23 +50,31 @@ export function buildHealthReport(vaultBase: string, dataRoot: string, notesFold
 		brokenNoteIds: [],
 	}
 
+	const resolve = (p: string): string => (vaultPath && !isAbsolutePath(p) ? joinPath(vaultPath, p) : p)
+	const exists = async (p: string): Promise<boolean> => {
+		if (!p) return false
+		try {
+			return await io.exists(resolve(p))
+		} catch {
+			return false
+		}
+	}
+
 	const ids = new Set<string>()
 	const paths = new Map<string, string[]>()
 	let jsonNames: string[] = []
 	try {
-		jsonNames = fs.readdirSync(booksDir).filter(n => n.endsWith('.json'))
+		const listed = await io.list(booksDir)
+		jsonNames = listed.files.filter(f => f.endsWith('.json'))
 	} catch {
 		return report
 	}
 
-	for (const file of jsonNames) {
+	for (const full of jsonNames) {
+		const file = full.replace(/\\/g, '/').split('/').pop() ?? full
 		ids.add(file.slice(0, -5))
-		let data: Record<string, unknown>
-		try {
-			data = JSON.parse(fs.readFileSync(pathModule.join(booksDir, file), 'utf-8')) as Record<string, unknown>
-		} catch {
-			continue
-		}
+		const data = await readJsonFile<Record<string, unknown>>(io, full)
+		if (!data) continue
 		report.jsonCount++
 		const bookPath = typeof data.bookPath === 'string' ? data.bookPath : ''
 		const author = typeof data.author === 'string' ? data.author : ''
@@ -90,12 +86,13 @@ export function buildHealthReport(vaultBase: string, dataRoot: string, notesFold
 			list.push(file)
 			paths.set(bookPath, list)
 		}
-		if (!bookPath || !fs.existsSync(resolve(vaultBase, bookPath))) {
+		const bookOk = await exists(bookPath)
+		if (!bookPath || !bookOk) {
 			report.missingBooks.push({ file, bookPath, title, annotations })
 		}
 		const notePath = typeof data.notePath === 'string' ? data.notePath : ''
-		if (notePath && !fs.existsSync(resolve(vaultBase, notePath))) {
-			report.missingNotes.push({ file, bookPath, notePath, title })
+		if (notePath && !(await exists(notePath))) {
+			report.missingNotes.push({ file, bookPath, notePath, title, bookExists: bookOk })
 		}
 	}
 
@@ -103,42 +100,26 @@ export function buildHealthReport(vaultBase: string, dataRoot: string, notesFold
 		if (files.length > 1) report.duplicates.push({ bookPath, files })
 	}
 
-	const shelfPath = pathModule.join(dataRoot, 'data', 'shelf.json')
-	try {
-		const shelf = JSON.parse(fs.readFileSync(shelfPath, 'utf-8')) as { entries?: Record<string, unknown> }
-		for (const key of Object.keys(shelf.entries ?? {})) {
-			if (!fs.existsSync(resolve(vaultBase, key))) report.staleShelf.push(key)
-		}
-	} catch {
-		// 没有书架缓存
+	const shelf = await readJsonFile<{ entries?: Record<string, unknown> }>(io, joinPath(dataRoot, 'data', 'shelf.json'))
+	for (const key of Object.keys(shelf?.entries ?? {})) {
+		if (!(await exists(key))) report.staleShelf.push(key)
 	}
 
-	const listsPath = pathModule.join(dataRoot, 'data', 'lists.json')
-	try {
-		const lists = JSON.parse(fs.readFileSync(listsPath, 'utf-8')) as { members?: Record<string, unknown> }
-		for (const key of Object.keys(lists.members ?? {})) {
-			if (!fs.existsSync(resolve(vaultBase, key))) report.staleLists.push(key)
-		}
-	} catch {
-		// 没有书单
+	const lists = await readJsonFile<{ members?: Record<string, unknown> }>(io, joinPath(dataRoot, 'data', 'lists.json'))
+	for (const key of Object.keys(lists?.members ?? {})) {
+		if (!(await exists(key))) report.staleLists.push(key)
 	}
 
-	const statsPath = pathModule.join(dataRoot, 'data', 'stats.json')
-	try {
-		const stats = JSON.parse(fs.readFileSync(statsPath, 'utf-8')) as { books?: Record<string, unknown> }
-		for (const key of Object.keys(stats.books ?? {})) {
-			if (!fs.existsSync(resolve(vaultBase, key))) report.staleStats.push(key)
-		}
-	} catch {
-		// 没有统计
+	const stats = await readJsonFile<{ books?: Record<string, unknown> }>(io, joinPath(dataRoot, 'data', 'stats.json'))
+	for (const key of Object.keys(stats?.books ?? {})) {
+		if (!(await exists(key))) report.staleStats.push(key)
 	}
 
-	const notesRoot = notesFolder ? pathModule.join(vaultBase, notesFolder) : ''
-	if (notesRoot) {
-		for (const note of walkMarkdown(notesRoot)) {
+	if (notesFolder) {
+		for (const note of await walkMarkdown(io, joinPath(vaultPath, notesFolder))) {
 			let text = ''
 			try {
-				text = fs.readFileSync(note, 'utf-8')
+				text = await io.read(note)
 			} catch {
 				continue
 			}
@@ -146,7 +127,7 @@ export function buildHealthReport(vaultBase: string, dataRoot: string, notesFold
 			if (!line) continue
 			const id = line.slice('grove-book:'.length).trim()
 			if (id && !ids.has(id)) {
-				report.brokenNoteIds.push({ note: pathModule.basename(note), id })
+				report.brokenNoteIds.push({ note: note.replace(/\\/g, '/').split('/').pop() ?? note, id })
 			}
 		}
 	}
@@ -155,7 +136,22 @@ export function buildHealthReport(vaultBase: string, dataRoot: string, notesFold
 }
 
 /** 可安全清理的失效引用数：书架/书单/统计 + 原书仍在的失效笔记路径 */
-export function healthCleanupCount(report: HealthReport, vaultBase: string): number {
-	const notes = report.missingNotes.filter(n => n.bookPath && fs.existsSync(resolve(vaultBase, n.bookPath))).length
+export function healthCleanupCount(report: HealthReport): number {
+	const notes = report.missingNotes.filter(n => n.bookExists).length
 	return report.staleShelf.length + report.staleLists.length + report.staleStats.length + notes
+}
+
+async function walkMarkdown(io: PlatformIO, dir: string, out: string[] = []): Promise<string[]> {
+	if (!dir) return out
+	let listed: { files: string[]; folders: string[] }
+	try {
+		listed = await io.list(dir)
+	} catch {
+		return out
+	}
+	for (const f of listed.files) {
+		if (f.endsWith('.md')) out.push(f)
+	}
+	for (const sub of listed.folders) await walkMarkdown(io, sub, out)
+	return out
 }

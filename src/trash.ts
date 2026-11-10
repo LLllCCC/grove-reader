@@ -1,6 +1,5 @@
-import fs from 'node:fs'
-import pathModule from 'node:path'
-import { bookIdFor, isAbsolutePath, randomId } from './util'
+import { isAbsolutePath, randomId } from './util'
+import { dirName, joinPath, readJsonFile, PlatformIO } from './platformIO'
 import type { ShelfEntry } from './bookshelf'
 import type { StatsBook } from './stats'
 
@@ -37,82 +36,86 @@ export interface TrashInput {
 
 const RETENTION_DAYS = 30
 
+/** 取扩展名（含点）；没有扩展名时返回空串 */
+function extOf(p: string): string {
+	const base = p.replace(/\\/g, '/').split('/').pop() ?? ''
+	const i = base.lastIndexOf('.')
+	return i > 0 ? base.slice(i) : ''
+}
+
 /**
  * 插件内回收站：删书时把原文件、阅读笔记、批注 JSON、封面一起移到
- * data/trash/<id>/，保留 30 天，可恢复或永久删除。
- * 这样即使 Obsidian 的删除设置是“永久删除”，插件内仍能救回来。
+ * data/.trash/<id>/，保留 30 天，可恢复或永久删除。
+ *
+ * 走 PlatformIO（桌面 Node fs / 手机 vault.adapter），所以手机端也能用。
+ * 手机端所有路径都是库内相对路径，移动会在库内 rename，不会跨盘。
  */
 export class TrashStore {
 	private root: string
-	private dataRoot: string
-	private vaultBase: string
 
-	constructor(dataRoot: string, vaultBase: string) {
-		this.dataRoot = dataRoot
+	constructor(
+		private dataRoot: string,
+		private io: PlatformIO,
+		/** 桌面端为库根绝对路径；手机端传空串（路径本身就是库内相对路径） */
+		private vaultPath = '',
+	) {
 		// 放在书库根目录的隐藏文件夹里：和书库同盘（移动是瞬时 rename），
 		// 又不会被 Obsidian 文件列表索引成大文件
-		this.root = pathModule.join(dataRoot, '.trash')
-		this.vaultBase = vaultBase
+		this.root = joinPath(dataRoot, '.trash')
 	}
 
 	rootPath(): string {
 		return this.root
 	}
 
-	list(): TrashEntry[] {
-		let names: string[] = []
+	async list(): Promise<TrashEntry[]> {
+		let folders: string[] = []
 		try {
-			names = fs.readdirSync(this.root)
+			const listed = await this.io.list(this.root)
+			folders = listed.folders
 		} catch {
 			return []
 		}
 		const entries: TrashEntry[] = []
-		for (const name of names) {
-			const manifest = pathModule.join(this.root, name, 'manifest.json')
-			try {
-				const entry = JSON.parse(fs.readFileSync(manifest, 'utf-8')) as TrashEntry
-				if (entry && entry.id && entry.bookPath) entries.push(entry)
-			} catch {
-				// 忽略损坏/临时目录
-			}
+		for (const dir of folders) {
+			const entry = await readJsonFile<TrashEntry>(this.io, joinPath(dir, 'manifest.json'))
+			if (entry && entry.id && entry.bookPath) entries.push(entry)
 		}
 		return entries.sort((a, b) => b.deletedAt - a.deletedAt)
 	}
 
 	/** 把一批文件移入回收站；任一步失败会尽量回滚 */
-	move(input: TrashInput): TrashEntry {
+	async move(input: TrashInput): Promise<TrashEntry> {
 		const id = `${Date.now()}-${randomId()}`
-		const dir = pathModule.join(this.root, id)
-		fs.mkdirSync(dir, { recursive: true })
+		const dir = joinPath(this.root, id)
+		await this.io.mkdir(dir)
 		const files: TrashEntry['files'] = {}
 		const moved: Array<[string, string]> = []
 		let size = 0
 
-		const move = (src: string, destName: string): void => {
-			if (!fs.existsSync(src)) return
-			const dst = pathModule.join(dir, destName)
+		const moveOne = async (src: string, destName: string): Promise<boolean> => {
+			if (!(await this.io.exists(src))) return false
 			try {
-				size += fs.statSync(src).size
+				const st = await this.io.stat(src)
+				if (st) size += st.size
 			} catch {
 				// 大小只用于展示
 			}
-			moveFile(src, dst)
+			const dst = joinPath(dir, destName)
+			await this.moveFile(src, dst)
 			moved.push([src, dst])
-			files[destName.startsWith('book') ? 'book'
-				: destName.startsWith('note') ? 'note'
-				: destName.startsWith('cover') ? 'cover'
-				: 'data'] = destName
+			if (destName.startsWith('book')) files.book = destName
+			else if (destName.startsWith('note')) files.note = destName
+			else if (destName.startsWith('cover')) files.cover = destName
+			else files.data = destName
+			return true
 		}
 
 		try {
-			move(this.resolve(input.bookPath), `book${pathModule.extname(input.bookPath)}`)
-			if (input.notePath) move(this.resolve(input.notePath), 'note.md')
-			if (input.dataFile) {
-				move(pathModule.join(this.dataRoot, 'data', 'books', input.dataFile), 'data.json')
-			}
-			if (input.cover) {
-				move(pathModule.join(this.dataRoot, 'data', 'covers', input.cover), `cover${pathModule.extname(input.cover)}`)
-			}
+			await moveOne(this.resolve(input.bookPath), `book${extOf(input.bookPath)}`)
+			if (input.notePath) await moveOne(this.resolve(input.notePath), 'note.md')
+			if (input.dataFile) await moveOne(joinPath(this.dataRoot, 'data', 'books', input.dataFile), 'data.json')
+			if (input.cover) await moveOne(joinPath(this.dataRoot, 'data', 'covers', input.cover), `cover${extOf(input.cover)}`)
 			const entry: TrashEntry = {
 				id,
 				deletedAt: Date.now(),
@@ -127,65 +130,73 @@ export class TrashStore {
 				size,
 				files,
 			}
-			fs.writeFileSync(pathModule.join(dir, 'manifest.json'), JSON.stringify(entry, null, 2), 'utf-8')
+			await this.io.write(joinPath(dir, 'manifest.json'), JSON.stringify(entry, null, 2))
 			return entry
 		} catch (e) {
 			for (const [src, dst] of moved.reverse()) {
 				try {
-					moveFile(dst, src)
+					await this.moveFile(dst, src)
 				} catch {
 					// 回滚失败时保留现场，错误信息里说明
 				}
 			}
-			fs.rmSync(dir, { recursive: true, force: true })
+			try {
+				await this.io.removeDir(dir)
+			} catch {
+				// ignore
+			}
 			throw e
 		}
 	}
 
 	/** 恢复到原路径；目标已存在时抛错，避免覆盖 */
-	restore(id: string): TrashEntry {
-		const dir = pathModule.join(this.root, id)
-		const manifest = pathModule.join(dir, 'manifest.json')
-		const entry = JSON.parse(fs.readFileSync(manifest, 'utf-8')) as TrashEntry
+	async restore(id: string): Promise<TrashEntry> {
+		const dir = joinPath(this.root, id)
+		const entry = await readJsonFile<TrashEntry>(this.io, joinPath(dir, 'manifest.json'))
+		if (!entry) throw new Error('回收站记录已损坏，无法恢复')
 		const bookTarget = this.resolve(entry.bookPath)
 		const noteTarget = entry.notePath ? this.resolve(entry.notePath) : ''
-		const dataTarget = entry.dataFile ? pathModule.join(this.dataRoot, 'data', 'books', entry.dataFile) : ''
-		const coverTarget = entry.cover ? pathModule.join(this.dataRoot, 'data', 'covers', entry.cover) : ''
+		const dataTarget = entry.dataFile ? joinPath(this.dataRoot, 'data', 'books', entry.dataFile) : ''
+		const coverTarget = entry.cover ? joinPath(this.dataRoot, 'data', 'covers', entry.cover) : ''
 
-		if (entry.files.book && fs.existsSync(bookTarget)) throw new Error('原位置已有同名书籍文件，请先移走再恢复')
-		if (entry.files.note && noteTarget && fs.existsSync(noteTarget)) throw new Error('原位置已有同名笔记，请先移走再恢复')
-		if (entry.files.data && dataTarget && fs.existsSync(dataTarget)) throw new Error('这本书已有新的批注数据，请先备份再恢复')
+		if (entry.files.book && (await this.io.exists(bookTarget))) throw new Error('原位置已有同名书籍文件，请先移走再恢复')
+		if (entry.files.note && noteTarget && (await this.io.exists(noteTarget))) throw new Error('原位置已有同名笔记，请先移走再恢复')
+		if (entry.files.data && dataTarget && (await this.io.exists(dataTarget))) throw new Error('这本书已有新的批注数据，请先备份再恢复')
 
 		const moved: Array<[string, string]> = []
 		let coverRestored = false
 		try {
 			if (entry.files.book) {
-				moveFile(pathModule.join(dir, entry.files.book), bookTarget)
-				moved.push([pathModule.join(dir, entry.files.book), bookTarget])
+				const from = joinPath(dir, entry.files.book)
+				await this.moveFile(from, bookTarget)
+				moved.push([from, bookTarget])
 			}
 			if (entry.files.note && noteTarget) {
-				moveFile(pathModule.join(dir, entry.files.note), noteTarget)
-				moved.push([pathModule.join(dir, entry.files.note), noteTarget])
+				const from = joinPath(dir, entry.files.note)
+				await this.moveFile(from, noteTarget)
+				moved.push([from, noteTarget])
 			}
 			if (entry.files.data && dataTarget) {
-				moveFile(pathModule.join(dir, entry.files.data), dataTarget)
-				moved.push([pathModule.join(dir, entry.files.data), dataTarget])
+				const from = joinPath(dir, entry.files.data)
+				await this.moveFile(from, dataTarget)
+				moved.push([from, dataTarget])
 			}
 			if (entry.files.cover && coverTarget) {
-				if (fs.existsSync(coverTarget)) {
+				const from = joinPath(dir, entry.files.cover)
+				if (await this.io.exists(coverTarget)) {
 					// 已有同名封面时以现有为准，不覆盖；书架仍指向这个名字
-					fs.rmSync(pathModule.join(dir, entry.files.cover), { force: true })
+					await this.io.remove(from)
 					coverRestored = true
 				} else {
-					moveFile(pathModule.join(dir, entry.files.cover), coverTarget)
-					moved.push([pathModule.join(dir, entry.files.cover), coverTarget])
+					await this.moveFile(from, coverTarget)
+					moved.push([from, coverTarget])
 					coverRestored = true
 				}
 			}
 		} catch (e) {
 			for (const [src, dst] of moved.reverse()) {
 				try {
-					moveFile(dst, src)
+					await this.moveFile(dst, src)
 				} catch {
 					// 保留现场
 				}
@@ -193,7 +204,7 @@ export class TrashStore {
 			throw e
 		}
 
-		fs.rmSync(dir, { recursive: true, force: true })
+		await this.io.removeDir(dir)
 		if (!coverRestored) {
 			delete entry.files.cover
 			if (entry.shelfEntry) delete entry.shelfEntry.cover
@@ -201,21 +212,21 @@ export class TrashStore {
 		return entry
 	}
 
-	purge(id: string): void {
-		fs.rmSync(pathModule.join(this.root, id), { recursive: true, force: true })
+	async purge(id: string): Promise<void> {
+		await this.io.removeDir(joinPath(this.root, id))
 	}
 
-	empty(): number {
-		let names: string[] = []
+	async empty(): Promise<number> {
+		let folders: string[] = []
 		try {
-			names = fs.readdirSync(this.root)
+			folders = (await this.io.list(this.root)).folders
 		} catch {
 			return 0
 		}
 		let count = 0
-		for (const name of names) {
+		for (const dir of folders) {
 			try {
-				fs.rmSync(pathModule.join(this.root, name), { recursive: true, force: true })
+				await this.io.removeDir(dir)
 				count++
 			} catch {
 				// 跳过占用中的文件
@@ -224,13 +235,13 @@ export class TrashStore {
 		return count
 	}
 
-	purgeExpired(days = RETENTION_DAYS): number {
+	async purgeExpired(days = RETENTION_DAYS): Promise<number> {
 		const cutoff = Date.now() - days * 86_400_000
 		let count = 0
-		for (const entry of this.list()) {
+		for (const entry of await this.list()) {
 			if (entry.deletedAt < cutoff) {
 				try {
-					this.purge(entry.id)
+					await this.purge(entry.id)
 					count++
 				} catch {
 					// 下次再试
@@ -244,23 +255,20 @@ export class TrashStore {
 		return RETENTION_DAYS
 	}
 
+	/** 同盘 rename；跨盘（EXDEV）或手机端 adapter 不支持时降级为复制后删除 */
+	private async moveFile(src: string, dst: string): Promise<void> {
+		const parent = dirName(dst)
+		if (parent) await this.io.mkdir(parent)
+		try {
+			await this.io.rename(src, dst)
+			return
+		} catch {
+			await this.io.copy(src, dst)
+			await this.io.remove(src)
+		}
+	}
+
 	private resolve(p: string): string {
-		return isAbsolutePath(p) ? p : pathModule.join(this.vaultBase, p)
+		return isAbsolutePath(p) || !this.vaultPath ? p : joinPath(this.vaultPath, p)
 	}
-}
-
-function moveFile(src: string, dst: string): void {
-	fs.mkdirSync(pathModule.dirname(dst), { recursive: true })
-	try {
-		fs.renameSync(src, dst)
-	} catch (e) {
-		const code = (e as NodeJS.ErrnoException).code
-		if (code !== 'EXDEV') throw e
-		fs.copyFileSync(src, dst)
-		fs.unlinkSync(src)
-	}
-}
-
-export function trashDataFile(dataRoot: string, bookPath: string): string {
-	return pathModule.join(dataRoot, 'data', 'books', `${bookIdFor(bookPath)}.json`)
 }

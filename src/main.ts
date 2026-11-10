@@ -96,15 +96,19 @@ export default class GroveReaderPlugin extends Plugin {
 		this.oplog = new OpLog(this.dataRoot, io)
 		await this.oplog.load()
 		this.debugLog = new DebugLog(this.dataRoot, io, this.settings.debugMode)
-		if (!this.isMobile) {
-			const { TrashStore } = await import('./trash')
-			this.trash = new TrashStore(this.dataRoot, this.vaultBase)
-			const purged = this.trash.purgeExpired()
-			if (purged) {
-				this.oplog.add('回收站清理', `自动清理 ${purged} 项`)
+		// 回收站走 PlatformIO，手机端同样可用（vault.adapter 移动库内文件）
+		const { TrashStore } = await import('./trash')
+		this.trash = new TrashStore(this.dataRoot, io, this.vaultBase ?? '')
+		void this.trash
+			.purgeExpired()
+			.then(purged => {
+				if (!purged) return
+				this.oplog?.add('回收站清理', `自动清理 ${purged} 项`)
 				this.debug('trash', 'purge expired', { count: purged })
-			}
-		}
+			})
+			.catch(() => {
+				// 清理失败不影响启动
+			})
 		this.store = new BookStore(this.dataRoot, this.settings.maxBackups, io)
 		await this.store.preload()
 		let lastSaveErrorAt = 0
@@ -262,29 +266,25 @@ export default class GroveReaderPlugin extends Plugin {
 		await this.exportDataBackup()
 	}
 
-	/** 数据体检：只读扫描，不删任何东西（依赖 Node fs，仅桌面端） */
+	/** 数据体检：只读扫描，不删任何东西（PlatformIO，桌面/手机都能跑） */
 	showHealthReport(): void {
-		if (this.isMobile) {
-			new Notice(`${APP_NAME}：手机端暂不支持数据体检`)
-			return
-		}
 		void this.#runHealthReport()
 	}
 
 	async #runHealthReport(): Promise<void> {
 		const { buildHealthReport, healthCleanupCount } = await import('./health')
-		const report = buildHealthReport(this.vaultBase, this.dataRoot, this.settings.notesFolder)
+		const report = await buildHealthReport(this.io, this.vaultBase ?? '', this.dataRoot, this.settings.notesFolder)
 		this.debug('health', 'scan', {
 			json: report.jsonCount,
 			missingBooks: report.missingBooks.length,
 			missingNotes: report.missingNotes.length,
 		})
-		new HealthReportModal(this.app, report, healthCleanupCount(report, this.vaultBase), () => void this.confirmCleanupHealth(report)).open()
+		new HealthReportModal(this.app, report, healthCleanupCount(report), () => void this.confirmCleanupHealth(report)).open()
 	}
 
 	private async confirmCleanupHealth(report: HealthReport): Promise<void> {
 		const { healthCleanupCount } = await import('./health')
-		const count = healthCleanupCount(report, this.vaultBase)
+		const count = healthCleanupCount(report)
 		if (!count) {
 			new Notice(`${APP_NAME}：没有可清理的失效引用`)
 			return
@@ -312,11 +312,8 @@ export default class GroveReaderPlugin extends Plugin {
 			removed++
 		}
 		for (const issue of report.missingNotes) {
-			if (!issue.bookPath) continue
-			const exists = isAbsolutePath(issue.bookPath)
-				? (this.desktopFs?.pathExists(issue.bookPath) ?? false)
-				: this.app.vault.getAbstractFileByPath(issue.bookPath) !== null
-			if (!exists) continue
+			// bookExists 在扫描时就算好了：原书还在、只是笔记丢了，才清这条引用
+			if (!issue.bookExists) continue
 			this.store.clearNotePath(issue.bookPath)
 			removed++
 		}
@@ -331,32 +328,34 @@ export default class GroveReaderPlugin extends Plugin {
 
 	/**
 	 * 删除书籍时把书籍/笔记/批注/封面一起移入插件回收站。
-	 * 回收站需要 Node fs，手机端没有：返回 false，调用方按普通删除处理。
+	 * 移动失败时返回 false，调用方回退到 Obsidian 自带的删除逻辑。
 	 */
-	moveToTrash(bookPath: string, title: string, notePath?: string): boolean {
+	async moveToTrash(bookPath: string, title: string, notePath?: string): Promise<boolean> {
 		if (!this.trash) return false
 		const entry = this.shelfCache.get(bookPath)
 		const dataFile = `${bookIdFor(bookPath)}.json`
 		const hasData = this.store.hasDataFor(bookPath)
-		this.trash.move({
-			title,
-			bookPath,
-			notePath,
-			dataFile: hasData ? dataFile : undefined,
-			cover: entry?.cover,
-			shelfEntry: entry ?? null,
-			statsEntry: this.stats.peek(bookPath) ?? null,
-			listId: this.lists.listIdOf(bookPath),
-		})
-		return true
+		try {
+			await this.trash.move({
+				title,
+				bookPath,
+				notePath,
+				dataFile: hasData ? dataFile : undefined,
+				cover: entry?.cover,
+				shelfEntry: entry ?? null,
+				statsEntry: this.stats.peek(bookPath) ?? null,
+				listId: this.lists.listIdOf(bookPath),
+			})
+			return true
+		} catch (e) {
+			this.debug('trash', 'move failed', { bookPath, error: e instanceof Error ? e.message : String(e) })
+			return false
+		}
 	}
 
 	async restoreTrash(id: string): Promise<void> {
-		if (!this.trash) {
-			new Notice(`${APP_NAME}：手机端暂不支持回收站`)
-			return
-		}
-		const entry = this.trash.restore(id)
+		if (!this.trash) return
+		const entry = await this.trash.restore(id)
 		this.shelfCache.set(entry.bookPath, entry.shelfEntry ?? {})
 		if (entry.statsEntry) this.stats.setBook(entry.bookPath, entry.statsEntry)
 		if (entry.listId) this.lists.setMember(entry.bookPath, entry.listId)
@@ -368,34 +367,25 @@ export default class GroveReaderPlugin extends Plugin {
 		new Notice(`${APP_NAME}：已恢复《${entry.title}》`)
 	}
 
-	purgeTrash(id: string): void {
-		if (!this.trash) {
-			new Notice(`${APP_NAME}：手机端暂不支持回收站`)
-			return
-		}
-		const entry = this.trash.list().find(e => e.id === id)
-		this.trash.purge(id)
+	async purgeTrash(id: string): Promise<void> {
+		if (!this.trash) return
+		const entry = (await this.trash.list()).find(e => e.id === id)
+		await this.trash.purge(id)
 		this.oplog.add('回收站永久删除', entry ? `《${entry.title}》` : id)
 		this.debug('trash', 'purge', { id })
 		new Notice(`${APP_NAME}：已永久删除`)
 	}
 
-	emptyTrash(): void {
-		if (!this.trash) {
-			new Notice(`${APP_NAME}：手机端暂不支持回收站`)
-			return
-		}
-		const count = this.trash.empty()
+	async emptyTrash(): Promise<void> {
+		if (!this.trash) return
+		const count = await this.trash.empty()
 		this.oplog.add('清空回收站', `${count} 项`)
 		this.debug('trash', 'empty', { count })
 		new Notice(`${APP_NAME}：已清空回收站（${count} 项）`)
 	}
 
 	showTrash(): void {
-		if (!this.trash) {
-			new Notice(`${APP_NAME}：手机端暂不支持回收站`)
-			return
-		}
+		if (!this.trash) return
 		new TrashModal(this.app, this).open()
 	}
 

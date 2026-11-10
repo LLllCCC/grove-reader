@@ -498,16 +498,18 @@ export class GroveSettingTab extends PluginSettingTab {
 			.addButton(button =>
 				button.setButtonText('搜索').setCta().onClick(() => this.plugin.showSearch()))
 
-		// —— 回收站（依赖 node:fs，手机端没有）——
+		// —— 回收站（走 PlatformIO，手机端同样可用）——
 		const trash = this.plugin.trash
-		if (!Platform.isMobile && trash) {
+		if (trash) {
 			containerEl.createEl('h3', { text: '回收站' })
-			const trashCount = trash.list().length
-			new Setting(containerEl)
+			const trashSetting = new Setting(containerEl)
 				.setName('已删除的书籍')
 				.setDesc(`删书时把原文件、笔记、批注和封面移到这里，保留 ${trash.retentionDays()} 天；可恢复或永久删除`)
 				.addButton(button =>
-					button.setButtonText(`打开（${trashCount}）`).onClick(() => this.plugin.showTrash()))
+					button.setButtonText('打开').onClick(() => this.plugin.showTrash()))
+			void trash.list().then(entries => {
+				if (entries.length) trashSetting.setDesc(`已删除 ${entries.length} 项；可恢复或永久删除，保留 ${trash.retentionDays()} 天`)
+			})
 		}
 
 		// —— 操作记录 ——
@@ -529,13 +531,11 @@ export class GroveSettingTab extends PluginSettingTab {
 
 		// —— 维护 ——
 		containerEl.createEl('h3', { text: '维护' })
-		if (!Platform.isMobile) {
-			new Setting(containerEl)
-				.setName('数据体检')
-				.setDesc('检查批注 JSON、笔记、书架缓存、书单、统计之间的引用是否还对得上；只读，不会删除书籍或批注')
-				.addButton(button =>
-					button.setButtonText('运行').setCta().onClick(() => this.plugin.showHealthReport()))
-		}
+		new Setting(containerEl)
+			.setName('数据体检')
+			.setDesc('检查批注 JSON、笔记、书架缓存、书单、统计之间的引用是否还对得上；只读，不会删除书籍或批注')
+			.addButton(button =>
+				button.setButtonText('运行').setCta().onClick(() => this.plugin.showHealthReport()))
 		new Setting(containerEl)
 			.setName('调试模式')
 			.setDesc('把打开书籍、删除、清空、备份等事件写入 data/debug.log（512KB 轮转），默认关闭；反馈问题时再开')

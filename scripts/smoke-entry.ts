@@ -11,6 +11,8 @@ import { BookData } from '../src/types'
 import { bookIdFor, compareCfi, formatDuration, relativeTime } from '../src/util'
 import { applySync, normalizeExcerpt, parseNoteEntries, planSync } from '../src/noteSync'
 import { buildSearchIndex, searchDocs } from '../src/search'
+import { TrashStore } from '../src/trash'
+import { buildHealthReport, healthCleanupCount } from '../src/health'
 import { appendCards, buildCardText, emptyCanvas, parseCanvas, serializeCanvas, shortTitle } from '../src/canvas'
 
 async function main(): Promise<void> {
@@ -390,6 +392,73 @@ assert.equal(idx[0].bookTitle, '书名A')
 assert.equal(idx[0].bookExists, true)
 assert.equal(searchDocs(idx, '关键词').length, 1)
 assert.equal(searchDocs(idx, '关键词', { onlyNotes: true }).length, 1)
+
+// 27. 回收站（PlatformIO 版）：移入 → 恢复 → 再移入 → 清空
+const vaultTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-vault-'))
+const trashRoot = path.join(vaultTmp, 'Grove Reader')
+const trashBooksDir = path.join(trashRoot, 'data', 'books')
+const trashCoversDir = path.join(trashRoot, 'data', 'covers')
+fs.mkdirSync(trashBooksDir, { recursive: true })
+fs.mkdirSync(trashCoversDir, { recursive: true })
+fs.mkdirSync(path.join(vaultTmp, 'Grove Reader', '书籍'), { recursive: true })
+const trashBookRel = 'Grove Reader/书籍/回收站测试.epub'
+fs.writeFileSync(path.join(vaultTmp, trashBookRel), 'book-bytes-0123456789')
+fs.writeFileSync(path.join(trashBooksDir, 'abc.json'), '{"version":1}')
+fs.writeFileSync(path.join(trashCoversDir, 'abc.jpg'), 'cover-bytes')
+
+const trashStore = new TrashStore(trashRoot, new DesktopIO(), vaultTmp)
+const trashEntry = await trashStore.move({
+	title: '回收站测试',
+	bookPath: trashBookRel,
+	dataFile: 'abc.json',
+	cover: 'abc.jpg',
+})
+assert.equal(fs.existsSync(path.join(vaultTmp, trashBookRel)), false, '移入后原文件应已消失')
+assert.equal(fs.existsSync(path.join(trashBooksDir, 'abc.json')), false, '批注 JSON 应已移入回收站')
+assert.ok(trashEntry.size > 0, '回收站条目应记录大小')
+assert.equal((await trashStore.list()).length, 1)
+
+await trashStore.restore(trashEntry.id)
+assert.equal(fs.existsSync(path.join(vaultTmp, trashBookRel)), true, '恢复后原文件应回到原路径')
+assert.equal(fs.existsSync(path.join(trashBooksDir, 'abc.json')), true, '恢复后批注 JSON 应回到原路径')
+assert.equal((await trashStore.list()).length, 0, '恢复后回收站应为空')
+
+const trashEntry2 = await trashStore.move({ title: '回收站测试', bookPath: trashBookRel, dataFile: 'abc.json' })
+assert.equal((await trashStore.list()).length, 1)
+await trashStore.purge(trashEntry2.id)
+assert.equal((await trashStore.list()).length, 0, '永久删除后回收站应为空')
+assert.equal(fs.existsSync(path.join(vaultTmp, trashBookRel)), false, '永久删除后原文件不应存在')
+
+let restoreRejected = false
+try {
+	await trashStore.restore('not-exist-id')
+} catch {
+	restoreRejected = true
+}
+assert.equal(restoreRejected, true, '恢复不存在的条目应抛错')
+assert.equal(await trashStore.empty(), 0, '清空空回收站应返回 0')
+
+// 28. 数据体检（PlatformIO 版）：正常书 / 缺书 / 失效书架
+const hv = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-health-'))
+const hRoot = path.join(hv, 'Grove Reader')
+fs.mkdirSync(path.join(hRoot, 'data', 'books'), { recursive: true })
+fs.mkdirSync(path.join(hRoot, '书籍'), { recursive: true })
+fs.writeFileSync(path.join(hRoot, '书籍', 'ok.epub'), 'x')
+fs.writeFileSync(path.join(hRoot, 'data', 'books', 'ok.json'), JSON.stringify({
+	version: 1, bookPath: 'Grove Reader/书籍/ok.epub', title: '正常', annotations: [{ id: '1' }],
+}))
+fs.writeFileSync(path.join(hRoot, 'data', 'books', 'gone.json'), JSON.stringify({
+	version: 1, bookPath: 'Grove Reader/书籍/gone.epub', title: '丢了',
+}))
+fs.writeFileSync(path.join(hRoot, 'data', 'shelf.json'), JSON.stringify({
+	entries: { 'Grove Reader/书籍/gone.epub': {} },
+}))
+const hr = await buildHealthReport(new DesktopIO(), hv, hRoot, '')
+assert.equal(hr.jsonCount, 2)
+assert.equal(hr.annotationCount, 1)
+assert.equal(hr.missingBooks.length, 1)
+assert.equal(hr.staleShelf.length, 1)
+assert.equal(healthCleanupCount(hr), 1)
 
 console.log('SMOKE OK')
 }

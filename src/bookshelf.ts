@@ -896,7 +896,7 @@ export class BookshelfView extends ItemView {
 			if (closed) await new Promise(resolve => window.setTimeout(resolve, 300))
 			this.plugin.debug('delete', 'book', { path, deleteFile, deleteNote })
 			if (deleteFile) {
-				const trashed = this.plugin.moveToTrash(path, title, deleteNote ? notePath : undefined)
+				const trashed = await this.plugin.moveToTrash(path, title, deleteNote ? notePath : undefined)
 				if (!trashed) {
 					// 手机端没有插件回收站：按 Obsidian 的删除设置直接删原文件（与笔记）
 					const bookFile = this.app.vault.getAbstractFileByPath(path)

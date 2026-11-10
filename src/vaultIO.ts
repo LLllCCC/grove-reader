@@ -32,7 +32,23 @@ export class VaultIO implements PlatformIO {
 	}
 
 	async mkdir(path: string): Promise<void> {
-		await this.adapter.mkdir(this.p(path))
+		const full = this.p(path)
+		try {
+			await this.adapter.mkdir(full)
+		} catch {
+			// 有的 adapter 不建父目录：逐级补齐再试
+			const parts = full.split('/')
+			let cur = ''
+			for (const seg of parts) {
+				cur = cur ? `${cur}/${seg}` : seg
+				if (await this.adapter.exists(cur)) continue
+				try {
+					await this.adapter.mkdir(cur)
+				} catch {
+					// 竞态下别人已建好，忽略
+				}
+			}
+		}
 	}
 
 	async remove(path: string): Promise<void> {
