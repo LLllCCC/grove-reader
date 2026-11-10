@@ -3070,6 +3070,11 @@ body.is-mobile .grove-toolbar > * {
 	flex: 0 0 auto;
 }
 
+body.is-mobile .grove-toolbar .grove-color-dot {
+	width: 18px;
+	height: 18px;
+}
+
 /* 手机窄屏上这两样只占宽度不干活，直接不显示 */
 body.is-mobile .grove-toolbar .grove-flex-spacer,
 body.is-mobile .grove-toolbar .grove-sep {
@@ -3078,18 +3083,25 @@ body.is-mobile .grove-toolbar .grove-sep {
 
 body.is-mobile .grove-toolbar .grove-progress {
 	flex: 0 0 auto;
-	width: 118px;
+	width: auto;
 	min-width: 0;
+	gap: 0;
+}
+
+/* 手机上翻页靠左右滑，进度条滑杆只会占地方，把「颜色 + 评论」挤到屏幕外；
+   保留百分比文字，定位跳转交给目录面板 */
+body.is-mobile .grove-toolbar .grove-progress input[type='range'] {
+	display: none !important;
 }
 
 body.is-mobile .grove-toolbar .grove-toc {
 	flex: 0 0 auto;
-	max-width: 42vw;
+	max-width: 36vw;
 }
 
 body.is-mobile .grove-toolbar .grove-toc-select,
 body.is-mobile .grove-toolbar .grove-toc-btn {
-	max-width: 42vw;
+	max-width: 36vw;
 }
 
 /* 开合按钮：收起态独占整条窄条（点哪儿都能开），展开态钉在最左不随横滑滑走 */

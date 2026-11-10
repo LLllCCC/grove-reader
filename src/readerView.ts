@@ -895,8 +895,11 @@ export class ReaderView extends ItemView {
 			if (bar?.dataset.barOpen === '1') this.#setMobileBarOpen(false)
 		}
 		const percent = Math.round((d.fraction ?? 0) * 100)
+		// 手机窄屏一行放不下「0% · Loc 0」，只留百分比，把颜色和评论按钮留在首屏
 		this.progressLabel.setText(
-			`${percent}%${d.pageItem ? ` · 第 ${d.pageItem.label} 页` : d.location ? ` · Loc ${d.location.current}` : ''}`,
+			this.plugin.isMobile
+				? `${percent}%`
+				: `${percent}%${d.pageItem ? ` · 第 ${d.pageItem.label} 页` : d.location ? ` · Loc ${d.location.current}` : ''}`,
 		)
 		if (!this.sliderActive) this.slider.value = String(d.fraction ?? 0)
 		if (d.tocItem?.href) {
