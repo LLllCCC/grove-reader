@@ -35,3 +35,20 @@ adb shell "am start -a android.intent.action.VIEW -d 'obsidian://open?vault=Obsi
 - 里程碑 B：PDF（pdfjs worker 在移动 WebView 的加载）、回收站 `trash.ts`、体检 `health.ts`、统计/操作记录入口、备份导出与数据迁移策略。
 - `/sdcard/Documents/GroveTest/` 仍存在（废弃测试库）；手机插件目录里 `data-obsolete-20261111` 是旧数据副本。
 - 书架卡片在 ADB `input tap` 下点不开（真机正常），原因未查。
+
+## 补记（同日，用户真机反馈后）
+
+三个回归已修，回归原因与对应的坑：
+
+1. **点正文工具栏闪退**：`#clearPending()` 只是清待处理选区（点正文、选区为空时必走），
+   里面不能收工具栏，否则开完立刻被关。收栏只在划线/评论真正落地后显式调用。
+2. **滑动不翻页**：Obsidian 手机端把长距离横向拖动识别成拉侧栏。
+   - TXT：在阅读区 `touchmove` 捕获阶段 `stopPropagation()` 截停横向手势；
+   - EPUB：**不要**自己监听 iframe 的 touchend 做翻页，交给 foliate 原生 swipe，
+     两套同时开会一次滑两页（已删除该段代码）。
+3. **拖选择手柄跳页、选区丢失**：foliate `paginator.js` 把拖选当 swipe，
+   且 700ms 后为「跨页选取」主动 next/prev。已打本地补丁（`hasSelection` 保护 +
+   `selectionPaging` 开关，移动端关闭），登记在 `lib/foliate-js/UPSTREAM.md`。
+
+手机端手势有三层竞争：Obsidian 工作区手势 / WebView 原生选区 / foliate swipe。
+排查时先用临时浮层打印 `dx、page、screen、scrollLeft`，比盲改 CSS 快得多（浮层记得删）。
