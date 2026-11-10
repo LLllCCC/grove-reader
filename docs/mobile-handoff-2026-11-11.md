@@ -70,3 +70,17 @@ adb shell "am start -a android.intent.action.VIEW -d 'obsidian://open?vault=Obsi
 未完成：备份导出 / 数据迁移的手机策略；扫描版 PDF 的 wasm 资源；PDF 文字层划选批注的真机验证。
 
 调试入口：`obsidian://grove?path=<库内路径>` 可直接按路径打开书籍/PDF。
+
+## 里程碑 B 收尾
+
+- **备份导出 / 数据迁移**：新增 `src/backup.ts`，三个函数全走 `PlatformIO`，
+  桌面绝对路径与手机库内相对路径共用一套逻辑。安全策略保留（`.grove-backup`
+  标记、目标被占用中止、迁移三重校验、份数比对）。手机端放开，自动备份也放开；
+  只有「额外保存到库外盘」仍限桌面。真机用「临时开 daily 自动备份」端到端验证过。
+- **PDF 划选**：Android 长按选中发的是 `pointercancel`，`pointerup` 不来，
+  所以 pending 永远为空。补 `document.selectionchange`（120ms 防抖、只在选区
+  落在 `.grove-pdf-page` 内时采集）。真机：选中 → 点颜色 → 高亮落盘。
+
+仍留的口子：扫描版 PDF 的 wasm 资源在手机端跳过（resourcePath 是文件路径，
+fetch 不到）；TXT 主文档选区「松手消失」未解，但 PDF 能正常选中，说明问题在
+TXT 视图自身而非 Obsidian 全局——这是下一步的关键线索。
