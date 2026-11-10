@@ -52,3 +52,21 @@ adb shell "am start -a android.intent.action.VIEW -d 'obsidian://open?vault=Obsi
 
 手机端手势有三层竞争：Obsidian 工作区手势 / WebView 原生选区 / foliate swipe。
 排查时先用临时浮层打印 `dx、page、screen、scrollLeft`，比盲改 CSS 快得多（浮层记得删）。
+
+## 里程碑 B 进展（同日）
+
+已完成并真机验证：
+
+1. **回收站**：`trash.ts` 全量改 `PlatformIO` + async；`VaultIO.mkdir` 逐级建父目录；
+   移动失败回退 copy+remove；settings / modal / 删除流程同步改 await。冒烟有专用用例。
+2. **数据体检**：`health.ts` 重写为 `io.list/read/exists`；`missingNotes.bookExists`
+   在扫描时算好，`healthCleanupCount` 变纯函数，不再依赖 `desktopFs`。
+3. **PDF**：
+   - 顶层 node 依赖清除，桌面 range 读取改成注入 `RangeReader` + 动态 import `node:fs/promises`；
+   - 手机整文件读入（>64MB 拒绝），worker 走 **Blob URL**（resourcePath 是 /storage 路径，
+     Worker 加载不了）；wasm/cmaps/字体等在手机跳过；
+   - 视图注册到手机，批注栏默认收起，工具栏改静态单行（手机没有 hover）。
+
+未完成：备份导出 / 数据迁移的手机策略；扫描版 PDF 的 wasm 资源；PDF 文字层划选批注的真机验证。
+
+调试入口：`obsidian://grove?path=<库内路径>` 可直接按路径打开书籍/PDF。
