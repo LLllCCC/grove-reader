@@ -483,6 +483,9 @@ export class ReaderView extends ItemView {
 			foliate.addEventListener('show-annotation', this.#onShowAnnotation as EventListener)
 
 			await foliate.open(new File([buf], name))
+			// 手机端关掉「拖选到页边自动翻页」：会把跨页拖选手势当成 swipe，直接跳页并冲掉选区
+			const renderer = (foliate as unknown as { renderer?: { selectionPaging?: boolean } }).renderer
+			if (renderer) renderer.selectionPaging = !this.plugin.isMobile
 			this.loadedPath = target
 			this.readerInnerEl.empty()
 			this.readerInnerEl.appendChild(foliate)
@@ -820,22 +823,9 @@ export class ReaderView extends ItemView {
 		if (!this.wheelDocs.has(doc)) {
 			this.wheelDocs.set(doc, index)
 			doc.addEventListener('wheel', (we: WheelEvent) => this.#onWheel(we), { passive: false })
-			doc.addEventListener('touchstart', (event: TouchEvent) => {
-				const touch = event.changedTouches[0]
-				if (touch) this.touchStart = { x: touch.clientX, y: touch.clientY }
-			}, { passive: true })
-			doc.addEventListener('touchend', (event: TouchEvent) => {
-				const start = this.touchStart
-				this.touchStart = null
-				const touch = event.changedTouches[0]
-				if (!start || !touch || this.popup || !this.sidebarEl.classList.contains('grove-hidden')) return
-				if (doc.getSelection()?.toString()) return
-				const dx = touch.clientX - start.x
-				const dy = touch.clientY - start.y
-				if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.25) return
-				if (dx < 0) this.nextPage()
-				else this.prevPage()
-			}, { passive: true })
+			// 左右滑动翻页交给 foliate 自己的 swipe（带跟手拖动和阻尼，手感比我们自己算位移好）。
+			// 这里曾经自己监听 touchend 再 nextPage()，会和 foliate 的 snap 叠加，出现一次滑动翻两页，
+			// 而且拖选择手柄也会被当成 swipe。已移除，勿再加回。
 		}
 		// EPUB 正文在 iframe 里，点击不会冒泡到宿主，必须单独在 doc 上监听
 		doc.addEventListener('click', (ev: MouseEvent) => {
@@ -1000,11 +990,8 @@ export class ReaderView extends ItemView {
 	#clearPending(): void {
 		this.pending = null
 		this.#hidePopup()
-		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
-		if (bar) bar.dataset.barOpen = '0'
-		// 手机端状态是「dataset + 文案 + 内联样式」一整套，必须整体复位，
-		// 否则会出现记录说已收起、画面还开着的假死状态。
-		if (this.plugin.isMobile) this.#setMobileBarOpen(false)
+		// 同 TextView：只是清待处理选区，不碰工具栏。点正文时 pointerup 后的
+		// #captureSelection 会因为选区为空走到这里，顺手收栏会造成「闪一下就没」。
 	}
 
 	#showPopup(_doc: Document, range: Range, point?: { x: number; y: number }): void {
@@ -1197,6 +1184,7 @@ export class ReaderView extends ItemView {
 		}
 		this.#scheduleSave(true)
 		this.#renderSidebar()
+		if (this.plugin.isMobile) this.#setMobileBarOpen(false)
 	}
 
 	async #commentOnPending(): Promise<void> {

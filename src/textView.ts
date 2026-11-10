@@ -79,6 +79,8 @@ export class TextView extends ItemView {
 	private pendingCfi: string | null = null
 	private lastWheel = 0
 	private touchStart: { x: number; y: number } | null = null
+	/** 按下那一刻是否已经存在文字选区（拖选手柄时抬手选区可能已空，不能单看抬手状态） */
+	private touchHadSelection = false
 	private saveTimer: number | null = null
 
 	private pending: TextSelection | null = null
@@ -228,13 +230,6 @@ export class TextView extends ItemView {
 	#buildDom(): void {
 		const root = this.contentEl
 		root.addClass('grove-content')
-		// TEMP DEBUG 浮层
-		if (!document.getElementById('grove-dbg')) {
-			const dbg = document.createElement('div')
-			dbg.id = 'grove-dbg'
-			dbg.style.cssText = 'position:fixed;left:4px;bottom:78px;z-index:2147483647;background:rgba(0,0,0,.85);color:#0f0;font:11px/1.4 monospace;padding:4px 6px;border-radius:4px;max-width:92vw;white-space:pre-wrap;pointer-events:none'
-			document.body.appendChild(dbg)
-		}
 		this.registerDomEvent(root, 'click', (event: MouseEvent) => {
 			if (!Platform.isMobile && !Platform.isMobileApp) return
 			const target = event.target as HTMLElement | null
@@ -362,26 +357,33 @@ export class TextView extends ItemView {
 		this.trackEl = this.scrollEl.createDiv({ cls: 'grove-text-track' })
 		this.textEl = this.trackEl.createDiv({ cls: 'grove-text-content' })
 		this.registerDomEvent(this.scrollEl, 'wheel', e => this.#onWheel(e), { passive: false })
+		// Obsidian 手机端会把长距离横向拖动识别成「拉开侧栏」，翻页滑动因此被抢走。
+		// 在阅读区捕获阶段截停横向手势，不让它继续往上冒泡。
+		this.registerDomEvent(this.scrollEl, 'touchmove', (e: TouchEvent) => {
+			if (e.touches.length !== 1 || !this.touchStart) return
+			const t = e.touches[0]
+			const dx = Math.abs(t.clientX - this.touchStart.x)
+			const dy = Math.abs(t.clientY - this.touchStart.y)
+			if (dx > 12 && dx > dy) e.stopPropagation()
+		}, { passive: true, capture: true })
 		this.registerDomEvent(this.scrollEl, 'touchstart', (e: TouchEvent) => {
 			const touch = e.changedTouches[0]
 			if (touch) this.touchStart = { x: touch.clientX, y: touch.clientY }
+			this.touchHadSelection = !!window.getSelection()?.toString()
 		}, { passive: true })
 		this.registerDomEvent(this.scrollEl, 'touchend', (e: TouchEvent) => {
 			const start = this.touchStart
+			const hadSelection = this.touchHadSelection
 			this.touchStart = null
+			this.touchHadSelection = false
 			const touch = e.changedTouches[0]
-			const dbg = document.getElementById('grove-dbg')
-			const put = (msg: string): void => {
-				if (dbg) dbg.textContent = msg
-			}
-			if (!start || !touch) { put('bail: no start/touch'); return }
-			if (this.popup) { put('bail: popup'); return }
-			if (!this.sidebarEl.hasClass('grove-hidden')) { put('bail: sidebar open'); return }
-			if (window.getSelection()?.toString()) { put('bail: selection'); return }
+			if (!start || !touch) return
+			if (this.popup) return
+			if (!this.sidebarEl.hasClass('grove-hidden')) return
+			if (hadSelection || window.getSelection()?.toString()) return
 			const dx = touch.clientX - start.x
 			const dy = touch.clientY - start.y
-			put(`dx=${Math.round(dx)} dy=${Math.round(dy)}`)
-			if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.25) { put(`thumb: dx=${Math.round(dx)} dy=${Math.round(dy)}`); return }
+			if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.25) return
 			if (dx < 0) this.nextPage()
 			else this.prevPage()
 		}, { passive: true })
@@ -1506,9 +1508,9 @@ export class TextView extends ItemView {
 	#clearPending(): void {
 		this.pending = null
 		this.#hidePopup()
-		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
-		if (bar) bar.dataset.barOpen = '0'
-		if (Platform.isMobile || Platform.isMobileApp) this.#setMobileBarOpen(false)
+		// 注意：这里**不能**动工具栏开合。普通点一下正文时，pointerup 后的
+		// #captureSelection 发现选区为空就会走到这里，一旦顺手收栏，用户看到的就是
+		// 「点一下屏幕，工具栏闪一下又消失」。收栏只在真正完成批注动作后显式调用。
 	}
 
 	#showPopup(range: Range): void {
@@ -1674,6 +1676,7 @@ export class TextView extends ItemView {
 		this.#renderPage()
 		this.#scheduleSave(true)
 		this.#renderSidebar()
+		this.#collapseMobileBar()
 	}
 
 	async #commentOnSelection(): Promise<void> {
@@ -1714,6 +1717,7 @@ export class TextView extends ItemView {
 			this.#scheduleSave(true)
 			this.#renderPage()
 			this.#renderSidebar()
+			this.#collapseMobileBar()
 		}).open()
 	}
 
