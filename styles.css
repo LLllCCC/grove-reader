@@ -3075,6 +3075,34 @@ body.is-mobile .grove-toolbar .grove-color-dot {
 	height: 18px;
 }
 
+/* 手机首屏要放得下「颜色 + 评论 + 外观 T + 笔记 + 批注栏」，
+   所以把最宽的目录下拉和百分比挪到最后，靠横滑去够；功能一个都不少 */
+body.is-mobile .grove-toolbar .grove-mobile-toolbar-close {
+	order: 1;
+}
+
+body.is-mobile .grove-toolbar .grove-color-dot {
+	order: 2;
+}
+
+body.is-mobile .grove-toolbar .grove-icon-btn {
+	order: 3;
+}
+
+body.is-mobile .grove-toolbar .grove-progress {
+	order: 4;
+}
+
+body.is-mobile .grove-toolbar .grove-toc {
+	order: 5;
+}
+
+/* TXT 专属的信息位（编码选择、第几屏）也挪到最后，别占用首屏 */
+body.is-mobile .grove-toolbar .grove-text-encoding,
+body.is-mobile .grove-toolbar .grove-text-meta {
+	order: 6;
+}
+
 /* 手机窄屏上这两样只占宽度不干活，直接不显示 */
 body.is-mobile .grove-toolbar .grove-flex-spacer,
 body.is-mobile .grove-toolbar .grove-sep {

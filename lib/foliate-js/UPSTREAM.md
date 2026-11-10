@@ -40,6 +40,8 @@
 | 类字段 | 新增 `selectionPaging = true`，插件在移动端置 `false`，关掉「拖选到页边自动翻页」（上游 `checkPointerSelection` 的 700ms 防抖 next/prev） |
 | `#onTouchStart` | 记录 `hasSelection`：按下瞬间是否已有非折叠选区 |
 | `#onTouchMove` / `#onTouchEnd` | `hasSelection` 为真时直接返回，不 `scrollBy`、不 `snap`，避免把拖选拖成翻页 |
+| `#observer` | `ResizeObserver` 回调里先判 `#selectionActive()`，有选区就不 `render()`——重排会重建文档，把正在选的文字冲掉（同 TXT 视图的处理） |
+| 新增 `#selectionActive()` | 遍历 `getContents()` 的 doc，判断是否有非折叠选区 |
 
 插件侧对应：`src/readerView.ts` 在 `foliate.open()` 之后设置 `renderer.selectionPaging = !isMobile`。
 **不要再在插件里自己监听 iframe 的 touchend 做翻页**——会和 foliate 的 snap 叠加成一次滑两页。

@@ -234,7 +234,12 @@ export class TextView extends ItemView {
 			if (!Platform.isMobile && !Platform.isMobileApp) return
 			const target = event.target as HTMLElement | null
 			if (target?.closest('a, button, input, select, .grove-toolbar, .grove-annotation, .grove-sel-popup')) return
-			if (window.getSelection()?.toString()) return
+			if (window.getSelection()?.toString()) {
+				// 这是「选完松手」收尾的那一次点击。别再往上冒泡，否则 Obsidian 的
+				// 点击处理会把它当普通点按，顺手把刚选好的文字清掉（表现为选完自己消失）。
+				event.stopPropagation()
+				return
+			}
 			this.#setMobileBarOpen(true)
 		})
 		const toolbar = root.createDiv('grove-toolbar')
@@ -357,14 +362,15 @@ export class TextView extends ItemView {
 		this.trackEl = this.scrollEl.createDiv({ cls: 'grove-text-track' })
 		this.textEl = this.trackEl.createDiv({ cls: 'grove-text-content' })
 		this.registerDomEvent(this.scrollEl, 'wheel', e => this.#onWheel(e), { passive: false })
-		// Obsidian 手机端会把长距离横向拖动识别成「拉开侧栏」，翻页滑动因此被抢走。
-		// 在阅读区捕获阶段截停横向手势，不让它继续往上冒泡。
+		// Obsidian 手机端把横向拖动识别成「拉开侧栏」：到手阈值会整屏开栏，
+		// 没到阈值也会一路拖动画布，在相反一侧露白边。这里从第一帧起就不让手势冒泡，
+		// 否则前 12px 的位移已经足够让整屏晃一下。
 		this.registerDomEvent(this.scrollEl, 'touchmove', (e: TouchEvent) => {
-			if (e.touches.length !== 1 || !this.touchStart) return
-			const t = e.touches[0]
-			const dx = Math.abs(t.clientX - this.touchStart.x)
-			const dy = Math.abs(t.clientY - this.touchStart.y)
-			if (dx > 12 && dx > dy) e.stopPropagation()
+			e.stopPropagation()
+		}, { passive: true, capture: true })
+		// Obsidian 的手势层对触摸同时挂 pointer 事件，一并截停
+		this.registerDomEvent(this.scrollEl, 'pointermove', (e: PointerEvent) => {
+			if (e.pointerType === 'touch') e.stopPropagation()
 		}, { passive: true, capture: true })
 		this.registerDomEvent(this.scrollEl, 'touchstart', (e: TouchEvent) => {
 			const touch = e.changedTouches[0]
@@ -1434,8 +1440,21 @@ export class TextView extends ItemView {
 		if (this.relayoutTimer != null) window.clearTimeout(this.relayoutTimer)
 		this.relayoutTimer = window.setTimeout(() => {
 			this.relayoutTimer = null
+			// 重排会重建正文 DOM，正在选的文字会跟着没了，表现就是
+			// 「手指一松开，刚选中的文段自己消失」。有选区时先让路，选完再排。
+			if (this.#hasActiveSelection()) {
+				this.#scheduleRelayout()
+				return
+			}
 			this.relayout()
 		}, 160)
+	}
+
+	/** 正文里是否有正在进行的文字选区（选完了但还没处理也算） */
+	#hasActiveSelection(): boolean {
+		const sel = window.getSelection()
+		if (!sel || sel.isCollapsed || !sel.rangeCount || !this.textEl) return false
+		return this.textEl.contains(sel.getRangeAt(0).startContainer)
 	}
 
 	// ------------------------------------------------------------------
