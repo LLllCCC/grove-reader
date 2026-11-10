@@ -260,7 +260,6 @@ export default class GroveReaderPlugin extends Plugin {
 
 	/** 每天/每周首次启动时自动备份；时间戳先落盘，避免同一天重复执行 */
 	async maybeAutoBackup(): Promise<void> {
-		if (this.isMobile) return
 		const mode = this.settings.autoBackup
 		if (mode !== 'daily' && mode !== 'weekly') return
 		const interval = mode === 'daily' ? 86_400_000 : 7 * 86_400_000

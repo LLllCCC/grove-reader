@@ -163,6 +163,8 @@ export class PdfView extends ItemView {
 	private popup: HTMLElement | null = null
 	private saveTimer: number | null = null
 	private relayoutTimer: number | null = null
+	/** 选区变化防抖：手机长按选择走的是 selectionchange（pointerup 会被 pointercancel 吃掉） */
+	private selectionTimer: number | null = null
 
 	private pagesEl!: HTMLElement
 	private sidebarEl!: HTMLElement
@@ -339,6 +341,20 @@ export class PdfView extends ItemView {
 		})
 		this.pagesEl.addEventListener('pointerup', () => {
 			window.setTimeout(() => this.#captureSelection(), 0)
+		})
+		// 手机端长按选中文字时，浏览器会发 pointercancel 而不是 pointerup，
+		// 只在 pointerup 里捕获会拿不到选区（点颜色按钮就提示"请先划选"）。
+		// selectionchange 在拖手柄时也会持续触发，统一在这里兜住。
+		this.registerDomEvent(document, 'selectionchange', () => {
+			if (this.selectionTimer != null) window.clearTimeout(this.selectionTimer)
+			this.selectionTimer = window.setTimeout(() => {
+				this.selectionTimer = null
+				const sel = window.getSelection()
+				if (!sel || sel.isCollapsed || !sel.rangeCount) return
+				const node = sel.getRangeAt(0).startContainer
+				if (!this.pagesEl.contains(node)) return
+				this.#captureSelection()
+			}, 120)
 		})
 		// 容器宽度变化（新标签刚展开、侧栏开关、窗口缩放、分屏）后重算缩放重排。
 		// 视图刚创建时宽度为 0，必须等有真实宽度后再算，否则页面会被渲染得极小。
@@ -607,6 +623,10 @@ export class PdfView extends ItemView {
 		if (this.relayoutTimer != null) {
 			window.clearTimeout(this.relayoutTimer)
 			this.relayoutTimer = null
+		}
+		if (this.selectionTimer != null) {
+			window.clearTimeout(this.selectionTimer)
+			this.selectionTimer = null
 		}
 		if (this.idleTimer != null) {
 			window.clearTimeout(this.idleTimer)

@@ -13,6 +13,7 @@ import { applySync, normalizeExcerpt, parseNoteEntries, planSync } from '../src/
 import { buildSearchIndex, searchDocs } from '../src/search'
 import { TrashStore } from '../src/trash'
 import { buildHealthReport, healthCleanupCount } from '../src/health'
+import { checkMigrateTarget, exportDataBackup, migrateDataFolder } from '../src/backup'
 import { appendCards, buildCardText, emptyCanvas, parseCanvas, serializeCanvas, shortTitle } from '../src/canvas'
 
 async function main(): Promise<void> {
@@ -459,6 +460,43 @@ assert.equal(hr.annotationCount, 1)
 assert.equal(hr.missingBooks.length, 1)
 assert.equal(hr.staleShelf.length, 1)
 assert.equal(healthCleanupCount(hr), 1)
+
+// 29. 备份导出（PlatformIO 版）：正常导出、标记文件、目标被占用时阻断
+const bv = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-backup-'))
+const bDataRoot = path.join(bv, 'Grove Reader')
+const bPluginDir = path.join(bv, '.obsidian', 'plugins', 'grove-reader')
+fs.mkdirSync(path.join(bDataRoot, 'data', 'books'), { recursive: true })
+fs.mkdirSync(path.join(bDataRoot, 'data', 'covers'), { recursive: true })
+fs.mkdirSync(bPluginDir, { recursive: true })
+fs.writeFileSync(path.join(bDataRoot, 'data', 'books', 'b1.json'), '{"version":1}')
+fs.writeFileSync(path.join(bDataRoot, 'data', 'shelf.json'), '{"entries":{}}')
+fs.writeFileSync(path.join(bPluginDir, 'data.json'), '{"scanFolders":[]}')
+const bIo = new DesktopIO()
+const bRoot = path.join(bv, 'Grove Reader 数据备份')
+const bk1 = await exportDataBackup({ io: bIo, root: bRoot, dataRoot: bDataRoot, pluginDir: bPluginDir })
+assert.equal(bk1.status, 'done')
+assert.equal(bk1.bookCount, 1)
+assert.equal(fs.existsSync(path.join(bRoot, 'books', 'b1.json')), true, '批注 JSON 应被复制到备份目录')
+assert.equal(fs.existsSync(path.join(bRoot, 'shelf.json')), true, '书架缓存应被复制')
+assert.equal(fs.existsSync(path.join(bRoot, '.grove-backup')), true, '应写入备份目录标记')
+assert.equal(fs.existsSync(path.join(bRoot, '说明.md')), true, '应生成说明文件')
+
+const clashRoot = path.join(bv, '已有笔记')
+fs.mkdirSync(path.join(clashRoot, 'books'), { recursive: true })
+const bk2 = await exportDataBackup({ io: bIo, root: clashRoot, dataRoot: bDataRoot, pluginDir: bPluginDir })
+assert.equal(bk2.status, 'blocked', '目标里已有同名目录且没有标记时应中止')
+
+// 30. 数据迁移（PlatformIO 版）：复制 + 份数校验 + 目标非空时拒绝
+const mTarget = path.join(bv, 'MovedRoot')
+const check1 = await checkMigrateTarget(bIo, bDataRoot, mTarget)
+assert.equal(check1.ok, true)
+const m1 = await migrateDataFolder(bIo, bDataRoot, mTarget)
+assert.equal(m1.books, 1)
+assert.equal(fs.existsSync(path.join(mTarget, 'data', 'books', 'b1.json')), true, '迁移后目标应存在批注 JSON')
+const check2 = await checkMigrateTarget(bIo, bDataRoot, mTarget)
+assert.equal(check2.ok, false, '目标已有数据时应拒绝迁移')
+const check3 = await checkMigrateTarget(bIo, bDataRoot, bDataRoot)
+assert.equal(check3.ok, false, '迁移到自身应被拒绝')
 
 console.log('SMOKE OK')
 }
