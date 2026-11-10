@@ -30,6 +30,20 @@
 重复 `define` 会抛 `NotSupportedError` 导致插件启用失败。
 （这 4 个文件在编辑时行尾被存成了 CRLF，与上游 LF 不同，属 cosmetic 差异。）
 
+### 2026-11-11 追加：`paginator.js` 移动端选区保护
+
+手机上拖选择手柄到页边时，上游会把整段手势当成 swipe 翻页，直接跳页并把选区冲掉。
+改动（只影响触摸路径，桌面行为不变）：
+
+| 位置 | 改动 |
+| --- | --- |
+| 类字段 | 新增 `selectionPaging = true`，插件在移动端置 `false`，关掉「拖选到页边自动翻页」（上游 `checkPointerSelection` 的 700ms 防抖 next/prev） |
+| `#onTouchStart` | 记录 `hasSelection`：按下瞬间是否已有非折叠选区 |
+| `#onTouchMove` / `#onTouchEnd` | `hasSelection` 为真时直接返回，不 `scrollBy`、不 `snap`，避免把拖选拖成翻页 |
+
+插件侧对应：`src/readerView.ts` 在 `foliate.open()` 之后设置 `renderer.selectionPaging = !isMobile`。
+**不要再在插件里自己监听 iframe 的 touchend 做翻页**——会和 foliate 的 snap 叠加成一次滑两页。
+
 其余 14 个 `.js` 文件与基准 commit 字节一致。
 
 ## 升级方法
