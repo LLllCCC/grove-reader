@@ -19,6 +19,12 @@ export class BookStore {
 	private cache = new Map<string, BookData>()
 	/** 每本书一条写入链，保证顺序，避免并发写同一文件 */
 	private writes = new Map<string, Promise<void>>()
+	/**
+	 * 最近一次自己写盘的内容。vault 的 modify 事件是我们自己触发的也会来一遍，
+	 * 不比对内容就会「存盘 → 回读 → 刷新界面 → 再存盘」自激成死循环，
+	 * 表现之一就是手机端正文每秒重绘、刚选中的文字被冲掉。
+	 */
+	private lastWritten = new Map<string, string>()
 	private loaded = false
 	/** 预载失败时暂停写入：宁可弹错，也不能用空数据覆盖磁盘上的批注 */
 	private preloadError: Error | null = null
@@ -119,10 +125,28 @@ export class BookStore {
 		// 自己刚写完的文件不要立刻回读，否则会和排队中的写入打架
 		const pending = this.writes.get(id)
 		if (pending) await pending.catch(() => undefined)
-		const data = await this.#readWithRepair(id, file)
-		if (!data) return false
+		let raw = ''
+		try {
+			raw = await this.io.read(file)
+		} catch {
+			return false
+		}
+		// 内容和刚写下去的一模一样 → 这条 modify 是我们自己造成的，不必刷新界面
+		if (this.lastWritten.get(id) === raw) return false
+		let data: BookData | null = null
+		try {
+			data = JSON.parse(raw) as BookData
+		} catch {
+			data = null
+		}
+		if (!data) {
+			const repaired = await this.#readWithRepair(id, file)
+			if (!repaired) return false
+			data = repaired
+		}
 		this.#normalize(data)
 		this.cache.set(id, data)
+		this.lastWritten.set(id, raw)
 		return true
 	}
 
@@ -212,7 +236,8 @@ export class BookStore {
 		await this.io.mkdir(this.booksDir)
 		const file = this.fileFor(id)
 		const tmp = `${file}.tmp`
-		await this.io.write(tmp, JSON.stringify(data, null, 2))
+		const text = JSON.stringify(data, null, 2)
+		await this.io.write(tmp, text)
 		if (await this.io.exists(file)) await this.#maybeBackup(id, file)
 		try {
 			await this.io.rename(tmp, file)
@@ -231,6 +256,7 @@ export class BookStore {
 				throw copyErr
 			}
 		}
+		this.lastWritten.set(id, text)
 	}
 
 	#normalize(data: BookData): void {

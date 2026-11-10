@@ -498,6 +498,21 @@ assert.equal(check2.ok, false, '目标已有数据时应拒绝迁移')
 const check3 = await checkMigrateTarget(bIo, bDataRoot, bDataRoot)
 assert.equal(check3.ok, false, '迁移到自身应被拒绝')
 
+// 31. 写盘回读去重：自己写的内容不该被当成外部修改（否则会和 vault.modify 死循环）
+const sd = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-store-'))
+const storeDedupe = new BookStore(sd, 2, new DesktopIO())
+await storeDedupe.preload()
+const sb = storeDedupe.load('Books/x.epub')
+sb.title = 'X'
+storeDedupe.save(sb)
+await storeDedupe.flush()
+assert.equal(await storeDedupe.reloadFromDisk(bookIdFor('Books/x.epub')), false, '内容未变时不应判定为外部修改')
+const sfile = path.join(sd, 'data', 'books', `${bookIdFor('Books/x.epub')}.json`)
+const editedRW = JSON.parse(fs.readFileSync(sfile, 'utf8')) as { title: string }
+editedRW.title = 'Y'
+fs.writeFileSync(sfile, JSON.stringify(editedRW, null, 2))
+assert.equal(await storeDedupe.reloadFromDisk(bookIdFor('Books/x.epub')), true, '外部改写后应判定为有更新')
+
 console.log('SMOKE OK')
 }
 

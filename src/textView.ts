@@ -1204,9 +1204,13 @@ export class TextView extends ItemView {
 	#touchLocation(offsetArg?: number): void {
 		if (!this.data) return
 		const offset = offsetArg ?? this.#currentOffset()
+		const cfi = `txt:${offset}`
+		const prev = this.data.lastLocation
+		// 位置没变就别重写时间戳：每次落盘都会引起一轮「回读 + 刷新」，白耗电还会打断选区
+		if (prev && prev.cfi === cfi && prev.index === this.page) return
 		const total = this.#totalChars()
 		this.data.lastLocation = {
-			cfi: `txt:${offset}`,
+			cfi,
 			index: this.page,
 			fraction: total > 0 ? offset / total : 0,
 			updatedAt: Date.now(),
@@ -1365,7 +1369,14 @@ export class TextView extends ItemView {
 	/** 批注被外部改动（从笔记回写）后刷新侧栏与当前页高亮 */
 	refreshAnnotations(): void {
 		this.#renderSidebar()
-		if (this.bytes) this.#renderPage()
+		if (!this.bytes) return
+		// 正在选字时先别重绘：重绘会重建正文 DOM，把用户选到一半的文字冲掉。
+		// 外部改批注不急这几百毫秒，等选区消失再补。
+		if (this.#hasActiveSelection()) {
+			window.setTimeout(() => this.refreshAnnotations(), 1200)
+			return
+		}
+		this.#renderPage()
 	}
 
 	nextPage(): void {
