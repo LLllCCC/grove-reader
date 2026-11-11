@@ -1711,6 +1711,12 @@
 	transform: translateY(0);
 }
 
+/* 外观面板开着时工具栏常驻：调字号/行距时鼠标在面板里，工具栏一躲就看不到
+   进度和颜色，也不方便再点一次把它收回去 */
+.grove-content.is-appear-open > .grove-toolbar {
+	transform: translateY(0);
+}
+
 .grove-body {
 	min-width: 0;
 }

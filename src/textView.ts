@@ -101,6 +101,7 @@ export class TextView extends ItemView {
 	private slider!: HTMLInputElement
 	private progressLabel!: HTMLElement
 	private prevBtn!: HTMLButtonElement
+	private pageBtnsEl!: HTMLElement
 	private nextBtn!: HTMLButtonElement
 	private encodingSelect!: HTMLSelectElement
 	private appearPanelEl!: HTMLElement
@@ -352,7 +353,7 @@ export class TextView extends ItemView {
 			if (this.appearPanelEl.hasClass('grove-hidden')) return
 			const t = e.target
 			if (t instanceof Element && !t.closest('.grove-appear-panel') && !t.closest('.grove-appear-button')) {
-				this.appearPanelEl.addClass('grove-hidden')
+				this.#setAppearancePanelOpen(false)
 			}
 		}, { capture: true })
 
@@ -403,6 +404,7 @@ export class TextView extends ItemView {
 		this.registerDomEvent(this.textEl, 'click', (e: MouseEvent) => this.#onTextClick(e))
 
 		const pageBtns = this.readerEl.createDiv('grove-page-btns')
+		this.pageBtnsEl = pageBtns
 		this.prevBtn = pageBtns.createEl('button', {
 			cls: 'clickable-icon grove-page-btn',
 			attr: { 'aria-label': '上一页' },
@@ -1995,13 +1997,19 @@ export class TextView extends ItemView {
 	// 外观面板（与 EPUB 共用同一份设置）
 	// ------------------------------------------------------------------
 
+	/**
+	 * 面板开合的唯一入口。打开时给内容区挂 `is-appear-open`，
+	 * 让平时藏在顶边外的工具栏常驻（与 EPUB 视图同一套 CSS）。
+	 */
+	#setAppearancePanelOpen(open: boolean): void {
+		this.appearPanelEl.toggleClass('grove-hidden', !open)
+		this.contentEl.toggleClass('is-appear-open', open)
+	}
+
 	#toggleAppearancePanel(): void {
-		if (this.appearPanelEl.hasClass('grove-hidden')) {
-			this.#renderAppearancePanel()
-			this.appearPanelEl.removeClass('grove-hidden')
-		} else {
-			this.appearPanelEl.addClass('grove-hidden')
-		}
+		const hidden = this.appearPanelEl.hasClass('grove-hidden')
+		if (hidden) this.#renderAppearancePanel()
+		this.#setAppearancePanelOpen(hidden)
 	}
 
 	#renderAppearancePanel(): void {
@@ -2097,8 +2105,15 @@ export class TextView extends ItemView {
 		if (rerender) this.#renderAppearancePanel()
 	}
 
+	/** 与 EPUB 视图同一条规则：勾了「鼠标滚动换页」，右下角箭头就是重复入口 */
+	#applyPageBtns(): void {
+		const hide = this.plugin.settings.appearance.wheelPageTurn && !this.plugin.isMobileShell
+		this.pageBtnsEl?.toggleClass('grove-hidden', hide)
+	}
+
 	#applyAppearance(): void {
 		if (!this.readerEl || !this.textEl) return
+		this.#applyPageBtns()
 		const a = this.plugin.settings.appearance
 		let bg: string
 		let fg: string

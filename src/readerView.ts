@@ -147,6 +147,7 @@ export class ReaderView extends ItemView {
 	private slider!: HTMLInputElement
 	private progressLabel!: HTMLElement
 	private appearPanelEl!: HTMLElement
+	private pageBtnsEl!: HTMLElement
 	private mobileToolbarHandle: HTMLElement | null = null
 
 	private sidebarQuery = ''
@@ -255,7 +256,7 @@ export class ReaderView extends ItemView {
 			if (!this.plugin.isMobileShell) return
 			const target = ev.target as HTMLElement | null
 			if (!this.appearPanelEl?.classList.contains('grove-hidden') && !target?.closest('.grove-appear-panel') && !target?.closest('.grove-appear-button')) {
-				this.appearPanelEl.addClass('grove-hidden')
+				this.#setAppearancePanelOpen(false)
 				return
 			}
 			if (target?.closest('a, button, .grove-toolbar, .grove-annotation')) return
@@ -338,7 +339,7 @@ export class ReaderView extends ItemView {
 		this.registerDomEvent(this.contentEl, 'click', e => {
 			const t = e.target
 			if (this.appearPanelEl.classList.contains('grove-hidden')) return
-			if (t instanceof Element && !t.closest('.grove-appear-panel') && !t.closest('.grove-appear-button')) this.appearPanelEl.addClass('grove-hidden')
+			if (t instanceof Element && !t.closest('.grove-appear-panel') && !t.closest('.grove-appear-button')) this.#setAppearancePanelOpen(false)
 		}, { capture: true })
 
 		const body = root.createDiv('grove-body')
@@ -348,6 +349,7 @@ export class ReaderView extends ItemView {
 
 		// 右下角悬浮翻页按钮
 		const pageBtns = this.readerEl.createDiv('grove-page-btns')
+		this.pageBtnsEl = pageBtns
 		const prevBtn = pageBtns.createEl('button', { cls: 'clickable-icon grove-page-btn', attr: { 'aria-label': '上一页' } })
 		setIcon(prevBtn, 'chevron-left')
 		prevBtn.addEventListener('click', () => this.foliate?.goLeft())
@@ -628,6 +630,7 @@ export class ReaderView extends ItemView {
 	}
 
 	#applyAppearance(): void {
+		this.#applyPageBtns()
 		const a = this.plugin.settings.appearance
 		const renderer = this.foliate?.renderer
 		if (renderer) {
@@ -688,14 +691,31 @@ export class ReaderView extends ItemView {
 		return rules.join('\n')
 	}
 
+	/**
+	 * 开了「鼠标滚动换页」之后，右下角箭头就是重复入口，桌面收起。
+	 * 手机端保留：触屏没有滚轮，箭头是唯一可见的翻页入口。
+	 */
+	#applyPageBtns(): void {
+		const hide = this.plugin.settings.appearance.wheelPageTurn && !this.plugin.isMobileShell
+		this.pageBtnsEl?.toggleClass('grove-hidden', hide)
+	}
+
+	/**
+	 * 面板开合的唯一入口。
+	 *
+	 * 打开时给阅读区挂 `is-appear-open`：工具栏平时靠 `translateY` 躲在顶边外，
+	 * 只有 hover 才出来；调字号/行距时鼠标在面板里，工具栏一躲就看不到进度和
+	 * 颜色，所以面板开着期间让它常驻（见 styles.css）。
+	 */
+	#setAppearancePanelOpen(open: boolean): void {
+		this.appearPanelEl.toggleClass('grove-hidden', !open)
+		this.contentEl.toggleClass('is-appear-open', open)
+	}
+
 	#toggleAppearancePanel(): void {
 		const hidden = this.appearPanelEl.classList.contains('grove-hidden')
-		if (hidden) {
-			this.#renderAppearancePanel()
-			this.appearPanelEl.removeClass('grove-hidden')
-		} else {
-			this.appearPanelEl.addClass('grove-hidden')
-		}
+		if (hidden) this.#renderAppearancePanel()
+		this.#setAppearancePanelOpen(hidden)
 	}
 
 	#renderAppearancePanel(): void {
@@ -835,7 +855,7 @@ export class ReaderView extends ItemView {
 			const target = ev.target as HTMLElement | null
 			if (target?.closest('a, button, .grove-annotation')) return
 			if (!this.appearPanelEl.classList.contains('grove-hidden')) {
-				this.appearPanelEl.addClass('grove-hidden')
+				this.#setAppearancePanelOpen(false)
 				return
 			}
 			const sel = doc.getSelection()

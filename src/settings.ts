@@ -551,6 +551,18 @@ export class GroveSettingTab extends PluginSettingTab {
 			.addButton(button =>
 				button.setButtonText('打开日志').onClick(() => void this.plugin.openDebugLog()))
 
+		// 桌面验收移动端布局用；手机端没有意义，直接不渲染这一行
+		if (!Platform.isMobile) {
+			new Setting(containerEl)
+				.setName('模拟手机形态（桌面验收）')
+				.setDesc('让桌面按手机的界面形态渲染：工具栏收成窄条、批注栏默认收起、点正文上下分区翻页。只影响长相，PDF 读取方式、备份到库外盘这类平台能力不变。改完重开书架/书籍生效；命令面板也能切换')
+				.addToggle(toggle =>
+					toggle.setValue(this.plugin.isMobileShell).onChange(value => {
+						this.plugin.setMobileShell(value)
+						toggle.setValue(this.plugin.isMobileShell)
+					}))
+		}
+
 		containerEl.createEl('p', {
 			cls: 'setting-item-description',
 			text: `批注数据每本书一个 JSON 文件，默认在插件目录的 data/ 下；填写「数据文件夹」后会改存到库内对应目录（如「Grove Reader」→ Grove Reader/data/）。即使停用或删除插件，已生成的 Markdown 笔记也不受影响。阅读中的字体、背景等外观设置请在阅读界面的「Aa」面板中调整。`,

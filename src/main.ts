@@ -109,13 +109,19 @@ export default class GroveReaderPlugin extends Plugin {
 			new Notice(`${APP_NAME}：当前已经是手机端，这个开关只在桌面端有用`)
 			return
 		}
-		this.forceMobileShell = setForceMobileShell(!this.forceMobileShell)
-		this.applyShellClass()
+		this.setMobileShell(!this.forceMobileShell)
 		new Notice(
 			this.forceMobileShell
 				? `${APP_NAME}：已按手机形态渲染（重开书架/书籍后工具栏也会跟着变）`
 				: `${APP_NAME}：已恢复桌面形态`,
 		)
+	}
+
+	/** 设置页与命令共用的开关入口（只写开关与 body class，不弹提示） */
+	setMobileShell(on: boolean): void {
+		if (this.isMobile) return
+		this.forceMobileShell = setForceMobileShell(on)
+		this.applyShellClass()
 		this.debug('app', 'mobile shell', { on: this.forceMobileShell })
 	}
 
