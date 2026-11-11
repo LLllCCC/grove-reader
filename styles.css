@@ -733,6 +733,12 @@
 	transition: opacity 0.2s ease;
 }
 
+/* .grove-hidden 的 display:none 写在本规则之前，同权重会被上面的 display:flex 盖掉，
+   所以这里用双类名提权；否则「勾了滚动换页就收起箭头」永远不生效 */
+.grove-page-btns.grove-hidden {
+	display: none;
+}
+
 .grove-reader:hover .grove-page-btns {
 	opacity: 1;
 }
@@ -769,8 +775,19 @@
 	gap: 12px;
 }
 
+.grove-appear-panel {
+	transition: opacity 0.16s ease, transform 0.16s ease;
+	transform-origin: top right;
+}
+
+/* 收起用透明度 + 位移过渡（display:none 没法过渡）；隐藏时仍占位但不可点，
+   面板是绝对定位，不影响布局 */
 .grove-appear-panel.grove-hidden {
-	display: none;
+	opacity: 0;
+	transform: translateY(-6px) scale(0.99);
+	pointer-events: none;
+	visibility: hidden;
+	transition: opacity 0.16s ease, transform 0.16s ease, visibility 0s linear 0.16s;
 }
 
 body.is-mobile .grove-appear-panel {

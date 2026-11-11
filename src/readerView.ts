@@ -851,13 +851,16 @@ export class ReaderView extends ItemView {
 		}
 		// EPUB 正文在 iframe 里，点击不会冒泡到宿主，必须单独在 doc 上监听
 		doc.addEventListener('click', (ev: MouseEvent) => {
-			if (!this.plugin.isMobile) return
 			const target = ev.target as HTMLElement | null
 			if (target?.closest('a, button, .grove-annotation')) return
+			// 面板开着时点正文 = 一起收：面板淡出，工具栏随之滑回顶边（它只是被
+			// is-appear-open 临时钉住的）。桌面也要处理——正文在 iframe 里，
+			// 点击不冒泡到宿主，宿主那层 capture 监听收不到。
 			if (!this.appearPanelEl.classList.contains('grove-hidden')) {
 				this.#setAppearancePanelOpen(false)
 				return
 			}
+			if (!this.plugin.isMobile) return
 			const sel = doc.getSelection()
 			if (sel && !sel.isCollapsed) return
 			this.#setMobileBarOpen(true)
