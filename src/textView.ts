@@ -233,7 +233,7 @@ export class TextView extends ItemView {
 		root.addClass('grove-content')
 		this.registerDomEvent(root, 'pointerdown', () => this.plugin.noteReadingActivity(), { passive: true })
 		this.registerDomEvent(root, 'click', (event: MouseEvent) => {
-			if (!this.plugin.isMobileShell) return
+			if (!this.plugin.isMobile) return
 			const target = event.target as HTMLElement | null
 			if (target?.closest('a, button, input, select, .grove-toolbar, .grove-annotation, .grove-sel-popup')) return
 			if (window.getSelection()?.toString()) {
@@ -245,7 +245,7 @@ export class TextView extends ItemView {
 			this.#setMobileBarOpen(true)
 		})
 		const toolbar = root.createDiv('grove-toolbar')
-		if (this.plugin.isMobileShell) {
+		if (this.plugin.isMobile) {
 			toolbar.dataset.barOpen = '0'
 			const handle = toolbar.createEl('button', {
 				cls: 'grove-mobile-toolbar-close',
@@ -608,7 +608,7 @@ export class TextView extends ItemView {
 		this.#buildToc()
 		this.#renderSidebar()
 		this.#renderPage()
-		this.sidebarEl.classList.toggle('grove-hidden', this.plugin.isMobileShell || !this.plugin.settings.openSidebarWithBook)
+		this.sidebarEl.classList.toggle('grove-hidden', this.plugin.isMobile || !this.plugin.settings.openSidebarWithBook)
 	}
 
 	/** 扫描全文里的「第X章 / 序章 / 番外」作为目录；只取行首、长度有限的短行 */
@@ -1419,7 +1419,7 @@ export class TextView extends ItemView {
 
 	/** 手机端：翻页后自动收起工具栏，避免一直挡住正文 */
 	#collapseMobileBar(): void {
-		if (!this.plugin.isMobileShell) return
+		if (!this.plugin.isMobile) return
 		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
 		if (bar?.dataset.barOpen === '1') this.#setMobileBarOpen(false)
 	}
@@ -1535,7 +1535,7 @@ export class TextView extends ItemView {
 		}
 		const pageStart = this.pageStarts[this.page] ?? 0
 		this.pending = { start: pageStart + localStart, end: pageStart + localStart + raw.length, text: trimmed }
-		if (this.plugin.isMobileShell) {
+		if (this.plugin.isMobile) {
 			this.#hidePopup()
 			return
 		}
@@ -2107,7 +2107,7 @@ export class TextView extends ItemView {
 
 	/** 与 EPUB 视图同一条规则：勾了「鼠标滚动换页」，右下角箭头就是重复入口 */
 	#applyPageBtns(): void {
-		const hide = this.plugin.settings.appearance.wheelPageTurn && !this.plugin.isMobileShell
+		const hide = this.plugin.settings.appearance.wheelPageTurn && !this.plugin.isMobile
 		this.pageBtnsEl?.toggleClass('grove-hidden', hide)
 	}
 

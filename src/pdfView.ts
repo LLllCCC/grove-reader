@@ -387,7 +387,7 @@ export class PdfView extends ItemView {
 
 		this.sidebarEl = body.createDiv('grove-sidebar')
 		// 手机窄屏：批注栏默认收起，把宽度让给页面（打开成功后还会按设置再校一次）
-		if (this.plugin.isMobileShell) this.sidebarEl.classList.add('grove-hidden')
+		if (this.plugin.isMobile) this.sidebarEl.classList.add('grove-hidden')
 		const sideHead = this.sidebarEl.createDiv('grove-sidebar-head')
 		this.annCountEl = sideHead.createSpan('grove-ann-count')
 		this.annCountEl.setText('0 个批注')
@@ -606,7 +606,7 @@ export class PdfView extends ItemView {
 			this.#loadFilterState()
 			this.searchInput.value = this.sidebarQuery
 			this.#renderSidebar()
-			this.sidebarEl.classList.toggle('grove-hidden', this.plugin.isMobileShell || !this.plugin.settings.openSidebarWithBook)
+			this.sidebarEl.classList.toggle('grove-hidden', this.plugin.isMobile || !this.plugin.settings.openSidebarWithBook)
 		} catch (e) {
 			console.error('[Grove Reader] 打开 PDF 失败', e)
 			await this.#teardown()

@@ -340,32 +340,3 @@ export function contrastFg(bg: string): string {
 	return isDarkColor(bg) ? '#c9c9ce' : '#2b2b2b'
 }
 
-// ----------------------------------------------------------------------
-// 桌面验收移动端布局用的「模拟手机形态」开关
-// ----------------------------------------------------------------------
-
-/** localStorage 键：值为 '1' 时，桌面端也按手机形态渲染（仅影响界面承载） */
-export const FORCE_MOBILE_SHELL_KEY = 'grove-reader:force-mobile'
-
-/**
- * 读开关。只影响界面承载（工具栏窄条、批注栏默认收起、上下分区点按等），
- * **不参与平台能力判断**——PDF 是否走 node:fs、是否整文件读入内存、
- * 备份能否写到库外路径，这些必须继续按真实平台走，否则桌面会退化成手机。
- */
-export function forceMobileShellEnabled(): boolean {
-	try {
-		return window.localStorage?.getItem(FORCE_MOBILE_SHELL_KEY) === '1'
-	} catch {
-		return false
-	}
-}
-
-/** 写开关；返回写入后的值（隐私模式下写失败时返回原值，不抛） */
-export function setForceMobileShell(on: boolean): boolean {
-	try {
-		window.localStorage?.setItem(FORCE_MOBILE_SHELL_KEY, on ? '1' : '0')
-		return on
-	} catch {
-		return forceMobileShellEnabled()
-	}
-}

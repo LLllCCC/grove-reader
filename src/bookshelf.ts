@@ -566,7 +566,7 @@ export class BookshelfView extends ItemView {
 
 	/** 手机上一屏放不了几张，分批建卡片，首屏更快出图 */
 	#batchSize(): number {
-		return this.plugin.isMobileShell ? 36 : 120
+		return this.plugin.isMobile ? 36 : 120
 	}
 
 	#renderCardsInBatches(

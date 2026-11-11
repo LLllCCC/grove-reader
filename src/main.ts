@@ -29,7 +29,7 @@ import { appendCards, buildCardText, canvasColor, emptyCanvas, parseCanvas, seri
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
 import type { NoteExtraFields } from './notes'
-import { bookIdFor, forceMobileShellEnabled, isAbsolutePath, sanitizeFileName, setForceMobileShell, stripNumericTitlePrefix } from './util'
+import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
 import { isReaderExt, isShelfExt } from './types'
 import { usageDocMarkdown, USAGE_DOC_NAME } from './usageDoc'
 import { LOGO_OPTIONS, logoById } from './logos'
@@ -64,8 +64,6 @@ export default class GroveReaderPlugin extends Plugin {
 	pluginDir = ''
 	/** 书架搜索词：只活在本次会话，关掉书架页再打开还在，重启 Obsidian 清空 */
 	shelfSearch = ''
-	/** 桌面验收开关：localStorage 里的「模拟手机形态」，只在桌面生效 */
-	private forceMobileShell = false
 	/** 阅读计时的基线：上一拍结算时刻、最近一次真实交互、当前统计中的书 */
 	private statsLastTick = 0
 	private statsLastActive = 0
@@ -80,55 +78,8 @@ export default class GroveReaderPlugin extends Plugin {
 		return Platform.isMobile || Platform.isMobileApp
 	}
 
-	/**
-	 * 界面按手机形态承载（桌面验收移动端布局用）。
-	 *
-	 * 与 isMobile 的分工：这个只管**长相**——工具栏窄条、批注栏默认收起、
-	 * 点正文上下分区、选区弹条贴底。平台能力判断（node:fs、PDF 内存上限、
-	 * 备份到库外盘）必须继续看 isMobile，否则桌面会真的退化成手机。
-	 */
-	get isMobileShell(): boolean {
-		return this.isMobile || this.forceMobileShell
-	}
-
-	/** 把 body class 刷成当前形态；CSS 里 `body.is-mobile` 与 `body.grove-shell-mobile` 同权 */
-	applyShellClass(): void {
-		document.body.classList.toggle('grove-shell-mobile', this.forceMobileShell)
-	}
-
-	/**
-	 * 桌面验收移动端布局：切到/切回手机形态。
-	 *
-	 * 目的不是「给用户一个开关」，而是省掉「改样式 → 打包 → 装到手机 → 截图」
-	 * 这一轮几分钟的循环：桌面上改完样式，切一下就能看到手机的样子。
-	 * 样式立即生效；已打开的视图需要重开一次才会重建 DOM（工具栏朝向是在
-	 * #buildDom 里决定的）。
-	 */
-	toggleMobileShell(): void {
-		if (this.isMobile) {
-			new Notice(`${APP_NAME}：当前已经是手机端，这个开关只在桌面端有用`)
-			return
-		}
-		this.setMobileShell(!this.forceMobileShell)
-		new Notice(
-			this.forceMobileShell
-				? `${APP_NAME}：已按手机形态渲染（重开书架/书籍后工具栏也会跟着变）`
-				: `${APP_NAME}：已恢复桌面形态`,
-		)
-	}
-
-	/** 设置页与命令共用的开关入口（只写开关与 body class，不弹提示） */
-	setMobileShell(on: boolean): void {
-		if (this.isMobile) return
-		this.forceMobileShell = setForceMobileShell(on)
-		this.applyShellClass()
-		this.debug('app', 'mobile shell', { on: this.forceMobileShell })
-	}
-
 	async onload(): Promise<void> {
 		await this.loadSettings()
-		this.forceMobileShell = forceMobileShellEnabled()
-		this.applyShellClass()
 		for (const option of LOGO_OPTIONS) {
 			if (option.icon) addIcon(`grove-logo-${option.id}`, option.icon)
 		}
@@ -257,7 +208,6 @@ export default class GroveReaderPlugin extends Plugin {
 
 	onunload(): void {
 		// 各视图的 onClose 会负责落盘与销毁渲染器；这里再兜一层排队中的批注写入
-		document.body.classList.remove('grove-shell-mobile')
 		void this.store?.flush()
 		this.stats?.saveNow()
 		void this.stats?.flush()
@@ -1076,12 +1026,6 @@ export default class GroveReaderPlugin extends Plugin {
 			id: 'reading-stats',
 			name: '阅读统计',
 			callback: () => new ReadingStatsModal(this.app, this).open(),
-		})
-		// 桌面验收用：不进设置界面，避免变成一个「用户会误开」的选项
-		this.addCommand({
-			id: 'toggle-mobile-shell',
-			name: '切换模拟手机形态（桌面验收布局用）',
-			callback: () => this.toggleMobileShell(),
 		})
 	}
 
