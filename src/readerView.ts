@@ -247,10 +247,12 @@ export class ReaderView extends ItemView {
 		const root = this.contentEl
 		root.empty()
 		root.addClass('grove-content')
+		// 阅读计时的「人在看」信号：点按正文、拖进度条都算命中了这一拍
+		this.registerDomEvent(root, 'pointerdown', () => this.plugin.noteReadingActivity(), { passive: true })
 
 		// 手机没有 hover：点正文只展开；收起交给顶边把手，避免阅读点击误收起
 		this.registerDomEvent(root, 'click', (ev: MouseEvent) => {
-			if (!this.plugin.isMobile) return
+			if (!this.plugin.isMobileShell) return
 			const target = ev.target as HTMLElement | null
 			if (!this.appearPanelEl?.classList.contains('grove-hidden') && !target?.closest('.grove-appear-panel') && !target?.closest('.grove-appear-button')) {
 				this.appearPanelEl.addClass('grove-hidden')
@@ -263,7 +265,7 @@ export class ReaderView extends ItemView {
 		})
 
 		const toolbar = root.createDiv('grove-toolbar')
-		if (this.plugin.isMobile) {
+		if (this.plugin.isMobileShell) {
 			// 初始收起：工具栏只剩顶部一条窄条，窄条本身就是一个大的「展开」热区
 			toolbar.dataset.barOpen = '0'
 			const handle = toolbar.createEl('button', {
@@ -485,7 +487,7 @@ export class ReaderView extends ItemView {
 			await foliate.open(new File([buf], name))
 			// 手机端关掉「拖选到页边自动翻页」：会把跨页拖选手势当成 swipe，直接跳页并冲掉选区
 			const renderer = (foliate as unknown as { renderer?: { selectionPaging?: boolean } }).renderer
-			if (renderer) renderer.selectionPaging = !this.plugin.isMobile
+			if (renderer) renderer.selectionPaging = !this.plugin.isMobileShell
 			this.loadedPath = target
 			this.readerInnerEl.empty()
 			this.readerInnerEl.appendChild(foliate)
@@ -512,7 +514,7 @@ export class ReaderView extends ItemView {
 			}
 			this.#resetSidebarFilters()
 			this.#renderSidebar()
-			this.sidebarEl.classList.toggle('grove-hidden', this.plugin.isMobile || !this.plugin.settings.openSidebarWithBook)
+			this.sidebarEl.classList.toggle('grove-hidden', this.plugin.isMobileShell || !this.plugin.settings.openSidebarWithBook)
 		} catch (e) {
 			console.error('[Grove Reader] 打开书籍失败', e)
 			this.#showEmpty(`打开失败：${e instanceof Error ? e.message : String(e)}`)
@@ -829,7 +831,7 @@ export class ReaderView extends ItemView {
 		}
 		// EPUB 正文在 iframe 里，点击不会冒泡到宿主，必须单独在 doc 上监听
 		doc.addEventListener('click', (ev: MouseEvent) => {
-			if (!this.plugin.isMobile) return
+			if (!this.plugin.isMobileShell) return
 			const target = ev.target as HTMLElement | null
 			if (target?.closest('a, button, .grove-annotation')) return
 			if (!this.appearPanelEl.classList.contains('grove-hidden')) {
@@ -840,7 +842,7 @@ export class ReaderView extends ItemView {
 			if (sel && !sel.isCollapsed) return
 			this.#setMobileBarOpen(true)
 		})
-		if (this.plugin.isMobile) {
+		if (this.plugin.isMobileShell) {
 			doc.addEventListener('touchstart', (event: TouchEvent) => {
 				const touch = event.changedTouches[0]
 				if (touch) this.touchStart = { x: touch.clientX, y: touch.clientY }
@@ -872,6 +874,7 @@ export class ReaderView extends ItemView {
 	}
 
 	#onRelocate = (e: Event): void => {
+		this.plugin.noteReadingActivity()
 		const d = (e as CustomEvent<RelocateDetail>).detail
 		// 阅读统计：位置变化计一次「翻页」（首次定位是基线，不计）
 		const moved = !!d.location && d.location.current !== this.lastStatsLoc
@@ -880,14 +883,14 @@ export class ReaderView extends ItemView {
 			this.lastStatsLoc = d.location.current
 		}
 		// 手机端：翻页或滚动换了位置就自动收起工具栏，别让它一直挡正文（拖进度条时不收）
-		if (moved && this.plugin.isMobile && !this.sliderActive) {
+		if (moved && this.plugin.isMobileShell && !this.sliderActive) {
 			const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
 			if (bar?.dataset.barOpen === '1') this.#setMobileBarOpen(false)
 		}
 		const percent = Math.round((d.fraction ?? 0) * 100)
 		// 手机窄屏一行放不下「0% · Loc 0」，只留百分比，把颜色和评论按钮留在首屏
 		this.progressLabel.setText(
-			this.plugin.isMobile
+			this.plugin.isMobileShell
 				? `${percent}%`
 				: `${percent}%${d.pageItem ? ` · 第 ${d.pageItem.label} 页` : d.location ? ` · Loc ${d.location.current}` : ''}`,
 		)
@@ -981,7 +984,7 @@ export class ReaderView extends ItemView {
 			return
 		}
 		this.pending = { cfi, text: text.trim(), index }
-		if (this.plugin.isMobile) {
+		if (this.plugin.isMobileShell) {
 			this.#hidePopup()
 			this.popupTimer = null
 		} else this.#showPopup(doc, range, point)
@@ -1105,7 +1108,7 @@ export class ReaderView extends ItemView {
 		left = Math.max(8, Math.min(left, window.innerWidth - size.width - 8))
 		// 贴在选区上方：用包围盒顶边（多行时即首行）算，间距 6px；
 		// 上方放不下（选区贴着页顶）才落到下方
-		const safeTop = this.plugin.isMobile ? 64 : 8
+		const safeTop = this.plugin.isMobileShell ? 64 : 8
 		let top = anchorTop - size.height - 6
 		if (top < safeTop) top = Math.min(lastBottom + 6, window.innerHeight - size.height - 8)
 		top = Math.max(safeTop, Math.min(top, window.innerHeight - size.height - 8))
@@ -1184,7 +1187,7 @@ export class ReaderView extends ItemView {
 		}
 		this.#scheduleSave(true)
 		this.#renderSidebar()
-		if (this.plugin.isMobile) this.#setMobileBarOpen(false)
+		if (this.plugin.isMobileShell) this.#setMobileBarOpen(false)
 	}
 
 	async #commentOnPending(): Promise<void> {
@@ -1753,6 +1756,7 @@ export class ReaderView extends ItemView {
 
 	/** 鼠标滚轮/触控板上下滚动翻页；输入框、侧栏和选择弹窗不拦 */
 	#onWheel(e: WheelEvent): void {
+		this.plugin.noteReadingActivity()
 		if (!this.plugin.settings.appearance.wheelPageTurn || !this.foliate) return
 		if (e.ctrlKey || e.metaKey || e.defaultPrevented) return
 		const sel = e.view?.getSelection?.()

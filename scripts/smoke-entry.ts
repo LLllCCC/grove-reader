@@ -6,7 +6,7 @@ import assert from 'node:assert'
 import { BookStore } from '../src/store'
 import { DesktopIO } from '../src/desktopIO'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, NOTE_BEGIN, NOTE_END, renderNoteTemplate } from '../src/notes'
-import { StatsStore, todayKey } from '../src/stats'
+import { STATS_IDLE_MS, STATS_TICK_MS, StatsStore, accrueTick, todayKey } from '../src/stats'
 import { BookData } from '../src/types'
 import { bookIdFor, compareCfi, formatDuration, relativeTime } from '../src/util'
 import { applySync, normalizeExcerpt, parseNoteEntries, planSync } from '../src/noteSync'
@@ -221,6 +221,21 @@ await stats2.load()
 assert.equal(stats2.sortedBooks().length, 2)
 assert.equal(stats2.sortedBooks().find(([p]) => p === 'A/书一.epub')![1].seconds, 420, '统计应从磁盘完整恢复')
 assert.equal(todayKey(new Date('2026-09-25')).length, 10)
+
+// 计时口径：记这一拍的长度，而不是「距上次交互多久」
+{
+	const T = 15_000
+	const t0 = 1_000_000
+	// 正常一拍：上次交互在 3 秒前 → 记满 15 秒
+	assert.equal(accrueTick({ now: t0 + T, lastTickAt: t0, lastActive: t0 + T - 3_000 }), 15, '活跃的一拍应记满 tick')
+	// 人走了 90 秒：一拍都不记（开着书吃饭不该算阅读）
+	assert.equal(accrueTick({ now: t0 + T, lastTickAt: t0, lastActive: t0 - 75_000 }), 0, '空闲超过 IDLE 应记 0')
+	// 定时器被系统挂起后回来：单拍封顶 2×tick，不把整段空档补上
+	assert.equal(accrueTick({ now: t0 + 600_000, lastTickAt: t0, lastActive: t0 + 600_000 - 1_000 }), 30, '长空档应封顶 2×tick')
+	// 极端/坏数据不抛、不记
+	assert.equal(accrueTick({ now: t0, lastTickAt: t0 + 1, lastActive: t0 }), 0, '时间倒流应记 0')
+	assert.equal(accrueTick({ now: t0 + T, lastTickAt: t0, lastActive: Number.NaN }), 0, '坏时间戳应记 0')
+}
 
 // 14. 批注排序：CFI 按数字段比较（/10 必须排在 /9 之后），颜色名输出中文
 const cfiBook: BookData = {
@@ -470,7 +485,7 @@ fs.mkdirSync(path.join(bDataRoot, 'data', 'covers'), { recursive: true })
 fs.mkdirSync(bPluginDir, { recursive: true })
 fs.writeFileSync(path.join(bDataRoot, 'data', 'books', 'b1.json'), '{"version":1}')
 fs.writeFileSync(path.join(bDataRoot, 'data', 'shelf.json'), '{"entries":{}}')
-fs.writeFileSync(path.join(bPluginDir, 'data.json'), '{"scanFolders":[]}')
+fs.writeFileSync(path.join(bPluginDir, 'data.json'), '{"scanFolders":[],"aiApiKey":"sk-should-not-leak","aiModel":"glm-4-flash"}')
 const bIo = new DesktopIO()
 const bRoot = path.join(bv, 'Grove Reader 数据备份')
 const bk1 = await exportDataBackup({ io: bIo, root: bRoot, dataRoot: bDataRoot, pluginDir: bPluginDir })
@@ -480,6 +495,14 @@ assert.equal(fs.existsSync(path.join(bRoot, 'books', 'b1.json')), true, '批注 
 assert.equal(fs.existsSync(path.join(bRoot, 'shelf.json')), true, '书架缓存应被复制')
 assert.equal(fs.existsSync(path.join(bRoot, '.grove-backup')), true, '应写入备份目录标记')
 assert.equal(fs.existsSync(path.join(bRoot, '说明.md')), true, '应生成说明文件')
+{
+	// 备份里可以带走设置，但不能带走 AI Key
+	const copied = JSON.parse(fs.readFileSync(path.join(bRoot, 'data.json'), 'utf-8'))
+	assert.equal(copied.aiApiKey, undefined, '备份里的 data.json 不应包含 aiApiKey')
+	assert.equal(copied.aiModel, 'glm-4-flash', '其余设置应原样保留')
+	const original = JSON.parse(fs.readFileSync(path.join(bPluginDir, 'data.json'), 'utf-8'))
+	assert.equal(original.aiApiKey, 'sk-should-not-leak', '原 data.json 不应被改动')
+}
 
 const clashRoot = path.join(bv, '已有笔记')
 fs.mkdirSync(path.join(clashRoot, 'books'), { recursive: true })

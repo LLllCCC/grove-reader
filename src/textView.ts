@@ -1,4 +1,4 @@
-import { ItemView, Notice, Platform, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
+import { ItemView, Notice, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import {
 	Annotation,
@@ -230,8 +230,9 @@ export class TextView extends ItemView {
 	#buildDom(): void {
 		const root = this.contentEl
 		root.addClass('grove-content')
+		this.registerDomEvent(root, 'pointerdown', () => this.plugin.noteReadingActivity(), { passive: true })
 		this.registerDomEvent(root, 'click', (event: MouseEvent) => {
-			if (!Platform.isMobile && !Platform.isMobileApp) return
+			if (!this.plugin.isMobileShell) return
 			const target = event.target as HTMLElement | null
 			if (target?.closest('a, button, input, select, .grove-toolbar, .grove-annotation, .grove-sel-popup')) return
 			if (window.getSelection()?.toString()) {
@@ -243,7 +244,7 @@ export class TextView extends ItemView {
 			this.#setMobileBarOpen(true)
 		})
 		const toolbar = root.createDiv('grove-toolbar')
-		if (Platform.isMobile || Platform.isMobileApp) {
+		if (this.plugin.isMobileShell) {
 			toolbar.dataset.barOpen = '0'
 			const handle = toolbar.createEl('button', {
 				cls: 'grove-mobile-toolbar-close',
@@ -605,7 +606,7 @@ export class TextView extends ItemView {
 		this.#buildToc()
 		this.#renderSidebar()
 		this.#renderPage()
-		this.sidebarEl.classList.toggle('grove-hidden', this.plugin.isMobile || !this.plugin.settings.openSidebarWithBook)
+		this.sidebarEl.classList.toggle('grove-hidden', this.plugin.isMobileShell || !this.plugin.settings.openSidebarWithBook)
 	}
 
 	/** 扫描全文里的「第X章 / 序章 / 番外」作为目录；只取行首、长度有限的短行 */
@@ -1355,7 +1356,10 @@ export class TextView extends ItemView {
 	}
 
 	#goPage(page: number): void {
-		this.page = Math.max(0, Math.min(this.pages.length - 1, page))
+		const next = Math.max(0, Math.min(this.pages.length - 1, page))
+		// 真的换了页才算一次翻页（重排/重绘也会走这里，同页不算）
+		if (next !== this.page && this.bookPath) this.plugin.statsPageTurn(this.bookPath)
+		this.page = next
 		this.screen = 0
 		this.gotoLastScreen = false
 		this.pendingOffset = null
@@ -1413,13 +1417,14 @@ export class TextView extends ItemView {
 
 	/** 手机端：翻页后自动收起工具栏，避免一直挡住正文 */
 	#collapseMobileBar(): void {
-		if (!Platform.isMobile && !Platform.isMobileApp) return
+		if (!this.plugin.isMobileShell) return
 		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
 		if (bar?.dataset.barOpen === '1') this.#setMobileBarOpen(false)
 	}
 
 	/** 鼠标滚轮固定翻页（分页模式下滚轮不再滚动正文） */
 	#onWheel(e: WheelEvent): void {
+		this.plugin.noteReadingActivity()
 		if (e.ctrlKey || e.metaKey || e.altKey) return
 		if (Math.abs(e.deltaY) < 1) return
 		e.preventDefault()
@@ -1528,7 +1533,7 @@ export class TextView extends ItemView {
 		}
 		const pageStart = this.pageStarts[this.page] ?? 0
 		this.pending = { start: pageStart + localStart, end: pageStart + localStart + raw.length, text: trimmed }
-		if (this.plugin.isMobile) {
+		if (this.plugin.isMobileShell) {
 			this.#hidePopup()
 			return
 		}

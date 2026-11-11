@@ -46,6 +46,21 @@
 插件侧对应：`src/readerView.ts` 在 `foliate.open()` 之后设置 `renderer.selectionPaging = !isMobile`。
 **不要再在插件里自己监听 iframe 的 touchend 做翻页**——会和 foliate 的 snap 叠加成一次滑两页。
 
+### 2026-11-11 追加二：稳定性四补丁（对照 bz-reader 的 vendor 补丁清单）
+
+来源：`yeshimei/bz-reader`（MIT）`patches/foliate-js.md` 里列的 7 条，去掉我们已有的
+两条（`customElements` 守卫、拖选禁翻页），取适用的四条。行尾仍为 LF。
+
+| 位置 | 改动 | 为什么 |
+| --- | --- | --- |
+| `load()` | 不再只等 `load` 事件：`display:block` + `visibility:hidden` 起步，另加 200ms 轮询 `contentDocument`（判 `body.childElementCount`），`readyState==='loading'` 最多再等 2s 后强行挂载；20s 无正文则 `reject`；挂载时翻回 `visible` | 上游只挂 `load`、不挂 `error`：地址加载失败时 Promise 既不 resolve 也不 reject，`await` 永远悬着 → 白屏且无报错，恢复工作区时把 Obsidian 钉在「加载工作区中…」；安卓 WebView 对 `display:none` 的 iframe 可能干脆不加载 |
+| `destroy()` | `this.#view.destroy()` → `this.#view?.destroy()` | `#view` 在从未装载/已销毁时为 null，抛错会跳过 `sections[index].unload()` 与 `mediaQuery` 解绑，整本泄漏 |
+| `#top` 样式 | `--_max-column-count: 2` → `var(--_column-count, 2)` | 双栏要做成用户偏好；`#top` 的 shadow 规则直接声明 2，宿主变量进不去（继承只在无直接声明时生效），换 `var()` 后缺省仍是 2，行为不变 |
+| `View.columnize()` | 横排 `padding` 由 `0 gap/2` 改为 `var(--_pad-top, 0px) gap/2 var(--_pad-bottom, 0px)` | 分页模式下内联 `!important` 把上下 padding 覆成 0，宿主注入的 body padding 只对章首页生效，章中页文字顶到悬浮头栏；不设变量时与上游一致 |
+
+未采用：`#replaceBackground` 的 rAF 判空（本基准没有该方法，调用处已是 `this.#view?.document?.fonts` 可选链）、
+bz 的 srcdoc 兜底与 `__bzrDbg` 埋点（与本插件 CSP/调试体系不同）。
+
 其余 14 个 `.js` 文件与基准 commit 字节一致。
 
 ## 升级方法

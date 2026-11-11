@@ -2,7 +2,7 @@ import { FileSystemAdapter, Notice, Platform, Plugin, TFile, TFolder, addIcon, n
 import { BookStore } from './store'
 import { ShelfCache } from './bookshelf'
 import { ListsStore } from './lists'
-import { StatsStore } from './stats'
+import { STATS_TICK_MS, StatsStore, accrueTick } from './stats'
 import {
 	APP_NAME,
 	DEFAULT_APPEARANCE,
@@ -29,7 +29,7 @@ import { appendCards, buildCardText, canvasColor, emptyCanvas, parseCanvas, seri
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
 import type { NoteExtraFields } from './notes'
-import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
+import { bookIdFor, forceMobileShellEnabled, isAbsolutePath, sanitizeFileName, setForceMobileShell, stripNumericTitlePrefix } from './util'
 import { isReaderExt, isShelfExt } from './types'
 import { usageDocMarkdown, USAGE_DOC_NAME } from './usageDoc'
 import { LOGO_OPTIONS, logoById } from './logos'
@@ -64,6 +64,12 @@ export default class GroveReaderPlugin extends Plugin {
 	pluginDir = ''
 	/** 书架搜索词：只活在本次会话，关掉书架页再打开还在，重启 Obsidian 清空 */
 	shelfSearch = ''
+	/** 桌面验收开关：localStorage 里的「模拟手机形态」，只在桌面生效 */
+	private forceMobileShell = false
+	/** 阅读计时的基线：上一拍结算时刻、最近一次真实交互、当前统计中的书 */
+	private statsLastTick = 0
+	private statsLastActive = 0
+	private statsActivePath = ''
 
 	private dataRoot!: string
 	private persistTimer: number | null = null
@@ -74,8 +80,49 @@ export default class GroveReaderPlugin extends Plugin {
 		return Platform.isMobile || Platform.isMobileApp
 	}
 
+	/**
+	 * 界面按手机形态承载（桌面验收移动端布局用）。
+	 *
+	 * 与 isMobile 的分工：这个只管**长相**——工具栏窄条、批注栏默认收起、
+	 * 点正文上下分区、选区弹条贴底。平台能力判断（node:fs、PDF 内存上限、
+	 * 备份到库外盘）必须继续看 isMobile，否则桌面会真的退化成手机。
+	 */
+	get isMobileShell(): boolean {
+		return this.isMobile || this.forceMobileShell
+	}
+
+	/** 把 body class 刷成当前形态；CSS 里 `body.is-mobile` 与 `body.grove-shell-mobile` 同权 */
+	applyShellClass(): void {
+		document.body.classList.toggle('grove-shell-mobile', this.forceMobileShell)
+	}
+
+	/**
+	 * 桌面验收移动端布局：切到/切回手机形态。
+	 *
+	 * 目的不是「给用户一个开关」，而是省掉「改样式 → 打包 → 装到手机 → 截图」
+	 * 这一轮几分钟的循环：桌面上改完样式，切一下就能看到手机的样子。
+	 * 样式立即生效；已打开的视图需要重开一次才会重建 DOM（工具栏朝向是在
+	 * #buildDom 里决定的）。
+	 */
+	toggleMobileShell(): void {
+		if (this.isMobile) {
+			new Notice(`${APP_NAME}：当前已经是手机端，这个开关只在桌面端有用`)
+			return
+		}
+		this.forceMobileShell = setForceMobileShell(!this.forceMobileShell)
+		this.applyShellClass()
+		new Notice(
+			this.forceMobileShell
+				? `${APP_NAME}：已按手机形态渲染（重开书架/书籍后工具栏也会跟着变）`
+				: `${APP_NAME}：已恢复桌面形态`,
+		)
+		this.debug('app', 'mobile shell', { on: this.forceMobileShell })
+	}
+
 	async onload(): Promise<void> {
 		await this.loadSettings()
+		this.forceMobileShell = forceMobileShellEnabled()
+		this.applyShellClass()
 		for (const option of LOGO_OPTIONS) {
 			if (option.icon) addIcon(`grove-logo-${option.id}`, option.icon)
 		}
@@ -128,9 +175,6 @@ export default class GroveReaderPlugin extends Plugin {
 		await this.lists.load()
 		this.stats = new StatsStore(joinPath(this.dataRoot, 'data', 'stats.json'), io)
 		await this.stats.load()
-
-		// 手机上 Obsidian 对外部同步的文件不一定发 modify 事件；定时对一遍盘（17 个小文件，很轻）
-		this.registerInterval(window.setInterval(() => void this.reloadAllBooks(), 15000))
 
 		// 手机上 Obsidian 对外部同步的文件不一定发 modify 事件；定时对一遍盘（17 个小文件，很轻）
 		this.registerInterval(window.setInterval(() => void this.reloadAllBooks(), 15000))
@@ -207,6 +251,7 @@ export default class GroveReaderPlugin extends Plugin {
 
 	onunload(): void {
 		// 各视图的 onClose 会负责落盘与销毁渲染器；这里再兜一层排队中的批注写入
+		document.body.classList.remove('grove-shell-mobile')
 		void this.store?.flush()
 		this.stats?.saveNow()
 		void this.stats?.flush()
@@ -478,20 +523,52 @@ export default class GroveReaderPlugin extends Plugin {
 	// ------------------------------------------------------------------
 
 	/**
-	 * 每 15 秒采样一次阅读时长；仅当活动视图是阅读/PDF 视图且窗口有焦点时计入。
-	 * 翻页/换节次数由视图在事件里调用 statsPageTurn 记。
+	 * 每 15 秒结算一拍阅读时长。
+	 *
+	 * 判据是「这一拍里人还在看」，不是「窗口有焦点」：焦点在、人走了（吃饭、
+	 * 接电话）照样会记成读完一小时，报表一失真整个统计就没意义了。
+	 * 活动由三个视图上报（翻页/滚动/点按/按键），见 noteReadingActivity()。
+	 * 翻页次数仍由视图调用 statsPageTurn 记。
 	 */
 	#startStatsTracking(): void {
-		const INTERVAL = 15_000
+		this.statsLastTick = Date.now()
+		this.statsLastActive = this.statsLastTick
 		this.registerInterval(window.setInterval(() => {
-			const view = this.app.workspace.getActiveViewOfType(ReaderView) ?? this.activePdf()
-			if (!view?.ready || !document.hasFocus()) return
-			this.stats.record(view.bookPath, INTERVAL / 1000, 0)
-		}, INTERVAL))
+			const now = Date.now()
+			const view = this.activeReadingView()
+			const path = view?.ready ? view.bookPath : ''
+			// 换书/离开阅读页：只重设基线，不把上一本的这一拍记到新书上
+			if (!path || path !== this.statsActivePath) {
+				this.statsActivePath = path
+				this.statsLastTick = now
+				this.statsLastActive = now
+				return
+			}
+			const seconds = accrueTick({ now, lastTickAt: this.statsLastTick, lastActive: this.statsLastActive })
+			this.statsLastTick = now
+			if (!document.hasFocus()) return
+			if (seconds > 0) this.stats.record(path, seconds, 0)
+		}, STATS_TICK_MS))
+	}
+
+	/** 视图里的任一交互都算「人在看」：翻页、滚动、点按、按键都该调一次 */
+	noteReadingActivity(): void {
+		this.statsLastActive = Date.now()
+	}
+
+	/** 当前真正在前台的阅读视图（含 TXT）；PDF 由类型守卫判定 */
+	private activeReadingView(): { bookPath: string; ready: boolean } | null {
+		const reader = this.app.workspace.getActiveViewOfType(ReaderView)
+		if (reader) return reader
+		const text = this.app.workspace.getActiveViewOfType(TextView)
+		if (text) return text
+		const leaf = this.app.workspace.activeLeaf
+		return leaf && this.#isPdfView(leaf.view) ? leaf.view : null
 	}
 
 	/** 视图翻页/换节时调用：当日翻页计数 +1 */
 	statsPageTurn(bookPath: string): void {
+		this.noteReadingActivity()
 		this.stats.record(bookPath, 0, 1)
 	}
 
@@ -947,11 +1024,6 @@ export default class GroveReaderPlugin extends Plugin {
 			callback: () => void this.refreshAllNotes(),
 		})
 		this.addCommand({
-			id: 'refresh-all-notes',
-			name: '刷新全部阅读笔记（补齐统计字段）',
-			callback: () => void this.refreshAllNotes(),
-		})
-		this.addCommand({
 			id: 'sync-note-to-annotations',
 			name: '从笔记同步批注…',
 			checkCallback: checking => this.withAnyReader(checking, v => void this.openNoteSync(v)),
@@ -998,6 +1070,12 @@ export default class GroveReaderPlugin extends Plugin {
 			id: 'reading-stats',
 			name: '阅读统计',
 			callback: () => new ReadingStatsModal(this.app, this).open(),
+		})
+		// 桌面验收用：不进设置界面，避免变成一个「用户会误开」的选项
+		this.addCommand({
+			id: 'toggle-mobile-shell',
+			name: '切换模拟手机形态（桌面验收布局用）',
+			callback: () => this.toggleMobileShell(),
 		})
 	}
 

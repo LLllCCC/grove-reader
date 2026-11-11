@@ -1,14 +1,21 @@
-import { baseName, joinPath, PlatformIO } from './platformIO'
+import { baseName, joinPath, PlatformIO, readJsonFile, writeJsonFile } from './platformIO'
 
 /**
  * 备份导出与数据迁移（跨平台版）。
  *
  * 全部走 PlatformIO：桌面端传绝对路径、手机端传库内相对路径，同一套逻辑。
  * 手机端因此也能把批注数据导出到库内普通文件夹（随库同步、重装插件不影响）。
+ *
+ * 备份的是**用户内容**，不含凭据：data.json 里的 AI Key 会被剥掉再写。
+ * 这个备份文件夹是普通库内文件，用户会把它连同库一起同步、发给别人看、
+ * 或者传到网盘——把 Key 顺手带出去，是这份备份最容易造成的实际损失。
  */
 
 const MARKER = '.grove-backup'
 const CLASH_NAMES = ['books', 'covers', 'shelf.json', 'lists.json', 'data.json', 'oplog.json']
+
+/** 备份里必须剥掉的设置字段：值是凭据，一旦随备份流出就得换 Key */
+export const SECRET_SETTING_KEYS = ['aiApiKey'] as const
 
 export interface BackupInput {
 	io: PlatformIO
@@ -28,6 +35,30 @@ export interface BackupResult {
 
 function norm(p: string): string {
 	return p.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+/**
+ * 复制设置，但剥掉凭据字段。
+ *
+ * 解析失败（用户手改坏了 data.json）时**不写**：少一份设置，比写一份空设置好——
+ * 空设置会把笔记模板、数据目录、书架显示项一起清掉，比没恢复更糟。
+ */
+async function copySettingsWithoutSecrets(io: PlatformIO, src: string, dst: string): Promise<void> {
+	try {
+		if (!(await io.exists(src))) return
+	} catch {
+		return
+	}
+	const parsed = await readJsonFile<Record<string, unknown>>(io, src)
+	// 读不出来/解析失败就不写：少一份设置副本，好过写一份空设置把用户的
+	// 模板、数据目录、书架显示项一起清掉
+	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return
+	for (const key of SECRET_SETTING_KEYS) delete parsed[key]
+	try {
+		await writeJsonFile(io, dst, parsed)
+	} catch {
+		// 设置副本写失败不影响批注数据的备份
+	}
 }
 
 async function listNames(io: PlatformIO, dir: string): Promise<string[]> {
@@ -128,7 +159,6 @@ export async function exportDataBackup(input: BackupInput): Promise<BackupResult
 		[joinPath(dataRoot, 'data', 'shelf.json'), 'shelf.json'],
 		[joinPath(dataRoot, 'data', 'lists.json'), 'lists.json'],
 		[joinPath(dataRoot, 'data', 'oplog.json'), 'oplog.json'],
-		[joinPath(pluginDir, 'data.json'), 'data.json'],
 	] as const) {
 		try {
 			if (await io.exists(src)) await io.copy(src, joinPath(root, dst))
@@ -136,6 +166,9 @@ export async function exportDataBackup(input: BackupInput): Promise<BackupResult
 			// 单项缺失不影响整体备份
 		}
 	}
+
+	// data.json 单独处理：设置要带走，AI Key 必须留下（见文件头）
+	await copySettingsWithoutSecrets(io, joinPath(pluginDir, 'data.json'), joinPath(root, 'data.json'))
 
 	const coversDir = joinPath(dataRoot, 'data', 'covers')
 	try {
@@ -155,6 +188,9 @@ export async function exportDataBackup(input: BackupInput): Promise<BackupResult
 		'2. 把 books/、shelf.json、lists.json、covers/ 放回 <库>/.obsidian/plugins/grove-reader/data/；',
 		'3. 把 data.json 放回 <库>/.obsidian/plugins/grove-reader/（插件根目录）；',
 		'4. 重新打开 Obsidian。',
+		'',
+		'注意：data.json 里的 AI Key（aiApiKey）已在备份时剔除，恢复后需要在',
+		'设置 → 阅读与笔记 → AI 解释 里重新填一次。这样备份文件夹可以放心同步、外发。',
 		'',
 		`最近备份时间：${new Date().toLocaleString('zh-CN', { hour12: false })}`,
 	].join('\n')

@@ -773,7 +773,7 @@
 	display: none;
 }
 
-body.is-mobile .grove-appear-panel {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-appear-panel {
 	position: fixed;
 	top: max(58px, calc(env(safe-area-inset-top) + 58px));
 	left: 8px;
@@ -3018,19 +3018,19 @@ body.is-mobile .grove-appear-panel {
 	align-self: center;
 }
 
-body.is-mobile .grove-page-btns {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-page-btns {
 	display: none;
 }
 
 /* 移动端：回跳胶囊同样避开 Obsidian 底部悬浮栏 */
-body.is-mobile .grove-jump-return {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-jump-return {
 	bottom: calc(16px + 64px);
 }
 
 /* 移动端：工具栏贴顶。收起态是一条 20px 窄条（整条可点，提示「工具栏」）；
    展开态是一条 44px 单行工具栏，控件横向滑动，开合按钮 sticky 钉在左侧不跑掉。
    注意：不要再改回 flex-wrap: wrap + 末项 margin-left:auto，手机上会折成三行且把按钮挤出屏幕。 */
-body.is-mobile .grove-content > .grove-toolbar {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-content > .grove-toolbar {
 	display: flex !important;
 	flex-wrap: nowrap !important;
 	align-items: center;
@@ -3054,11 +3054,11 @@ body.is-mobile .grove-content > .grove-toolbar {
 	z-index: 60;
 }
 
-body.is-mobile .grove-content > .grove-toolbar::-webkit-scrollbar {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-content > .grove-toolbar::-webkit-scrollbar {
 	display: none;
 }
 
-body.is-mobile .grove-toolbar[data-bar-open='1'] {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar[data-bar-open='1'] {
 	height: 44px;
 	min-height: 44px;
 	border-bottom: 1px solid var(--background-modifier-border);
@@ -3066,50 +3066,50 @@ body.is-mobile .grove-toolbar[data-bar-open='1'] {
 	background: var(--background-primary);
 }
 
-body.is-mobile .grove-toolbar > * {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar > * {
 	flex: 0 0 auto;
 }
 
-body.is-mobile .grove-toolbar .grove-color-dot {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar .grove-color-dot {
 	width: 18px;
 	height: 18px;
 }
 
 /* 手机首屏要放得下「颜色 + 评论 + 外观 T + 笔记 + 批注栏」，
    所以把最宽的目录下拉和百分比挪到最后，靠横滑去够；功能一个都不少 */
-body.is-mobile .grove-toolbar .grove-mobile-toolbar-close {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar .grove-mobile-toolbar-close {
 	order: 1;
 }
 
-body.is-mobile .grove-toolbar .grove-color-dot {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar .grove-color-dot {
 	order: 2;
 }
 
-body.is-mobile .grove-toolbar .grove-icon-btn {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar .grove-icon-btn {
 	order: 3;
 }
 
-body.is-mobile .grove-toolbar .grove-progress {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar .grove-progress {
 	order: 4;
 }
 
-body.is-mobile .grove-toolbar .grove-toc {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar .grove-toc {
 	order: 5;
 }
 
 /* TXT 专属的信息位（编码选择、第几屏）也挪到最后，别占用首屏 */
-body.is-mobile .grove-toolbar .grove-text-encoding,
-body.is-mobile .grove-toolbar .grove-text-meta {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar .grove-text-encoding,
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar .grove-text-meta {
 	order: 6;
 }
 
 /* 手机窄屏上这两样只占宽度不干活，直接不显示 */
-body.is-mobile .grove-toolbar .grove-flex-spacer,
-body.is-mobile .grove-toolbar .grove-sep {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar .grove-flex-spacer,
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar .grove-sep {
 	display: none !important;
 }
 
-body.is-mobile .grove-toolbar .grove-progress {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar .grove-progress {
 	flex: 0 0 auto;
 	width: auto;
 	min-width: 0;
@@ -3118,22 +3118,22 @@ body.is-mobile .grove-toolbar .grove-progress {
 
 /* 手机上翻页靠左右滑，进度条滑杆只会占地方，把「颜色 + 评论」挤到屏幕外；
    保留百分比文字，定位跳转交给目录面板 */
-body.is-mobile .grove-toolbar .grove-progress input[type='range'] {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar .grove-progress input[type='range'] {
 	display: none !important;
 }
 
-body.is-mobile .grove-toolbar .grove-toc {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar .grove-toc {
 	flex: 0 0 auto;
 	max-width: 36vw;
 }
 
-body.is-mobile .grove-toolbar .grove-toc-select,
-body.is-mobile .grove-toolbar .grove-toc-btn {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar .grove-toc-select,
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar .grove-toc-btn {
 	max-width: 36vw;
 }
 
 /* 开合按钮：收起态独占整条窄条（点哪儿都能开），展开态钉在最左不随横滑滑走 */
-body.is-mobile .grove-toolbar .grove-mobile-toolbar-close {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar .grove-mobile-toolbar-close {
 	display: inline-flex !important;
 	align-items: center;
 	justify-content: center;
@@ -3155,23 +3155,23 @@ body.is-mobile .grove-toolbar .grove-mobile-toolbar-close {
 	white-space: nowrap;
 }
 
-body.is-mobile .grove-toolbar[data-bar-open='0'] .grove-mobile-toolbar-close {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar[data-bar-open='0'] .grove-mobile-toolbar-close {
 	width: 100%;
 	background: transparent;
 }
 
-body.is-mobile .grove-toolbar[data-bar-open='0'] .grove-mobile-toolbar-close::before {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar[data-bar-open='0'] .grove-mobile-toolbar-close::before {
 	content: '▾';
 	margin-right: 4px;
 	font-size: 9px;
 	letter-spacing: 0;
 }
 
-body.is-mobile .grove-toolbar[data-bar-open='0'] > *:not(.grove-mobile-toolbar-close) {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar[data-bar-open='0'] > *:not(.grove-mobile-toolbar-close) {
 	display: none !important;
 }
 
-body.is-mobile .grove-toolbar[data-bar-open='1'] .grove-mobile-toolbar-close {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-toolbar[data-bar-open='1'] .grove-mobile-toolbar-close {
 	height: 30px;
 	padding: 0 10px;
 	border-radius: 6px;
@@ -3183,7 +3183,7 @@ body.is-mobile .grove-toolbar[data-bar-open='1'] .grove-mobile-toolbar-close {
 
 
 /* 手机端 PDF：没有 hover，工具栏不能靠悬停滑出，直接占位成一行可横滑 */
-body.is-mobile .grove-pdf-content > .grove-toolbar {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-pdf-content > .grove-toolbar {
 	position: static;
 	transform: none;
 	flex-wrap: nowrap;
@@ -3195,10 +3195,10 @@ body.is-mobile .grove-pdf-content > .grove-toolbar {
 	flex: none;
 }
 
-body.is-mobile .grove-pdf-content > .grove-toolbar::-webkit-scrollbar {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-pdf-content > .grove-toolbar::-webkit-scrollbar {
 	display: none;
 }
 
-body.is-mobile .grove-pdf-content > .grove-toolbar > * {
+:is(body.is-mobile, body.grove-shell-mobile) .grove-pdf-content > .grove-toolbar > * {
 	flex: 0 0 auto;
 }

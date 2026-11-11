@@ -28,6 +28,40 @@ export function todayKey(d = new Date()): string {
 	return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
+/** 采样节拍：15 秒一跳 */
+export const STATS_TICK_MS = 15_000
+/** 超过这么久没有任何交互，就不算在读书（接电话、吃饭、睡着） */
+export const STATS_IDLE_MS = 60_000
+
+/**
+ * 这一拍该记多少秒。
+ *
+ * 记的是**这一拍的长度**，不是「距上次交互过了多久」。早先写成
+ * `min(TICK, now - lastActive)`：翻页频繁时（每 2–5 秒一次）每个 15 秒
+ * 采样只加 2–5 秒，一小时真实阅读能少记成十几分钟。
+ *
+ * 另外两条保险：
+ *  - 距上次交互 ≥ IDLE 就记 0（开着书去吃饭不至于记成读了 40 分钟）；
+ *  - 单拍最多按 2×TICK 计：系统休眠/标签页被挂起后回来，不能把整段空档补上。
+ *
+ * 纯函数，方便直接跑断言。
+ */
+export function accrueTick(input: {
+	now: number
+	lastTickAt: number
+	lastActive: number
+	idleMs?: number
+	tickMs?: number
+}): number {
+	const idle = input.idleMs ?? STATS_IDLE_MS
+	const tick = input.tickMs ?? STATS_TICK_MS
+	const span = input.now - input.lastTickAt
+	if (!Number.isFinite(span) || span <= 0) return 0
+	if (!Number.isFinite(input.now) || !Number.isFinite(input.lastActive)) return 0
+	if (input.now - input.lastActive >= idle) return 0
+	return Math.round(Math.min(span, tick * 2) / 1000)
+}
+
 /**
  * 阅读统计存储：data/stats.json，按书记录累计时长/翻页数与按日明细。
  * 读：启动时 `await load()` 一次读进内存；写：防抖后异步原子落盘。
