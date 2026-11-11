@@ -9,6 +9,7 @@ import {
 	ReaderAppearance,
 	colorCss,
 } from './types'
+import { renderAppearancePanel } from './appearancePanel'
 import { CommentModal, ConfirmModal } from './modals'
 import { closeAnnMenu, showAnnMenu } from './annMenu'
 import { AiPanel } from './aiPanel'
@@ -18,18 +19,6 @@ import { decodeTextBuffer, TextViewState, VIEW_TYPE_GROVE_TEXT } from './textCod
 export { VIEW_TYPE_GROVE_TEXT } from './textCodec'
 
 /** 与 EPUB 阅读外观面板保持同一组字体预设 */
-const TEXT_FONT_PRESETS: Array<{ label: string; value: string }> = [
-	{ label: '跟随主题', value: '' },
-	{ label: '系统衬线', value: 'serif' },
-	{ label: '系统无衬线', value: 'sans-serif' },
-	{ label: '宋体', value: '"Songti SC", "SimSun", "Noto Serif CJK SC", serif' },
-	{ label: '黑体', value: '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif' },
-	{ label: '楷体', value: '"KaiTi", "STKaiti", "Kaiti SC", serif' },
-	{ label: '仿宋', value: '"FangSong", "STFangsong", "Fang Song", serif' },
-	{ label: '霞鹜文楷', value: '"LXGW WenKai", "LXGW WenKai GB", "LXGW WenKai Screen", KaiTi, serif' },
-	{ label: '思源宋体', value: '"Source Han Serif SC", "Noto Serif CJK SC", "SimSun", serif' },
-	{ label: '思源黑体', value: '"Source Han Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif' },
-]
 
 /** TXT 批注定位：全文字符偏移，形如 txt:1234-1300 */
 const TXT_CFI_RE = /^txt:(\d+)(?:-(\d+))?$/
@@ -295,31 +284,13 @@ export class TextView extends ItemView {
 		}
 
 		const commentBtn = toolbar.createEl('button', {
-			cls: 'clickable-icon grove-icon-btn grove-appear-button',
+			cls: 'clickable-icon grove-icon-btn',
 			attr: { 'aria-label': '为划选文字添加评论' },
 		})
 		setIcon(commentBtn, 'message-square-plus')
 		commentBtn.addEventListener('click', () => void this.#commentOnSelection())
 
 		toolbar.createDiv('grove-flex-spacer')
-
-		const encodingWrap = toolbar.createDiv('grove-text-encoding')
-		this.encodingSelect = encodingWrap.createEl('select', { cls: 'dropdown' })
-		for (const [value, label] of [
-			['auto', '自动'],
-			['utf-8', 'UTF-8'],
-			['gb18030', 'GB18030'],
-			['big5', 'Big5'],
-			['utf-16le', 'UTF-16LE'],
-			['utf-16be', 'UTF-16BE'],
-		]) this.encodingSelect.createEl('option', { value, text: label })
-		this.encodingSelect.value = this.encoding
-		this.encodingSelect.addEventListener('change', () => {
-			this.encoding = this.encodingSelect.value
-			const fraction = this.pages.length > 1 ? this.page / (this.pages.length - 1) : 0
-			this.#decodeAndRender(fraction)
-			new Notice(`${this.plugin.manifest.name}：编码已切换为 ${this.encoding === 'auto' ? '自动' : this.encoding}`)
-		})
 
 		const appearBtn = toolbar.createEl('button', {
 			cls: 'clickable-icon grove-icon-btn',
@@ -344,6 +315,24 @@ export class TextView extends ItemView {
 		})
 		setIcon(sideBtn, 'list')
 		sideBtn.addEventListener('click', () => this.sidebarEl.classList.toggle('grove-hidden'))
+
+		const encodingWrap = toolbar.createDiv('grove-text-encoding')
+		this.encodingSelect = encodingWrap.createEl('select', { cls: 'dropdown' })
+		for (const [value, label] of [
+			['auto', '自动'],
+			['utf-8', 'UTF-8'],
+			['gb18030', 'GB18030'],
+			['big5', 'Big5'],
+			['utf-16le', 'UTF-16LE'],
+			['utf-16be', 'UTF-16BE'],
+		]) this.encodingSelect.createEl('option', { value, text: label })
+		this.encodingSelect.value = this.encoding
+		this.encodingSelect.addEventListener('change', () => {
+			this.encoding = this.encodingSelect.value
+			const fraction = this.pages.length > 1 ? this.page / (this.pages.length - 1) : 0
+			this.#decodeAndRender(fraction)
+			new Notice(`${this.plugin.manifest.name}：编码已切换为 ${this.encoding === 'auto' ? '自动' : this.encoding}`)
+		})
 
 		// 编码识别结果：短标签放末尾，鼠标悬停看完整信息
 		this.metaEl = toolbar.createDiv('grove-text-meta')
@@ -1194,7 +1183,7 @@ export class TextView extends ItemView {
 		const total = this.#totalChars()
 		const offset = offsetArg ?? this.#currentOffset()
 		const pct = total > 0 ? (offset / total) * 100 : 0
-		this.progressLabel.setText(`${pct.toFixed(1)}%`)
+		this.progressLabel.setText(`${Math.round(pct)}%`)
 		this.slider.min = '0'
 		this.slider.max = String(Math.max(1, total))
 		this.slider.value = String(offset)
@@ -1427,6 +1416,8 @@ export class TextView extends ItemView {
 	/** 鼠标滚轮固定翻页（分页模式下滚轮不再滚动正文） */
 	#onWheel(e: WheelEvent): void {
 		this.plugin.noteReadingActivity()
+		// 与 EPUB 同一个开关：关掉后滚轮不再翻页（TXT 是一屏一页，没有滚动可做）
+		if (!this.plugin.settings.appearance.wheelPageTurn) return
 		if (e.ctrlKey || e.metaKey || e.altKey) return
 		if (Math.abs(e.deltaY) < 1) return
 		e.preventDefault()
@@ -2013,88 +2004,19 @@ export class TextView extends ItemView {
 	}
 
 	#renderAppearancePanel(): void {
-		const a = this.plugin.settings.appearance
-		const panel = this.appearPanelEl
-		panel.empty()
-
-		const bgRow = panel.createDiv('grove-appear-row')
-		bgRow.createSpan('grove-appear-label').setText('背景')
-		const swatches = bgRow.createDiv('grove-appear-swatches')
-		const themeChip = swatches.createEl('button', { cls: 'grove-appear-chip', text: '跟随主题' })
-		if (a.followTheme) themeChip.addClass('is-active')
-		themeChip.addEventListener('click', () => this.#patchAppearance({ followTheme: true }, true))
-		for (const preset of BACKGROUND_PRESETS) {
-			const sw = swatches.createEl('button', {
-				cls: 'grove-appear-swatch',
-				attr: { 'aria-label': preset.name, title: preset.name },
-			})
-			sw.style.backgroundColor = preset.bg
-			if (!a.followTheme && a.bgKey === preset.key) sw.addClass('is-active')
-			sw.addEventListener('click', () => this.#patchAppearance({ followTheme: false, bgKey: preset.key }, true))
-		}
-		const customWrap = swatches.createDiv('grove-appear-swatch grove-appear-custom')
-		customWrap.style.backgroundColor = a.customBg
-		if (!a.followTheme && a.bgKey === 'custom') customWrap.addClass('is-active')
-		const colorInput = customWrap.createEl('input', { attr: { type: 'color', title: '自定义背景色' } })
-		colorInput.value = /^#[0-9a-fA-F]{6}$/.test(a.customBg) ? a.customBg : '#ffffff'
-		colorInput.addEventListener('input', () => {
-			Object.assign(this.plugin.settings.appearance, {
-				followTheme: false,
-				bgKey: 'custom',
-				customBg: colorInput.value,
-			})
-			customWrap.style.backgroundColor = colorInput.value
-			this.#applyAppearance()
-			this.plugin.persistSettingsSoon()
-		})
-
-		const fontRow = panel.createDiv('grove-appear-row')
-		fontRow.createSpan('grove-appear-label').setText('字体')
-		const fontSelect = fontRow.createEl('select', { cls: 'dropdown' })
-		for (const font of TEXT_FONT_PRESETS) fontSelect.createEl('option', { value: font.value, text: font.label })
-		fontSelect.value = TEXT_FONT_PRESETS.some(font => font.value === a.fontFamily) ? a.fontFamily : ''
-		fontSelect.addEventListener('change', () => this.#patchAppearance({ fontFamily: fontSelect.value }, true))
-
-		const sliders: Array<{
-			label: string
-			key: keyof ReaderAppearance
-			min: number
-			max: number
-			step: number
-			fmt: (v: number) => string
-		}> = [
-			{ label: '字号', key: 'fontSize', min: 80, max: 180, step: 5, fmt: v => `${Math.round(v)}%` },
-			{ label: '行距', key: 'lineHeight', min: 1.2, max: 2.4, step: 0.05, fmt: v => v.toFixed(2) },
-			{ label: '上下留白', key: 'pageMargin', min: 0, max: 200, step: 4, fmt: v => `${Math.round(v)}px` },
-			{ label: '版心宽', key: 'maxInlineSize', min: 480, max: 1200, step: 20, fmt: v => `${Math.round(v)}px` },
-		]
-		for (const item of sliders) {
-			const row = panel.createDiv('grove-appear-row')
-			row.createSpan('grove-appear-label').setText(item.label)
-			const wrap = row.createDiv('grove-appear-slider')
-			const range = wrap.createEl('input', {
-				attr: { type: 'range', min: String(item.min), max: String(item.max), step: String(item.step) },
-			})
-			const valueEl = wrap.createSpan('grove-appear-value')
-			const current = Number(a[item.key]) || item.min
-			range.value = String(current)
-			valueEl.setText(item.fmt(current))
-			range.addEventListener('input', () => {
-				const value = Number.parseFloat(range.value)
-				valueEl.setText(item.fmt(value))
-				this.#patchAppearance({ [item.key]: value } as Partial<ReaderAppearance>)
-			})
-		}
-
-		const foot = panel.createDiv('grove-appear-foot')
-		const reset = foot.createEl('button', { text: '恢复默认' })
-		reset.addEventListener('click', () => {
-			Object.assign(this.plugin.settings.appearance, DEFAULT_APPEARANCE)
-			this.#applyAppearance()
-			void this.plugin.persistSettingsNow()
-			this.#renderAppearancePanel()
+		renderAppearancePanel(this.appearPanelEl, {
+			surface: 'txt',
+			appearance: () => this.plugin.settings.appearance,
+			patch: (patch, rerender) => this.#patchAppearance(patch, rerender),
+			reset: () => {
+				Object.assign(this.plugin.settings.appearance, DEFAULT_APPEARANCE)
+				this.#applyAppearance()
+				void this.plugin.persistSettingsNow()
+				this.#renderAppearancePanel()
+			},
 		})
 	}
+
 
 	#patchAppearance(patch: Partial<ReaderAppearance>, rerender = false): void {
 		Object.assign(this.plugin.settings.appearance, patch)
