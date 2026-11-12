@@ -17,6 +17,8 @@ import { checkMigrateTarget, exportDataBackup, migrateDataFolder } from '../src/
 import { appendCards, buildCardText, emptyCanvas, parseCanvas, serializeCanvas, shortTitle } from '../src/canvas'
 import { buildSubpath, parseGroveHref, parseSubpath, snippetOf, wikilinkFor } from '../src/wikilink'
 import { markupColorCss, markupOpacity, markupRects, markupSubtype } from '../src/pdfAnnots'
+import { collectGlobalBookmarks, filterGlobalBookmarks } from '../src/globalBookmarks'
+import { hasNoteFragment, isMarkerLikeText, looksLikeFootnoteRef } from '../src/footnotes'
 
 async function main(): Promise<void> {
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-data-'))
@@ -674,6 +676,48 @@ assert.equal(await storeDedupe.reloadFromDisk(bookIdFor('Books/x.epub')), true, 
 	assert.equal(markupColorCss({ color: null }), 'rgb(255, 214, 10)')
 	assert.equal(markupOpacity({ opacity: 1 }), 0.7)
 	assert.equal(markupOpacity({}), 0.45)
+}
+
+// 37. 全局书签：汇总、按时间倒序、书名回退、搜索
+{
+	const rows = collectGlobalBookmarks([
+		{ bookPath: 'Books/a.epub', title: '甲书', bookmarks: [{ id: 'a1', cfi: 'epubcfi(/6/4)', label: '第一章', createdAt: 100 }] },
+		{
+			bookPath: 'Books/b.pdf',
+			title: '',
+			bookmarks: [
+				{ id: 'b1', cfi: 'page:2', label: '第 2 页', createdAt: 300 },
+				{ id: 'b2', cfi: 'page:3', label: '第 3 页', text: '某段', createdAt: 200 },
+			],
+		},
+		{ bookPath: 'Books/c.txt', bookmarks: [] },
+	])
+	assert.equal(rows.length, 3)
+	assert.equal(rows[0].bookmark.id, 'b1', '最新添加的排最前')
+	assert.equal(rows[1].bookmark.id, 'b2')
+	assert.equal(rows[2].bookmark.id, 'a1')
+	assert.equal(rows[0].bookTitle, 'b', '没有书名时退回文件名')
+	assert.equal(filterGlobalBookmarks(rows, '第 2 页').length, 1)
+	assert.equal(filterGlobalBookmarks(rows, 'b 某段').length, 1, '空格分词按 AND 匹配')
+	assert.equal(filterGlobalBookmarks(rows, '不存在').length, 0)
+	assert.equal(filterGlobalBookmarks(rows, '').length, 3)
+}
+
+// 38. 脚注识别：显式 noteref、无标注的 [n]、回链与普通目录链接
+{
+	assert.ok(looksLikeFootnoteRef({ href: 'ch1.xhtml#fn1', epubType: 'noteref', text: '[1]' }))
+	assert.ok(looksLikeFootnoteRef({ href: 'ch1.xhtml#fn1', role: 'doc-noteref', text: '' }), 'role 也算显式标注')
+	assert.ok(looksLikeFootnoteRef({ href: 'text00003.html#note1n', text: '[1]' }), '无标注靠 [n] + 片段名')
+	assert.ok(looksLikeFootnoteRef({ href: 'notes.xhtml#fn3', text: '[3]' }), '跨文件同样识别')
+	assert.ok(looksLikeFootnoteRef({ href: '#12', text: '1', isSuper: true }), '上标 + 纯数字片段')
+	assert.ok(!looksLikeFootnoteRef({ href: 'ch1.xhtml', text: '[1]' }), '没有片段不弹窗')
+	assert.ok(!looksLikeFootnoteRef({ href: '#note1', epubType: 'backlink', text: '[1]' }), '回链不弹窗')
+	assert.ok(!looksLikeFootnoteRef({ href: '#chapter1', text: '第一章' }), '普通目录链接不弹窗')
+	assert.ok(!looksLikeFootnoteRef({ href: '#chapter1', text: '[1]' }), '片段不像脚注时不猜')
+	assert.ok(isMarkerLikeText('[1]') && isMarkerLikeText('（12）') && isMarkerLikeText('①') && isMarkerLikeText('*'))
+	assert.ok(!isMarkerLikeText('第一章') && !isMarkerLikeText('参见'))
+	assert.ok(hasNoteFragment('text.html#note1n') && hasNoteFragment('ch2.xhtml#fn3'))
+	assert.ok(!hasNoteFragment('ch2.xhtml#chapter1'))
 }
 
 console.log('SMOKE OK')

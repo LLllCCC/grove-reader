@@ -1,4 +1,4 @@
-import { App, AbstractInputSuggest, FuzzySuggestModal, Modal, Notice, TFile, TFolder } from 'obsidian'
+import { App, AbstractInputSuggest, FuzzySuggestModal, Modal, Notice, TFile, TFolder, setIcon } from 'obsidian'
 import { Annotation, colorName, isShelfExt } from './types'
 import { colorDot, normalizeTerms, searchDocs } from './search'
 import type { SearchDoc } from './search'
@@ -9,6 +9,8 @@ import { basenameOf, cleanBookTitle, truncate } from './util'
 import type { OpEntry } from './oplog'
 import type { HealthReport } from './health'
 import type { SyncChange, SyncPlan } from './noteSync'
+import { filterGlobalBookmarks } from './globalBookmarks'
+import type { GlobalBookmarkRow } from './globalBookmarks'
 
 export class BookPickerModal extends FuzzySuggestModal<TFile> {
 	constructor(app: App, private onPick: (file: TFile) => void) {
@@ -1346,6 +1348,115 @@ export class CanvasExportModal extends Modal {
 			})
 			this.close()
 		})
+	}
+
+	onClose(): void {
+		this.contentEl.empty()
+	}
+}
+
+export interface GlobalBookmarkHandlers {
+	onJump: (row: GlobalBookmarkRow) => void
+	onDelete: (row: GlobalBookmarkRow) => void
+}
+
+function bookmarkTime(ts: number): string {
+	const d = new Date(ts || 0)
+	if (!ts) return ''
+	return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+/** 全局书签：汇总所有书的书签，点击跳回书内位置，可搜索/删除 */
+export class GlobalBookmarksModal extends Modal {
+	private query = ''
+
+	constructor(
+		app: App,
+		private getRows: () => GlobalBookmarkRow[],
+		private handlers: GlobalBookmarkHandlers,
+	) {
+		super(app)
+	}
+
+	onOpen(): void {
+		this.#render()
+	}
+
+	#render(): void {
+		const { contentEl } = this
+		contentEl.empty()
+		contentEl.addClass('grove-global-bm')
+		contentEl.createEl('h3', { text: '全局书签' })
+		const all = this.getRows()
+		const bookCount = new Set(all.map(r => r.bookPath)).size
+		contentEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: all.length
+				? `共 ${all.length} 条书签，分布在 ${bookCount} 本书里。点击条目跳回书内位置。`
+				: '还没有书签。',
+		})
+		if (!all.length) {
+			contentEl.createEl('p', { cls: 'grove-ann-empty', text: '在阅读时点工具栏的书签按钮，就能把当前位置记下来。' })
+			this.#buttons()
+			return
+		}
+
+		const input = contentEl.createEl('input', {
+			type: 'search',
+			cls: 'grove-global-bm-search',
+			placeholder: '搜索书名 / 位置 / 片段',
+		})
+		input.value = this.query
+		input.addEventListener('input', () => {
+			this.query = input.value
+			draw()
+		})
+
+		const list = contentEl.createDiv('grove-global-bm-list')
+		const none = contentEl.createDiv('grove-ann-empty grove-hidden')
+		none.setText('没有匹配的书签')
+
+		const draw = (): void => {
+			const rows = filterGlobalBookmarks(all, this.query)
+			list.empty()
+			none.toggleClass('grove-hidden', rows.length > 0)
+			for (const row of rows) {
+				const item = list.createDiv('grove-bm-item')
+				const main = item.createDiv('grove-bm-main')
+				main.createDiv('grove-bm-label').setText(row.bookTitle)
+				main.createDiv('grove-bm-text').setText(
+					`${row.bookmark.label || '未命名位置'}${row.bookmark.text ? ` · ${row.bookmark.text}` : ''}`,
+				)
+				main.addEventListener('click', () => {
+					this.handlers.onJump(row)
+					this.close()
+				})
+				item.createSpan('grove-bm-time').setText(bookmarkTime(row.bookmark.createdAt))
+				const actions = item.createDiv('grove-bm-actions')
+				const jump = actions.createEl('button', { cls: 'clickable-icon grove-mini-btn', attr: { 'aria-label': '跳到书签位置' } })
+				setIcon(jump, 'arrow-up-left')
+				jump.addEventListener('click', e => {
+					e.stopPropagation()
+					this.handlers.onJump(row)
+					this.close()
+				})
+				const del = actions.createEl('button', { cls: 'clickable-icon grove-mini-btn', attr: { 'aria-label': '删除书签' } })
+				setIcon(del, 'trash-2')
+				del.addEventListener('click', e => {
+					e.stopPropagation()
+					this.handlers.onDelete(row)
+					this.#render()
+				})
+			}
+		}
+		draw()
+		this.#buttons()
+	}
+
+	#buttons(): void {
+		const buttons = this.contentEl.createDiv('modal-button-container')
+		const close = buttons.createEl('button', { text: '关闭', cls: 'mod-cta' })
+		close.addEventListener('click', () => this.close())
 	}
 
 	onClose(): void {

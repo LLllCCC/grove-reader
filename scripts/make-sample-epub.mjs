@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 
-const ch = (title, id, paragraphs) => `<?xml version="1.0" encoding="UTF-8"?>
+const ch = (title, id, paragraphs, extra = '') => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="zh-CN" lang="zh-CN">
 <head><title>${title}</title><link rel="stylesheet" type="text/css" href="style.css"/></head>
@@ -14,6 +14,7 @@ const ch = (title, id, paragraphs) => `<?xml version="1.0" encoding="UTF-8"?>
 <section epub:type="chapter">
 <h1>${title}</h1>
 ${paragraphs.map(p => `<p>${p}</p>`).join('\n')}
+${extra}
 </section>
 </body>
 </html>
@@ -111,3 +112,97 @@ p { text-indent: 2em; margin: 0.6em 0; }
 const out = path.join(root, 'Grove Reader 示例书.epub')
 fs.writeFileSync(out, zipSync(files))
 console.log(`已生成：${out}`)
+
+// ---------------------------------------------------------------------------
+// 样书-脚注.epub：覆盖脚注浮窗的三条路径
+//   1) 同文件 + epub:type="noteref"  2) 跨文件 + 未标注类型、文字 [3]
+// ---------------------------------------------------------------------------
+
+const fnCh1 = ch('第一章：同页脚注', 'fnch1', [
+	'这一句带一个标准脚注<a epub:type="noteref" href="#fn1" id="ref1"><sup>[1]</sup></a>，点它应该弹小窗，而不是跳走。',
+	'这一段带第二个脚注<a epub:type="noteref" href="#fn2" id="ref2"><sup>[2]</sup></a>，用来验证连续点击时旧结果不会覆盖新内容。',
+	...Array.from({ length: 6 }, (_, i) => `第${i + 1}段正文：脚注浮窗不该打断阅读位置，关掉之后还停在原页。`),
+], `
+<aside epub:type="footnote" id="fn1">
+<p><a epub:type="backlink" href="#ref1">[1]</a>脚注一：这是同文件、位于正文末尾的脚注正文。</p>
+</aside>
+<aside epub:type="footnote" id="fn2">
+<p><a epub:type="backlink" href="#ref2">[2]</a>脚注二：第二条脚注，内容更长一些，用来检查浮窗高度与滚动。${'脚注正文用来占位。'.repeat(12)}</p>
+</aside>`)
+
+const fnCh2 = ch('第二章：跨文件脚注', 'fnch2', [
+	'这一句的脚注在另一个文件里<a href="notes.xhtml#fn3" id="ref3"><sup>[3]</sup></a>，书里没写 epub:type，靠 [3] 和片段名识别。',
+	...Array.from({ length: 8 }, (_, i) => `第${i + 1}段正文：跨文件脚注要先解析目标章节，再截取段落。`),
+])
+
+const fnFiles = {
+	'mimetype': [strToU8('application/epub+zip'), { level: 0 }],
+	'META-INF/container.xml': strToU8(`<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+`),
+	'OEBPS/content.opf': strToU8(`<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" xml:lang="zh-CN">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="bookid">urn:uuid:grove-reader-footnote-0001</dc:identifier>
+    <dc:title>样书：脚注浮窗</dc:title>
+    <dc:creator>Grove</dc:creator>
+    <dc:language>zh-CN</dc:language>
+    <meta property="dcterms:modified">2026-11-13T00:00:00Z</meta>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="css" href="style.css" media-type="text/css"/>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch2" href="ch2.xhtml" media-type="application/xhtml+xml"/>
+    <item id="notes" href="notes.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+    <itemref idref="ch2"/>
+    <itemref idref="notes"/>
+  </spine>
+</package>
+`),
+	'OEBPS/nav.xhtml': strToU8(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="zh-CN" lang="zh-CN">
+<head><title>目录</title></head>
+<body>
+<nav epub:type="toc" id="toc">
+<h1>目录</h1>
+<ol>
+  <li><a href="ch1.xhtml">第一章：同页脚注</a></li>
+  <li><a href="ch2.xhtml">第二章：跨文件脚注</a></li>
+</ol>
+</nav>
+</body>
+</html>
+`),
+	'OEBPS/style.css': strToU8(`body { font-family: serif; line-height: 1.7; margin: 1em; }
+h1 { font-size: 1.5em; }
+p { text-indent: 2em; margin: 0.6em 0; }
+aside[epub|type~="footnote"] { border-top: 1px solid #ccc; margin-top: 1.5em; font-size: 0.9em; }
+`),
+	'OEBPS/ch1.xhtml': strToU8(fnCh1),
+	'OEBPS/ch2.xhtml': strToU8(fnCh2),
+	'OEBPS/notes.xhtml': strToU8(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="zh-CN" lang="zh-CN">
+<head><title>注释</title><link rel="stylesheet" type="text/css" href="style.css"/></head>
+<body>
+<section epub:type="endnotes">
+<h1>注释</h1>
+<div class="fnote"><p><a id="fn3" href="ch2.xhtml#ref3">[3]</a>脚注三：这条在独立文件里，标记也没有 epub:type，靠片段名 fn3 和 [3] 识别。</p></div>
+</section>
+</body>
+</html>
+`),
+}
+
+const fnOut = path.join(root, '样书-脚注.epub')
+fs.writeFileSync(fnOut, zipSync(fnFiles))
+console.log(`已生成：${fnOut}`)

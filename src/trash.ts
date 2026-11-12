@@ -204,7 +204,9 @@ export class TrashStore {
 			throw e
 		}
 
-		await this.io.removeDir(dir)
+		await this.#removeDirRetry(dir).catch(() => {
+			// 目录删不掉不影响恢复结果（文件已经回原位），下次 purge 会再清
+		})
 		if (!coverRestored) {
 			delete entry.files.cover
 			if (entry.shelfEntry) delete entry.shelfEntry.cover
@@ -213,18 +215,25 @@ export class TrashStore {
 	}
 
 	async purge(id: string): Promise<void> {
-		const dir = joinPath(this.root, id)
-		// Windows 上刚移进来的文件可能还被索引/杀软占着，直接删会报 ENOTEMPTY：
-		// 等一拍重试两次再放弃，避免用户点「永久删除」当场看到失败
-		for (let attempt = 0; ; attempt++) {
+		await this.#removeDirRetry(joinPath(this.root, id))
+	}
+
+	/**
+	 * Windows 上刚移进来的文件可能还被索引/杀软占着，直接删会报 ENOTEMPTY。
+	 * 退避重试 6 次（约 2 秒），仍失败才抛给调用方。
+	 */
+	async #removeDirRetry(dir: string, attempts = 6): Promise<void> {
+		let last: unknown = null
+		for (let i = 0; i < attempts; i++) {
 			try {
 				await this.io.removeDir(dir)
 				return
 			} catch (e) {
-				if (attempt >= 2) throw e
-				await new Promise(resolve => setTimeout(resolve, 120))
+				last = e
+				await new Promise(resolve => setTimeout(resolve, 100 * (i + 1)))
 			}
 		}
+		throw last instanceof Error ? last : new Error(String(last))
 	}
 
 	async empty(): Promise<number> {
@@ -237,7 +246,7 @@ export class TrashStore {
 		let count = 0
 		for (const dir of folders) {
 			try {
-				await this.io.removeDir(dir)
+				await this.#removeDirRetry(dir)
 				count++
 			} catch {
 				// 跳过占用中的文件

@@ -7,6 +7,7 @@ import { Annotation, BookData, HIGHLIGHT_COLORS, VIEW_TYPE_GROVE_PDF, colorCss }
 import { CommentModal, ConfirmModal } from './modals'
 import { JumpReturnBar } from './navReturn'
 import { createBookmarkSection, findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
+import { createColorControls } from './colorMenu'
 import { createCitationSection, type CitationSectionHandle } from './backlinks'
 import { basenameOf, isAbsolutePath, normalizeSelectionText, pageFromFraction, randomId, truncate } from './util'
 import { joinPath } from './platformIO'
@@ -164,6 +165,8 @@ export class PdfView extends ItemView {
 	private jumpReturn = new JumpReturnBar(() => this.contentEl ?? null)
 	/** 书签区的渲染句柄与工具栏按钮 */
 	private bookmarkSection: BookmarkSectionHandle | null = null
+	/** 手机端颜色弹层的清理函数（桌面是 5 个色点，返回空函数） */
+	private colorMenuClose: (() => void) | null = null
 	private citationSection: CitationSectionHandle | null = null
 	private bookmarkBtnEl: HTMLElement | null = null
 	private pages = new Map<number, PageEntry>()
@@ -248,6 +251,8 @@ export class PdfView extends ItemView {
 	}
 
 	async onClose(): Promise<void> {
+		this.colorMenuClose?.()
+		this.colorMenuClose = null
 		this.#flushSave()
 		await this.#teardown()
 		this.resizeObserver?.disconnect()
@@ -326,11 +331,7 @@ export class PdfView extends ItemView {
 		})
 
 		toolbar.createDiv('grove-sep')
-		for (const c of HIGHLIGHT_COLORS) {
-			const dot = toolbar.createEl('button', { cls: 'clickable-icon grove-color-dot', attr: { 'aria-label': `高亮（${c.name}）` } })
-			dot.style.backgroundColor = c.css
-			dot.addEventListener('click', () => void this.#createHighlightFromPending(c.key))
-		}
+		this.colorMenuClose = createColorControls(toolbar, key => void this.#createHighlightFromPending(key))
 		const commentBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '为划选文字添加评论' } })
 		setIcon(commentBtn, 'message-square-plus')
 		commentBtn.addEventListener('click', () => void this.#commentOnPending())

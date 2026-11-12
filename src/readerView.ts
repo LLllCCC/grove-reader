@@ -12,7 +12,9 @@ import {
 import { renderAppearancePanel } from './appearancePanel'
 import { JumpReturnBar } from './navReturn'
 import { createBookmarkSection, findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
+import { createColorControls } from './colorMenu'
 import { createCitationSection, type CitationSectionHandle } from './backlinks'
+import { blockForNote, footnoteFactsFrom, footnoteTextFrom, isInsideNoteBlock, looksLikeFootnoteRef } from './footnotes'
 import { CommentModal, ConfirmModal } from './modals'
 import { AiPanel } from './aiPanel'
 import { Overlayer } from '../lib/foliate-js/overlayer.js'
@@ -46,7 +48,7 @@ interface FoliateTOCItem {
 interface FoliateBook {
 	metadata?: { title?: unknown; author?: unknown }
 	toc?: FoliateTOCItem[]
-	sections?: Array<{ id?: string; href?: string }>
+	sections?: Array<{ id?: string; href?: string; createDocument?: () => Promise<Document> }>
 	/** href → { index: spine 索引, anchor: 文档内锚点 CFI } */
 	resolveHref?: (href: string) => { index: number; anchor?: unknown } | null
 	/** cfi → { index, label }，label 是 foliate 自己挑的最近目录项 */
@@ -56,6 +58,8 @@ interface FoliateBook {
 interface FoliateRenderer {
 	setStyles?: (css: string) => void
 	setAttribute(name: string, value: string): void
+	/** 当前渲染中的文档（翻页时只有当前节在 DOM 里） */
+	getContents?: () => Array<{ doc: Document; index: number }>
 }
 
 interface FoliateView extends HTMLElement {
@@ -128,11 +132,18 @@ export class ReaderView extends ItemView {
 	private popup: HTMLElement | null = null
 	private popupTimer: number | null = null
 	private popupCloser: ((e: MouseEvent) => void) | null = null
+	/** 脚注浮窗（EPUB）：点 noteref 时弹小窗，不上跳正文 */
+	private footnotePopup: HTMLElement | null = null
+	private footnoteCloser: ((e: MouseEvent) => void) | null = null
+	/** 连续点不同脚注时，丢弃迟到的旧解析结果 */
+	private footnoteSeq = 0
 	/** 跳转后的「返回原位置」浮条。挂 contentEl 而不是 readerEl：
 	 *  手机上 readerEl 里 foliate 的 iframe 会盖住它，点不到（PDF 侧同理，统一挂根节点） */
 	private jumpReturn = new JumpReturnBar(() => this.contentEl ?? null)
 	/** 书签区的渲染句柄与工具栏按钮（按钮图标随当前位置是否已加书签变化） */
 	private bookmarkSection: BookmarkSectionHandle | null = null
+	/** 手机端颜色弹层的清理函数（桌面是 5 个色点，返回空函数） */
+	private colorMenuClose: (() => void) | null = null
 	private citationSection: CitationSectionHandle | null = null
 	private bookmarkBtnEl: HTMLElement | null = null
 	private aiPanel = new AiPanel()
@@ -215,6 +226,8 @@ export class ReaderView extends ItemView {
 	}
 
 	async onClose(): Promise<void> {
+		this.colorMenuClose?.()
+		this.colorMenuClose = null
 		this.#flushSave()
 		this.#teardownBook()
 	}
@@ -322,11 +335,7 @@ export class ReaderView extends ItemView {
 
 		toolbar.createDiv('grove-sep')
 
-		for (const c of HIGHLIGHT_COLORS) {
-			const dot = toolbar.createEl('button', { cls: 'clickable-icon grove-color-dot', attr: { 'aria-label': `高亮（${c.name}）` } })
-			dot.style.backgroundColor = c.css
-			dot.addEventListener('click', () => void this.#createHighlightFromPending(c.key))
-		}
+		this.colorMenuClose = createColorControls(toolbar, key => void this.#createHighlightFromPending(key))
 
 		const commentBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '为划选文字添加评论' } })
 		setIcon(commentBtn, 'message-square-plus')
@@ -509,6 +518,7 @@ export class ReaderView extends ItemView {
 			foliate.addEventListener('draw-annotation', this.#onDrawAnnotation as EventListener)
 			foliate.addEventListener('create-overlay', this.#onCreateOverlay as EventListener)
 			foliate.addEventListener('show-annotation', this.#onShowAnnotation as EventListener)
+			foliate.addEventListener('link', this.#onLink as EventListener)
 
 			await foliate.open(new File([buf], name))
 			// 手机端关掉「拖选到页边自动翻页」：会把跨页拖选手势当成 swipe，直接跳页并冲掉选区
@@ -553,6 +563,7 @@ export class ReaderView extends ItemView {
 	#teardownBook(): void {
 		this.#clearFullTextSearch()
 		this.#hidePopup()
+		this.#closeFootnote()
 		this.#hideJumpReturn()
 		this.aiPanel.hide()
 		if (this.saveTimer != null) {
@@ -787,6 +798,8 @@ export class ReaderView extends ItemView {
 		// EPUB 正文在 iframe 里，点击不会冒泡到宿主，必须单独在 doc 上监听
 		doc.addEventListener('click', (ev: MouseEvent) => {
 			const target = ev.target as HTMLElement | null
+			// 点正文别处就收起脚注浮窗（点链接时交给 relocate 收：正常链接会跳走）
+			if (this.footnotePopup && !target?.closest?.('a[href]')) this.#closeFootnote()
 			if (target?.closest('a, button, .grove-annotation')) return
 			// 面板开着时点正文 = 一起收：面板淡出，工具栏随之滑回顶边（它只是被
 			// is-appear-open 临时钉住的）。桌面也要处理——正文在 iframe 里，
@@ -823,6 +836,7 @@ export class ReaderView extends ItemView {
 			window.setTimeout(() => this.#captureSelection(doc, index, point), 0)
 		})
 		doc.addEventListener('keydown', (ke: KeyboardEvent) => {
+			if (ke.key === 'Escape') this.#closeFootnote()
 			if (!PAGE_KEYS.has(ke.key)) return
 			const sel = doc.defaultView?.getSelection()
 			if (sel && !sel.isCollapsed) return // 正在用键盘选字时不翻页
@@ -841,6 +855,7 @@ export class ReaderView extends ItemView {
 			this.lastStatsLoc = d.location.current
 		}
 		// 手机端：翻页或滚动换了位置就自动收起工具栏，别让它一直挡正文（拖进度条时不收）
+		if (moved) this.#closeFootnote()
 		if (moved && this.plugin.isMobile && !this.sliderActive) {
 			const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
 			if (bar?.dataset.barOpen === '1') this.#setMobileBarOpen(false)
@@ -1112,6 +1127,119 @@ export class ReaderView extends ItemView {
 		}
 		this.popup?.remove()
 		this.popup = null
+	}
+
+	// ------------------------------------------------------------------
+	// 脚注浮窗
+	// ------------------------------------------------------------------
+
+	/** foliate 的 link 事件：脚注引用就地弹窗，其余链接照常跳转 */
+	#onLink = (e: Event): void => {
+		const detail = (e as CustomEvent<{ a?: HTMLAnchorElement; href?: string }>).detail
+		const a = detail?.a
+		const href = detail?.href
+		if (!a || !href) return
+		// 注释章末尾的 [1] 是回链，交给 foliate 跳回正文
+		if (isInsideNoteBlock(a)) return
+		if (!looksLikeFootnoteRef(footnoteFactsFrom(a, href))) return
+		e.preventDefault()
+		void this.#showFootnote(a, href)
+	}
+
+	/** 取某一节的 Document：当前节直接用已渲染的文档，其余节现解析一份 */
+	#docForIndex(index: number): Document | Promise<Document> | null {
+		const contents = this.foliate?.renderer?.getContents?.() ?? []
+		const current = contents.find(c => c.index === index)
+		if (current) return current.doc
+		const section = this.foliate?.book?.sections?.[index]
+		return section?.createDocument ? section.createDocument() : null
+	}
+
+	async #showFootnote(anchor: Element, href: string): Promise<void> {
+		const seq = ++this.footnoteSeq
+		const resolved = this.foliate?.book?.resolveHref?.(href) ?? null
+		const index = resolved?.index
+		const resolveAnchor = resolved?.anchor
+		if (!resolved || typeof index !== 'number' || index < 0 || typeof resolveAnchor !== 'function') {
+			void this.foliate?.goTo(href)
+			return
+		}
+		let doc: Document | null = null
+		try {
+			doc = await this.#docForIndex(index)
+		} catch {
+			doc = null
+		}
+		// 等待期间又点了别的脚注，这次结果作废
+		if (seq !== this.footnoteSeq) return
+		const target = doc ? (resolveAnchor as (d: Document) => Element | null)(doc) : null
+		const text = target ? footnoteTextFrom(blockForNote(target)) : ''
+		if (!target || !text.trim()) {
+			// 找不到正文就退回原生跳转，避免点了没反应
+			void this.foliate?.goTo(href)
+			return
+		}
+		this.#renderFootnotePopup(anchor, text, href)
+	}
+
+	#renderFootnotePopup(anchor: Element, text: string, href: string): void {
+		this.#closeFootnote()
+		const popup = document.createElement('div')
+		popup.className = 'grove-footnote-popup'
+		if (this.plugin.isMobile) popup.classList.add('is-mobile')
+
+		const head = popup.createDiv('grove-footnote-head')
+		head.createSpan({ text: '脚注' })
+		const close = head.createEl('button', { cls: 'grove-footnote-close', attr: { 'aria-label': '关闭' } })
+		setIcon(close, 'x')
+		close.addEventListener('click', () => this.#closeFootnote())
+
+		const body = popup.createDiv('grove-footnote-body')
+		for (const para of text.split(/\n{2,}/)) body.createEl('p', { text: para })
+
+		const foot = popup.createDiv('grove-footnote-foot')
+		const jump = foot.createEl('button', { cls: 'grove-footnote-jump', text: '跳到原文' })
+		jump.addEventListener('click', () => {
+			this.#closeFootnote()
+			void this.foliate?.goTo(href)
+		})
+		// 浮窗挂在主窗口，点它别触发「点外部关闭」
+		popup.addEventListener('mousedown', e => e.stopPropagation())
+
+		document.body.appendChild(popup)
+		this.footnotePopup = popup
+
+		// 桌面：贴着被点的标号下方；放不下就翻到上方。手机交给 CSS 做底部抽屉
+		if (!this.plugin.isMobile) {
+			const frameEl = anchor.ownerDocument?.defaultView?.frameElement as HTMLElement | null
+			const base = frameEl?.getBoundingClientRect() ?? this.readerEl.getBoundingClientRect()
+			const rect = anchor.getBoundingClientRect()
+			const size = popup.getBoundingClientRect()
+			const left = Math.max(8, Math.min(base.left + rect.left, window.innerWidth - size.width - 8))
+			let top = base.top + rect.bottom + 8
+			if (top + size.height > window.innerHeight - 8) {
+				top = Math.max(8, base.top + rect.top - size.height - 8)
+			}
+			popup.style.left = `${Math.round(left)}px`
+			popup.style.top = `${Math.round(top)}px`
+		}
+
+		const closer = (ev: MouseEvent): void => {
+			if (this.footnotePopup && !this.footnotePopup.contains(ev.target as Node)) this.#closeFootnote()
+		}
+		this.footnoteCloser = closer
+		window.setTimeout(() => {
+			if (this.footnoteCloser === closer) document.addEventListener('mousedown', closer, true)
+		}, 0)
+	}
+
+	#closeFootnote(): void {
+		if (this.footnoteCloser) {
+			document.removeEventListener('mousedown', this.footnoteCloser, true)
+			this.footnoteCloser = null
+		}
+		this.footnotePopup?.remove()
+		this.footnotePopup = null
 	}
 
 	async #createHighlightFromPending(color: string): Promise<void> {

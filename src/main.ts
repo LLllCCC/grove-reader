@@ -22,9 +22,11 @@ import {
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
 import { TextView, VIEW_TYPE_GROVE_TEXT } from './textView'
-import { BookPickerModal, CanvasExportModal, ConfirmModal, DangerConfirmModal, FolderPromptModal, HealthReportModal, NoteSyncModal, OpLogModal, ReadingStatsModal, PromptModal, SearchModal, TemplatePickerModal, TrashModal } from './modals'
+import { BookPickerModal, CanvasExportModal, ConfirmModal, DangerConfirmModal, FolderPromptModal, GlobalBookmarksModal, HealthReportModal, NoteSyncModal, OpLogModal, ReadingStatsModal, PromptModal, SearchModal, TemplatePickerModal, TrashModal } from './modals'
 import type { CanvasExportPayload } from './modals'
 import { applySync, planSync } from './noteSync'
+import { collectGlobalBookmarks } from './globalBookmarks'
+import type { GlobalBookmarkRow } from './globalBookmarks'
 import { appendCards, buildCardText, canvasColor, emptyCanvas, parseCanvas, serializeCanvas } from './canvas'
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate, resolveExcerptLinkStyle } from './notes'
@@ -71,6 +73,10 @@ export default class GroveReaderPlugin extends Plugin {
 	private statsLastTick = 0
 	private statsLastActive = 0
 	private statsActivePath = ''
+	/** 启动打点：插件实例创建 → onload 结束 → 书架首屏可交互（同一进程内相对时间） */
+	private readonly startupAt = typeof performance !== 'undefined' ? performance.now() : 0
+	private pluginReadyAt = 0
+	private shelfReadyAt = 0
 
 	private dataRoot!: string
 	private persistTimer: number | null = null
@@ -224,7 +230,31 @@ export default class GroveReaderPlugin extends Plugin {
 		}))
 		this.#startStatsTracking()
 		this.app.workspace.onLayoutReady(() => void this.maybeAutoBackup())
-		this.debug('app', 'onload', { version: this.manifest.version, dataRoot: this.dataRoot })
+		this.pluginReadyAt = this.#now()
+		this.debug('app', 'onload', { version: this.manifest.version, dataRoot: this.dataRoot, readyMs: Math.round(this.pluginReadyAt - this.startupAt) })
+	}
+
+	#now(): number {
+		return typeof performance !== 'undefined' ? performance.now() : Date.now()
+	}
+
+	/** 书架首屏（第一批卡片 + 搜索状态）可交互：只在本次会话第一次记录 */
+	markShelfInteractive(bookCount: number): void {
+		if (this.shelfReadyAt) return
+		this.shelfReadyAt = this.#now()
+		this.debug('startup', 'shelf interactive', {
+			pluginReadyMs: this.pluginReadyAt ? Math.round(this.pluginReadyAt - this.startupAt) : null,
+			shelfMs: Math.round(this.shelfReadyAt - this.startupAt),
+			books: bookCount,
+		})
+	}
+
+	/** 启动打点结果（相对插件实例创建；未发生时为 null） */
+	startupTimings(): { pluginReadyMs: number | null; shelfInteractiveMs: number | null } {
+		return {
+			pluginReadyMs: this.pluginReadyAt ? Math.round(this.pluginReadyAt - this.startupAt) : null,
+			shelfInteractiveMs: this.shelfReadyAt ? Math.round(this.shelfReadyAt - this.startupAt) : null,
+		}
 	}
 
 	onunload(): void {
@@ -422,6 +452,34 @@ export default class GroveReaderPlugin extends Plugin {
 	showTrash(): void {
 		if (!this.trash) return
 		new TrashModal(this.app, this).open()
+	}
+
+	/** 汇总所有书的书签（全局书签弹窗用） */
+	globalBookmarkRows(): GlobalBookmarkRow[] {
+		const sources = this.store.listBookPaths().map(bookPath => {
+			const data = this.store.load(bookPath)
+			return { bookPath, title: data.title, bookmarks: data.bookmarks ?? [] }
+		})
+		return collectGlobalBookmarks(sources)
+	}
+
+	openGlobalBookmarks(): void {
+		new GlobalBookmarksModal(
+			this.app,
+			() => this.globalBookmarkRows(),
+			{
+				onJump: row => void this.openBookByPath(row.bookPath, row.bookmark.cfi),
+				onDelete: row => this.deleteGlobalBookmark(row),
+			},
+		).open()
+	}
+
+	deleteGlobalBookmark(row: GlobalBookmarkRow): void {
+		const data = this.store.load(row.bookPath)
+		data.bookmarks = (data.bookmarks ?? []).filter(b => b.id !== row.bookmark.id)
+		this.store.save(data)
+		this.refreshNoteForBook(row.bookPath)
+		new Notice(`${APP_NAME}：已删除书签「${row.bookmark.label || '未命名位置'}」`)
 	}
 
 	loadSearchIndex(): SearchDoc[] {
@@ -1234,6 +1292,11 @@ export default class GroveReaderPlugin extends Plugin {
 			id: 'backup-data',
 			name: '备份批注数据到库内',
 			callback: () => void this.exportDataBackup(),
+		})
+		this.addCommand({
+			id: 'global-bookmarks',
+			name: '全局书签',
+			callback: () => this.openGlobalBookmarks(),
 		})
 		this.addCommand({
 			id: 'reading-stats',

@@ -122,6 +122,8 @@ export class ShelfCache {
 	private coverCacheChars = 0
 	/** 封面是否已经预热过（由书架首次渲染触发，避免启动就全量读盘） */
 	private coversLoaded = false
+	/** 封面后台读完后的通知（书架用来补画首次加载时还是空白的卡片） */
+	private coverListeners = new Set<(filename: string, url: string | null) => void>()
 	private io: PlatformIO
 
 	constructor(rootDir: string, io: PlatformIO) {
@@ -158,6 +160,12 @@ export class ShelfCache {
 		if (this.coversLoaded) return
 		this.coversLoaded = true
 		await this.#preloadCovers()
+	}
+
+	/** 封面后台读完时通知（url 为 null 表示读取失败）；返回取消订阅函数 */
+	onCoverLoaded(listener: (filename: string, url: string | null) => void): () => void {
+		this.coverListeners.add(listener)
+		return () => this.coverListeners.delete(listener)
 	}
 
 	get(path: string): ShelfEntry | undefined {
@@ -298,6 +306,13 @@ export class ShelfCache {
 		}
 		this.coverCache.set(filename, url)
 		if (url) this.coverCacheChars += url.length
+		for (const listener of this.coverListeners) {
+			try {
+				listener(filename, url)
+			} catch {
+				// 监听方（书架视图）已经关闭时忽略
+			}
+		}
 	}
 
 	#deleteCoverCache(filename: string): void {
@@ -396,6 +411,10 @@ export class BookshelfView extends ItemView {
 	private tooltipEl: HTMLElement | null = null
 	private tooltipTimer: number | null = null
 	private cardSeq = 0
+	/** 封面后台读完的订阅开关 */
+	private coverOff: (() => void) | null = null
+	/** 等封面加载的卡片容器：封面文件名 → 占位元素（首次渲染时封面还没读进缓存） */
+	private coverWaiters = new Map<string, Set<HTMLElement>>()
 
 	constructor(leaf: WorkspaceLeaf, private plugin: GroveReaderPlugin) {
 		super(leaf)
@@ -429,6 +448,7 @@ export class BookshelfView extends ItemView {
 		this.emptyEl = this.gridEl.createDiv('grove-shelf-empty grove-hidden')
 
 		this.#registerVaultEvents()
+		this.coverOff = this.plugin.shelfCache.onCoverLoaded((filename, url) => this.#onCoverLoaded(filename, url))
 		await this.refresh()
 	}
 
@@ -497,6 +517,9 @@ export class BookshelfView extends ItemView {
 		if (this.refreshTimer != null) window.clearTimeout(this.refreshTimer)
 		this.searchTimer = null
 		this.refreshTimer = null
+		this.coverOff?.()
+		this.coverOff = null
+		this.coverWaiters.clear()
 		this.#hideTooltip()
 		this.plugin.shelfCache.saveNow()
 		this.plugin.lists.saveNow()
@@ -511,6 +534,7 @@ export class BookshelfView extends ItemView {
 		this.#hideTooltip()
 		if (opts.rescan) this.scanToken++
 		this.cardEls.clear()
+		this.coverWaiters.clear()
 		this.gridEl.empty()
 		this.emptyEl = this.gridEl.createDiv('grove-shelf-empty grove-hidden')
 		this.continueEl.empty()
@@ -523,6 +547,7 @@ export class BookshelfView extends ItemView {
 			this.#showEmpty('还没有扫描文件夹。选择一个放书的文件夹（库内或本机任意路径），书架会递归扫描其中的电子书与 PDF。')
 			const addBtn = this.emptyEl.createEl('button', { text: '添加文件夹', cls: 'mod-cta' })
 			addBtn.addEventListener('click', () => void this.#addFolder())
+			plugin.markShelfInteractive(0)
 			return
 		}
 
@@ -554,17 +579,21 @@ export class BookshelfView extends ItemView {
 				this.#showEmpty(`扫描到的 ${hiddenCount} 本书都被移出书架了，原文件仍在库中。`)
 				const restore = this.emptyEl.createEl('button', { text: '全部恢复', cls: 'mod-cta' })
 				restore.addEventListener('click', () => void plugin.restoreHiddenBooks())
+				plugin.markShelfInteractive(0)
 				return
 			}
 			this.#showEmpty(visiblePaths.length && this.listFilter !== 'all'
 				? '这个书单里还没有书。在书籍卡片上右键 →「移入书单…」，或直接把书拖到书单标签上。'
 				: '扫描文件夹里没有找到书籍文件（支持 epub / mobi / azw3 / fb2 / cbz / txt，PDF 会一并收纳）。')
+			plugin.markShelfInteractive(0)
 			return
 		}
 
 		const pathsForCards = this.#sortPaths(inList, stats)
 		const tasks = this.#renderCardsInBatches(0, pathsForCards, stats, dupes)
 		this.#applySearch()
+		// 首屏卡片已建好：记一次「启动 → 书架可交互」（本次会话只记第一次）
+		plugin.markShelfInteractive(visiblePaths.length)
 		void this.#runQueue(tasks, 2).then(() => this.#applySearch())
 		if (pathsForCards.length > this.#batchSize()) this.#scheduleRestBatches(pathsForCards, stats, dupes)
 	}
@@ -1023,7 +1052,10 @@ export class BookshelfView extends ItemView {
 		const size = this.#fileSize(path)
 		const coverWrap = card.createDiv('grove-shelf-cover')
 		const media = coverWrap.createDiv('grove-shelf-cover-media')
-		this.#fillCover(media, plugin.shelfCache.coverDataUrl(entry?.cover), title)
+		const coverUrl = plugin.shelfCache.coverDataUrl(entry?.cover)
+		this.#fillCover(media, coverUrl, title)
+		// 缓存未命中：先显示占位，后台读完封面后按文件名补画这张卡
+		if (!coverUrl && entry?.cover) this.#waitForCover(entry.cover, media)
 
 		// 封面底部进度条：扫视时比读百分比快
 		const fraction = info?.fraction
@@ -1177,6 +1209,28 @@ export class BookshelfView extends ItemView {
 			img.draggable = false
 		} else {
 			container.createDiv('grove-shelf-cover-empty').setText(truncate(title, 24))
+		}
+	}
+
+	#waitForCover(filename: string, media: HTMLElement): void {
+		let set = this.coverWaiters.get(filename)
+		if (!set) {
+			set = new Set()
+			this.coverWaiters.set(filename, set)
+		}
+		set.add(media)
+	}
+
+	/** 封面后台读完：补画当时还是占位的卡片；失败就丢掉等待者 */
+	#onCoverLoaded(filename: string, url: string | null): void {
+		const waiting = this.coverWaiters.get(filename)
+		if (!waiting) return
+		this.coverWaiters.delete(filename)
+		if (!url) return
+		for (const media of waiting) {
+			if (!media.isConnected) continue
+			const card = media.closest('.grove-shelf-card') as HTMLElement | null
+			this.#fillCover(media, url, card?.dataset.title ?? '')
 		}
 	}
 
