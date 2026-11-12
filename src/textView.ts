@@ -10,6 +10,7 @@ import {
 	colorCss,
 } from './types'
 import { renderAppearancePanel } from './appearancePanel'
+import { JumpReturnBar } from './navReturn'
 import { CommentModal, ConfirmModal } from './modals'
 import { closeAnnMenu, showAnnMenu } from './annMenu'
 import { AiPanel } from './aiPanel'
@@ -60,6 +61,8 @@ export class TextView extends ItemView {
 	private pageStarts: number[] = [0]
 	private chapters: ChapterMark[] = []
 	private page = 0
+	/** 跳转后的「返回原位置」浮条 */
+	private jumpReturn = new JumpReturnBar(() => this.readerEl ?? null)
 	private encoding = 'auto'
 	private detected = ''
 	private warning: string | undefined
@@ -1211,7 +1214,23 @@ export class TextView extends ItemView {
 	}
 
 	/** 跳到指定字符偏移（目录、进度条、回跳链接） */
-	#jumpToOffset(offset: number, flashId?: string, alignTop = true): void {
+	/**
+	 * 明确跳转（目录 / 搜索命中 / 批注 / 进度滑杆）：跳完在左下角留「返回原位置」。
+	 * 翻页与滚动不走这里，否则每翻一屏都挂一条提示。
+	 */
+	#jumpToOffset(offset: number, flashId?: string, alignTop = true, remember = true): void {
+		const fromOffset = remember ? this.#currentOffset() : 0
+		this.#applyJump(offset, flashId, alignTop)
+		// 同一个位置附近就不必提示（比如点目录里当前所在的章）
+		if (!remember || Math.abs(fromOffset - offset) < 50) return
+		const idx = this.#sectionIndexOf(fromOffset)
+		this.jumpReturn.show({
+			label: idx >= 0 ? (this.chapters[idx]?.title?.trim() ?? '') : '',
+			back: () => this.#jumpToOffset(fromOffset, undefined, false),
+		})
+	}
+
+	#applyJump(offset: number, flashId?: string, alignTop = true): void {
 		this.alignToColumnTop = alignTop
 		const page = this.#pageOfOffset(offset)
 		this.flashAnnId = flashId ?? null

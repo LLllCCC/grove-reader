@@ -10,6 +10,7 @@ import {
 	colorCss,
 } from './types'
 import { renderAppearancePanel } from './appearancePanel'
+import { JumpReturnBar } from './navReturn'
 import { CommentModal, ConfirmModal } from './modals'
 import { AiPanel } from './aiPanel'
 import { Overlayer } from '../lib/foliate-js/overlayer.js'
@@ -121,7 +122,7 @@ export class ReaderView extends ItemView {
 	private popupTimer: number | null = null
 	private popupCloser: ((e: MouseEvent) => void) | null = null
 	/** 跳转后的「返回原位置」浮条 */
-	private jumpReturnEl: HTMLElement | null = null
+	private jumpReturn = new JumpReturnBar(() => this.readerEl ?? null)
 	private aiPanel = new AiPanel()
 	/** spine 索引 → 该节里最具体的目录项（同文件下「第X章」优先于「第X部分」） */
 	private tocBySection = new Map<number, { label: string; depth: number }>()
@@ -1601,7 +1602,6 @@ export class ReaderView extends ItemView {
 
 	/** 跳转后在左下角留一条「返回原位置」，可以一直挂着，也能关掉 */
 	#showJumpReturn(fromCfi: string): void {
-		this.#hideJumpReturn()
 		this.aiPanel.hide()
 		let fromLabel = ''
 		try {
@@ -1610,26 +1610,17 @@ export class ReaderView extends ItemView {
 		} catch {
 			fromLabel = ''
 		}
-		const bar = this.readerEl.createDiv('grove-jump-return')
-		const icon = bar.createSpan('grove-jump-return-icon')
-		setIcon(icon, 'corner-up-left')
-		bar.createSpan('grove-jump-return-text').setText(fromLabel ? `从「${fromLabel}」跳过来` : '已跳转')
-		const back = bar.createEl('button', { cls: 'grove-jump-return-btn', text: '返回' })
-		back.addEventListener('click', () => {
-			this.#hideJumpReturn()
-		this.aiPanel.hide()
-			void this.#jumpToCfi(fromCfi, false)
+		this.jumpReturn.show({
+			label: fromLabel,
+			back: () => {
+				this.aiPanel.hide()
+				void this.#jumpToCfi(fromCfi, false)
+			},
 		})
-		const close = bar.createEl('button', { cls: 'grove-jump-return-close' })
-		setIcon(close, 'x')
-		close.title = '关闭'
-		close.addEventListener('click', () => this.#hideJumpReturn())
-		this.jumpReturnEl = bar
 	}
 
 	#hideJumpReturn(): void {
-		this.jumpReturnEl?.remove()
-		this.jumpReturnEl = null
+		this.jumpReturn.hide()
 	}
 
 	jumpTo(cfi: string): void {

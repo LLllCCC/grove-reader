@@ -5,6 +5,7 @@ import type { PDFDocumentProxy, PDFWorker } from 'pdfjs-dist'
 import type GroveReaderPlugin from './main'
 import { Annotation, BookData, HIGHLIGHT_COLORS, VIEW_TYPE_GROVE_PDF, colorCss } from './types'
 import { CommentModal, ConfirmModal } from './modals'
+import { JumpReturnBar } from './navReturn'
 import { basenameOf, isAbsolutePath, normalizeSelectionText, randomId, truncate } from './util'
 import { joinPath } from './platformIO'
 
@@ -148,6 +149,8 @@ export class PdfView extends ItemView {
 	private scale = 1
 	private zoom = 1
 	private currentPage = 1
+	/** 跳转后的「返回原位置」浮条（挂 contentEl：pagesEl 是滚动容器，绝对定位会跟着页面滚走） */
+	private jumpReturn = new JumpReturnBar(() => this.contentEl ?? null)
 	private pages = new Map<number, PageEntry>()
 	private renderedPages = new Set<number>()
 	private renderingPages = new Set<number>()
@@ -303,7 +306,7 @@ export class PdfView extends ItemView {
 		this.tocSelect.addEventListener('change', () => {
 			const v = this.tocSelect.value
 			const n = Number.parseInt(v, 10)
-			if (Number.isFinite(n)) this.#scrollToPage(n)
+			if (Number.isFinite(n)) this.#jumpToPageWithReturn(n)
 		})
 
 		toolbar.createDiv('grove-sep')
@@ -599,7 +602,8 @@ export class PdfView extends ItemView {
 			if (this.pendingCfi) {
 				const c = this.pendingCfi
 				this.pendingCfi = null
-				this.#jumpToCfi(c)
+				// 从笔记链接进来：这是本视图的初始位置，没有「上一处」可回
+				this.#jumpToCfi(c, false)
 			}
 			// 换书时重置搜索状态，恢复本书的记忆筛选
 			this.searchTaskId++
@@ -1142,9 +1146,26 @@ export class PdfView extends ItemView {
 		el.addClass('grove-ann-revealed')
 	}
 
-	#jumpToCfi(cfi: string): void {
+	#jumpToCfi(cfi: string, remember = true): void {
 		const m = /^page:(\d+)$/.exec(cfi.trim())
-		if (m) this.#scrollToPage(Number.parseInt(m[1], 10))
+		if (!m) return
+		const page = Number.parseInt(m[1], 10)
+		if (!remember) {
+			this.#scrollToPage(page)
+			return
+		}
+		this.#jumpToPageWithReturn(page)
+	}
+
+	/** 明确跳页（批注 / 目录）：跳完在左下角留「返回原位置」。翻页按钮不走这里 */
+	#jumpToPageWithReturn(page: number): void {
+		const from = this.currentPage
+		this.#scrollToPage(page)
+		if (from === page) return
+		this.jumpReturn.show({
+			label: `第 ${from} 页`,
+			back: () => this.#scrollToPage(from),
+		})
 	}
 
 	/** 批注被外部改动（从笔记回写）后刷新侧栏 */
