@@ -391,6 +391,10 @@ export class PdfView extends ItemView {
 		const sideHead = this.sidebarEl.createDiv('grove-sidebar-head')
 		this.annCountEl = sideHead.createSpan('grove-ann-count')
 		this.annCountEl.setText('0 个批注')
+		// 与 EPUB / TXT 对齐：手机端批注栏是覆盖式抽屉，必须有一个明确的退出按钮
+		const closeSidebar = sideHead.createEl('button', { cls: 'clickable-icon grove-sidebar-close', attr: { 'aria-label': '关闭批注栏', title: '关闭批注栏' } })
+		setIcon(closeSidebar, 'x')
+		closeSidebar.addEventListener('click', () => this.sidebarEl.classList.add('grove-hidden'))
 
 		// 全文搜索折叠区，与 EPUB 阅读器使用相同的侧栏结构。
 		this.fullTextSearchEl = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })

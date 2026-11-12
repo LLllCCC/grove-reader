@@ -3041,6 +3041,42 @@ body.is-mobile .grove-appear-panel {
 	align-self: center;
 }
 
+/* 移动端：批注侧栏改为覆盖式抽屉。
+   手机可用宽度约 400dp，侧栏固定 300px 会把正文压到 37%（实测 PDF 渲染后字小到不可读）。
+   这里让它脱离 flex 流、贴右覆盖，开合完全不影响正文排版；桌面仍是并排布局。 */
+body.is-mobile .grove-body {
+	position: relative;
+}
+
+body.is-mobile .grove-sidebar {
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	width: min(88vw, 380px);
+	z-index: 30;
+	background: var(--background-primary);
+	box-shadow: -12px 0 28px -14px rgba(0, 0, 0, 0.45);
+	animation: grove-sidebar-slide-in 0.16s ease-out;
+}
+
+@keyframes grove-sidebar-slide-in {
+	from {
+		transform: translateX(18px);
+		opacity: 0;
+	}
+	to {
+		transform: none;
+		opacity: 1;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	body.is-mobile .grove-sidebar {
+		animation: none;
+	}
+}
+
 body.is-mobile .grove-page-btns {
 	display: none;
 }

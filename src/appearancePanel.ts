@@ -123,8 +123,10 @@ export function renderAppearancePanel(panel: HTMLElement, host: AppearancePanelH
 			step: 0.1,
 			fmt: v => (v <= 0 ? '跟随书籍' : `${v.toFixed(1)}em`),
 		})
+		// 版心宽只有 EPUB 能落地：它对应 foliate 的 max-inline-size。
+		// TXT 是自研分栏分页，版心就是屏幕宽度，这个值读不到，渲染出来就是死控件。
+		sliders.push({ label: '版心宽', key: 'maxInlineSize', min: 480, max: 1200, step: 20, fmt: v => `${Math.round(v)}px` })
 	}
-	sliders.push({ label: '版心宽', key: 'maxInlineSize', min: 480, max: 1200, step: 20, fmt: v => `${Math.round(v)}px` })
 
 	for (const item of sliders) {
 		const row = panel.createDiv('grove-appear-row')
