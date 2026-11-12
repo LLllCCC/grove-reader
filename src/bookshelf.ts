@@ -15,6 +15,9 @@ export const VIEW_TYPE_GROVE_BOOKSHELF = 'grove-bookshelf-view'
 const MAX_CACHED_COVERS = 96
 const MAX_CACHED_COVER_CHARS = 24_000_000
 
+/** PDF 封面解析版本：2 起手机端也解析首页（旧缓存靠这个字段触发一次重试） */
+const PDF_COVER_VERSION = 2
+
 const IMAGE_REQUEST_UA =
 	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 
@@ -93,6 +96,8 @@ export interface ShelfEntry {
 	/** 首次入库时间（区别于文件自身的 mtime） */
 	addedAt?: number
 	failed?: boolean
+	/** PDF 封面解析版本：2 起手机端也会解析首页。旧条目没有该字段 → 手机上重试一次 */
+	coverVersion?: number
 }
 
 interface ShelfTitleParts {
@@ -1238,7 +1243,10 @@ export class BookshelfView extends ItemView {
 		const ext = (path.split('.').pop() ?? '').toLowerCase()
 		// 缺 publisher 字段的旧电子书缓存视为不完整：下次刷新重解析补一次
 		const needsPublisher = isReaderExt(ext) && ext !== 'pdf' && existing?.publisher === undefined
-		if (!force && existing && existing.mtime === mtime && (existing.cover || existing.failed) && !needsPublisher) return
+		// PDF 封面解析升级：手机端从「一律跳过」改成能解析首页，老缓存里的
+		// failed 标记要继续有效就得靠版本号区分，否则用户升级后永远看不到封面
+		const needsPdfCover = ext === 'pdf' && Platform.isMobile && existing?.coverVersion !== PDF_COVER_VERSION
+		if (!force && existing && existing.mtime === mtime && (existing.cover || existing.failed) && !needsPublisher && !needsPdfCover) return
 
 		// PDF：渲染首页为封面 + 读取元数据标题（比文件名干净）
 		if (ext === 'pdf') {
@@ -1247,13 +1255,17 @@ export class BookshelfView extends ItemView {
 			let coverName: string | undefined
 			// 旧版缓存条目可能没有封面也没有 failed 标记（阶段一只存了文件名），
 			// 这种情况也要触发解析补封面
-			if (!existing || force || existing.mtime !== mtime || (!existing.cover && !existing.failed)) {
+			if (!existing || force || existing.mtime !== mtime || (!existing.cover && !existing.failed) || needsPdfCover) {
 				try {
-					// 手机端不解析 PDF：pdfjs 与库外读文件都依赖桌面能力
-					if (Platform.isMobile) throw new Error('mobile: skip pdf shelf info')
+					// 手机端也能解析（worker 走插件级 Blob URL、字节走 PlatformIO），
+					// 但要整本读进内存：超过 32MB 直接跳过，卡片退回通用图标，避免 OOM
+					const mb = (size ?? 0) / (1024 * 1024)
+					if (Platform.isMobile && mb > 32) {
+						throw new Error(`mobile: pdf ${Math.round(mb)}MB 超过封面解析上限（32MB）`)
+					}
 					const bytes = await plugin.readBookBytes(path)
 					const { readPdfShelfInfo } = await import('./pdfThumbnail')
-					const info = await readPdfShelfInfo(bytes, 300, rel => plugin.pdfjsAssetUrl(rel))
+					const info = await readPdfShelfInfo(bytes, 300, rel => plugin.pdfjsAssetUrl(rel), () => plugin.resolvePdfWorkerSrc())
 					if (info.title) title = cleanBookTitle(stripNumericTitlePrefix(info.title))
 					if (info.author) author = info.author
 					if (existing?.customCover && existing.cover && !force) {
@@ -1272,10 +1284,10 @@ export class BookshelfView extends ItemView {
 				if (!force && existing?.manualMeta) {
 					title = existing.title ?? title
 					author = existing.author ?? author
-					cache.set(path, { ...existing, cover: coverName, mtime, size, addedAt, failed: !coverName })
+					cache.set(path, { ...existing, cover: coverName, mtime, size, addedAt, failed: !coverName, coverVersion: PDF_COVER_VERSION })
 				} else {
 					title = stripTitleAuthor(title, author ?? '')
-					cache.set(path, { title, author, cover: coverName, customCover: existing?.customCover, mtime, size, addedAt, failed: !coverName })
+					cache.set(path, { title, author, cover: coverName, customCover: existing?.customCover, mtime, size, addedAt, failed: !coverName, coverVersion: PDF_COVER_VERSION })
 				}
 			} else {
 				title = existing.title ?? title

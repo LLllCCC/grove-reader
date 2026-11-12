@@ -39,15 +39,19 @@ export interface PdfShelfInfo {
  * 打开 PDF 并提取书架所需信息：首页缩略图 + 元数据标题/作者。
  * 任何一步失败都不抛出——cover 为 null、title/author 缺省，由调用方兜底。
  */
-export async function readPdfShelfInfo(
+async function doReadPdfShelfInfo(
 	bytes: ArrayBuffer,
 	targetWidth: number,
 	assetUrlGetter: AssetUrlGetter | null,
+	resolveWorkerSrc?: () => Promise<string | null>,
 ): Promise<PdfShelfInfo> {
 	let worker: InstanceType<typeof pdfjsLib.PDFWorker> | null = null
 	let doc: ThumbDoc | null = null
 	try {
-		const workerSrc = assetUrlGetter?.('pdf.worker.mjs')
+		// 手机端资源路径是 /storage/...，必须由插件转成 Blob URL
+		const workerSrc = resolveWorkerSrc
+			? await resolveWorkerSrc()
+			: assetUrlGetter?.('pdf.worker.mjs')
 		if (workerSrc) { (pdfjsLib.GlobalWorkerOptions as unknown as { workerSrc: string }).workerSrc = workerSrc }
 		worker = new pdfjsLib.PDFWorker()
 		await worker.promise
@@ -103,4 +107,24 @@ export async function readPdfShelfInfo(
 			// ignore
 		}
 	}
+}
+
+/**
+ * 串行排队：手机端没有 range 读取，整本 PDF 进内存，
+ * 书架同时解析多本会把峰值叠上去（封面预热本来就是并发 2）。
+ */
+let queue: Promise<unknown> = Promise.resolve()
+
+export function readPdfShelfInfo(
+	bytes: ArrayBuffer,
+	targetWidth: number,
+	assetUrlGetter: AssetUrlGetter | null,
+	resolveWorkerSrc?: () => Promise<string | null>,
+): Promise<PdfShelfInfo> {
+	const task = queue.then(
+		() => doReadPdfShelfInfo(bytes, targetWidth, assetUrlGetter, resolveWorkerSrc),
+		() => doReadPdfShelfInfo(bytes, targetWidth, assetUrlGetter, resolveWorkerSrc),
+	)
+	queue = task.catch(() => undefined)
+	return task
 }

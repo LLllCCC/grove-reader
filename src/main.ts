@@ -214,6 +214,10 @@ export default class GroveReaderPlugin extends Plugin {
 		this.oplog?.saveNow()
 		void this.oplog?.flush()
 		void this.debugLog?.flush()
+		if (this.pdfWorkerBlobUrl) {
+			URL.revokeObjectURL(this.pdfWorkerBlobUrl)
+			this.pdfWorkerBlobUrl = null
+		}
 	}
 
 	/** 当前应使用的图标 id（original 或无效值时回退到 Obsidian 原生 library） */
@@ -833,6 +837,27 @@ export default class GroveReaderPlugin extends Plugin {
 			return base
 		} catch {
 			return null
+		}
+	}
+
+	/** 手机端 getResourcePath 给的是 /storage/... 文件路径，Worker 加载不了，要读成 Blob URL。
+	 *  插件级缓存一份：PDF 阅读视图与书架封面解析共用，卸载时统一释放。
+	 *  （视图关闭时不要 revoke，否则另一个视图/书架再要就拿到失效 URL） */
+	private pdfWorkerBlobUrl: string | null = null
+
+	async resolvePdfWorkerSrc(): Promise<string | null> {
+		const direct = this.pdfjsAssetUrl('pdf.worker.mjs')
+		if (!this.isMobile) return direct
+		if (this.pdfWorkerBlobUrl) return this.pdfWorkerBlobUrl
+		const dir = this.manifest.dir
+		if (!dir) return direct
+		try {
+			const buf = await this.app.vault.adapter.readBinary(`${dir}/pdfjs/pdf.worker.mjs`)
+			this.pdfWorkerBlobUrl = URL.createObjectURL(new Blob([buf], { type: 'text/javascript' }))
+			return this.pdfWorkerBlobUrl
+		} catch (e) {
+			console.warn('[Grove Reader] 读取 pdf.worker 失败，退回资源路径', e)
+			return direct
 		}
 	}
 

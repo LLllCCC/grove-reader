@@ -139,8 +139,6 @@ export class PdfView extends ItemView {
 
 	private pdfDoc: PdfDocProxy | null = null
 	private pdfWorker: PDFWorker | null = null
-	/** 手机端用 Blob URL 加载 pdf.worker，关闭时需要释放 */
-	private workerBlobUrl: string | null = null
 	private pdfLoadingTask: ReturnType<typeof pdfjsLib.getDocument> | null = null
 	private pdfRangeTransport: PdfRangeTransport | null = null
 	private data: BookData | null = null
@@ -679,27 +677,12 @@ export class PdfView extends ItemView {
 				// ignore
 			}
 		}
-		if (this.workerBlobUrl) {
-			URL.revokeObjectURL(this.workerBlobUrl)
-			this.workerBlobUrl = null
-		}
 	}
 
-	/** 手机端 resourcePath 是 /storage/... 文件路径，Worker 加载不了；把 worker 读成 Blob URL 再用 */
+	/** 手机端 resourcePath 是 /storage/... 文件路径，Worker 加载不了；由插件统一读成 Blob URL
+	 *  （同一份 Blob 也被书架 PDF 封面解析复用，不要在视图关闭时释放） */
 	async #resolveWorkerSrc(): Promise<string | null> {
-		const direct = this.plugin.pdfjsAssetUrl('pdf.worker.mjs')
-		if (!this.plugin.isMobile) return direct
-		const dir = this.plugin.manifest.dir
-		if (!dir) return direct
-		try {
-			const buf = await this.app.vault.adapter.readBinary(`${dir}/pdfjs/pdf.worker.mjs`)
-			if (this.workerBlobUrl) URL.revokeObjectURL(this.workerBlobUrl)
-			this.workerBlobUrl = URL.createObjectURL(new Blob([buf], { type: 'text/javascript' }))
-			return this.workerBlobUrl
-		} catch (e) {
-			console.warn('[Grove Reader] 读取 pdf.worker 失败，退回资源路径', e)
-			return direct
-		}
+		return this.plugin.resolvePdfWorkerSrc()
 	}
 
 	#updateHeaderTitle(): void {
