@@ -16,6 +16,7 @@ import { buildHealthReport, healthCleanupCount } from '../src/health'
 import { checkMigrateTarget, exportDataBackup, migrateDataFolder } from '../src/backup'
 import { appendCards, buildCardText, emptyCanvas, parseCanvas, serializeCanvas, shortTitle } from '../src/canvas'
 import { buildSubpath, parseGroveHref, parseSubpath, snippetOf, wikilinkFor } from '../src/wikilink'
+import { markupColorCss, markupOpacity, markupRects, markupSubtype } from '../src/pdfAnnots'
 
 async function main(): Promise<void> {
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-data-'))
@@ -635,6 +636,44 @@ assert.equal(await storeDedupe.reloadFromDisk(bookIdFor('Books/x.epub')), true, 
 		bookmarks: [{ id: 'p1', cfi: 'page:12', label: '第 12 页', createdAt: 1 }],
 	}, 'pid', null)
 	assert.ok(pdfNote.includes('- 第 12 页'), 'PDF 书签应写页码')
+}
+
+// 36. PDF 自带批注：quadPoints / Rect 换算成相对矩形，颜色与类型过滤
+{
+	const flip = (x: number, y: number): number[] => [x, 800 - y]
+	const quad = [60, 720, 300, 720, 60, 700, 300, 700]
+	const rects = markupRects(
+		{ subtype: 'Highlight', rect: [60, 700, 300, 720], quadPoints: quad, color: [255, 235, 51], opacity: 0.5 },
+		600,
+		800,
+		flip,
+	)
+	assert.equal(rects.length, 1)
+	assert.ok(Math.abs(rects[0].l - 0.1) < 1e-9)
+	assert.ok(Math.abs(rects[0].t - 0.1) < 1e-9)
+	assert.ok(Math.abs(rects[0].w - 0.4) < 1e-9)
+	assert.ok(Math.abs(rects[0].h - 0.025) < 1e-9)
+	// 跨行高亮：16 个数 → 两个矩形
+	const two = markupRects(
+		{ subtype: 'Highlight', quadPoints: [...quad, 60, 680, 300, 680, 60, 660, 300, 660] },
+		600,
+		800,
+		flip,
+	)
+	assert.equal(two.length, 2)
+	// 没有 quadPoints 就退回 Rect
+	const fromRect = markupRects({ subtype: 'Underline', rect: [60, 700, 300, 720] }, 600, 800, flip)
+	assert.equal(fromRect.length, 1)
+	assert.ok(Math.abs(fromRect[0].h - 0.025) < 1e-9)
+	// 便签、链接不参与渲染
+	assert.equal(markupSubtype({ subtype: 'Text' }), null)
+	assert.equal(markupSubtype({ subtype: 'Link' }), null)
+	assert.equal(markupSubtype({ subtype: 'StrikeOut' }), 'strikeout')
+	// 颜色：0–255 RGB；缺省黄色；透明度夹在 0.15–0.7
+	assert.equal(markupColorCss({ color: new Uint8ClampedArray([255, 235, 51]) }), 'rgb(255, 235, 51)')
+	assert.equal(markupColorCss({ color: null }), 'rgb(255, 214, 10)')
+	assert.equal(markupOpacity({ opacity: 1 }), 0.7)
+	assert.equal(markupOpacity({}), 0.45)
 }
 
 console.log('SMOKE OK')

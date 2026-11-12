@@ -1528,6 +1528,19 @@ body.is-mobile .grove-appear-panel {
 	background: rgba(59, 130, 246, 0.35);
 }
 
+.grove-pdf-annlayer {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+
+/* PDF 文件里自带的批注（Acrobat/Preview 画的）：只读，不挡划选 */
+.grove-pdf-ann {
+	position: absolute;
+	border-radius: 2px;
+	mix-blend-mode: multiply;
+}
+
 .grove-pdf-hllayer {
 	position: absolute;
 	inset: 0;

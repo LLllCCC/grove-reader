@@ -11,6 +11,7 @@ import { createCitationSection, type CitationSectionHandle } from './backlinks'
 import { basenameOf, isAbsolutePath, normalizeSelectionText, pageFromFraction, randomId, truncate } from './util'
 import { joinPath } from './platformIO'
 import type { GroveLinkTarget } from './wikilink'
+import { markupColorCss, markupOpacity, markupRects, markupSubtype, type PdfMarkupAnnotation } from './pdfAnnots'
 
 /** 常量定义在 types.ts（main.ts 不 import 本模块也要能判断 PDF 视图），这里保持原导出名 */
 export { VIEW_TYPE_GROVE_PDF }
@@ -25,6 +26,7 @@ interface PdfViewport {
 	height: number
 	scale: number
 	rotation: number
+	convertToViewportPoint(x: number, y: number): number[]
 }
 
 interface PdfPageProxy {
@@ -32,6 +34,8 @@ interface PdfPageProxy {
 	render(params: { canvasContext: CanvasRenderingContext2D; viewport: PdfViewport }): { promise: Promise<void>; cancel(): void }
 	streamTextContent(): unknown
 	getTextContent(): Promise<{ items: Array<{ str?: string }> }>
+	/** PDF 文件里自带的注解（Acrobat/Preview 画的高亮等），只读渲染 */
+	getAnnotations(params?: { intent?: string }): Promise<PdfMarkupAnnotation[]>
 	cleanup(): void
 }
 
@@ -63,6 +67,8 @@ interface PageEntry {
 	wrap: HTMLElement
 	canvas?: HTMLCanvasElement
 	textDiv?: HTMLElement
+	/** PDF 自带批注层：在画布之上、文字层与插件高亮之下 */
+	annDiv?: HTMLElement
 	hlDiv?: HTMLElement
 	vp1w: number
 	vp1h: number
@@ -870,6 +876,7 @@ export class PdfView extends ItemView {
 				// 文字层失败不阻塞阅读，仅影响划选（降级）
 				p.textDone = true
 			}
+			await this.#drawEmbeddedAnnotations(page, p)
 			this.#drawHighlightsOf(p.wrap)
 			this.renderedPages.add(n)
 			this.#bumpIdleCleanup()
@@ -895,6 +902,8 @@ export class PdfView extends ItemView {
 	#ensurePageLayers(p: PageEntry): void {
 		if (p.canvas) return
 		p.canvas = p.wrap.createEl('canvas')
+		// PDF 自带批注在画布之上、文字层之下：不挡划选，也不会盖住插件自己的高亮
+		p.annDiv = p.wrap.createDiv('grove-pdf-annlayer')
 		p.textDiv = p.wrap.createDiv('grove-pdf-textlayer textLayer')
 		p.hlDiv = p.wrap.createDiv('grove-pdf-hllayer')
 	}
@@ -906,6 +915,8 @@ export class PdfView extends ItemView {
 			p.canvas.remove()
 			p.canvas = undefined
 		}
+		p.annDiv?.remove()
+		p.annDiv = undefined
 		p.textDiv?.remove()
 		p.textDiv = undefined
 		p.hlDiv?.remove()
@@ -992,6 +1003,47 @@ export class PdfView extends ItemView {
 		} catch (e) {
 			console.error(`[Grove Reader] 第 ${n} 页文字层创建失败`, e)
 			return false
+		}
+	}
+
+	/**
+	 * 渲染 PDF 文件里自带的批注（只读）。
+	 * 与插件自己的高亮分开：不写数据、不进批注栏、不参与点击命中。
+	 */
+	async #drawEmbeddedAnnotations(page: PdfPageProxy, p: PageEntry): Promise<void> {
+		const div = p.annDiv
+		if (!div) return
+		div.empty()
+		let annots: PdfMarkupAnnotation[]
+		try {
+			annots = await page.getAnnotations({ intent: 'display' })
+		} catch (e) {
+			console.error('[Grove Reader] 读取 PDF 自带批注失败', e)
+			return
+		}
+		if (!annots.length) return
+		const vp = page.getViewport({ scale: 1 })
+		for (const a of annots) {
+			const subtype = markupSubtype(a)
+			if (!subtype) continue
+			const color = markupColorCss(a)
+			for (const r of markupRects(a, vp.width, vp.height, (x, y) => vp.convertToViewportPoint(x, y))) {
+				const el = div.createDiv(`grove-pdf-ann grove-pdf-ann-${subtype}`)
+				el.style.left = `${r.l * 100}%`
+				el.style.top = `${r.t * 100}%`
+				el.style.width = `${r.w * 100}%`
+				el.style.height = `${r.h * 100}%`
+				if (subtype === 'highlight') {
+					el.style.backgroundColor = color
+					el.style.opacity = String(markupOpacity(a))
+				} else if (subtype === 'strikeout') {
+					el.style.borderTop = `2px solid ${color}`
+					el.style.height = '0'
+					el.style.top = `${(r.t + r.h / 2) * 100}%`
+				} else {
+					el.style.borderBottom = subtype === 'squiggly' ? `2px dotted ${color}` : `2px solid ${color}`
+				}
+			}
 		}
 	}
 

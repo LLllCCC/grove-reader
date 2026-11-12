@@ -1532,6 +1532,8 @@ export class TextView extends ItemView {
 		if (immediate) {
 			this.saveTimer = null
 			run()
+			// 批注/书签变更走即时保存，顺带防抖刷新已存在的阅读笔记（与 EPUB/PDF 一致）
+			this.plugin.scheduleNoteRefresh(this)
 		} else {
 			this.saveTimer = window.setTimeout(run, 900)
 		}
