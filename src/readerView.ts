@@ -123,8 +123,9 @@ export class ReaderView extends ItemView {
 	private popup: HTMLElement | null = null
 	private popupTimer: number | null = null
 	private popupCloser: ((e: MouseEvent) => void) | null = null
-	/** 跳转后的「返回原位置」浮条 */
-	private jumpReturn = new JumpReturnBar(() => this.readerEl ?? null)
+	/** 跳转后的「返回原位置」浮条。挂 contentEl 而不是 readerEl：
+	 *  手机上 readerEl 里 foliate 的 iframe 会盖住它，点不到（PDF 侧同理，统一挂根节点） */
+	private jumpReturn = new JumpReturnBar(() => this.contentEl ?? null)
 	private aiPanel = new AiPanel()
 	/** spine 索引 → 该节里最具体的目录项（同文件下「第X章」优先于「第X部分」） */
 	private tocBySection = new Map<number, { label: string; depth: number }>()

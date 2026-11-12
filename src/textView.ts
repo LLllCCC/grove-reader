@@ -61,8 +61,8 @@ export class TextView extends ItemView {
 	private pageStarts: number[] = [0]
 	private chapters: ChapterMark[] = []
 	private page = 0
-	/** 跳转后的「返回原位置」浮条 */
-	private jumpReturn = new JumpReturnBar(() => this.readerEl ?? null)
+	/** 跳转后的「返回原位置」浮条（挂 contentEl：阅读区里的滚动容器会盖住它） */
+	private jumpReturn = new JumpReturnBar(() => this.contentEl ?? null)
 	private encoding = 'auto'
 	private detected = ''
 	private warning: string | undefined
