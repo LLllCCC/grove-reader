@@ -918,6 +918,18 @@ export default class GroveReaderPlugin extends Plugin {
 		}
 	}
 
+	/**
+	 * 读插件自带的 pdfjs 资源（`wasm/` `cmaps/` `standard_fonts/`）。
+	 * 走 vault.adapter，桌面与手机同一条路：不依赖 getResourcePath 给的 URL
+	 * 能不能 fetch（手机上是 /storage/... 读不到），供 pdf.js 的 BinaryDataFactory 调用。
+	 */
+	async readPdfjsAsset(rel: string): Promise<Uint8Array> {
+		const dir = this.manifest.dir || joinPath('.obsidian', 'plugins', this.manifest.id)
+		const path = normalizePath(`${dir}/pdfjs/${rel}`)
+		const buf = await this.app.vault.adapter.readBinary(path)
+		return new Uint8Array(buf)
+	}
+
 	/** 手机端 getResourcePath 给的是 /storage/... 文件路径，Worker 加载不了，要读成 Blob URL。
 	 *  插件级缓存一份：PDF 阅读视图与书架封面解析共用，卸载时统一释放。
 	 *  （视图关闭时不要 revoke，否则另一个视图/书架再要就拿到失效 URL） */

@@ -2,9 +2,23 @@
 // 会先读 %APPDATA%\obsidian\obsidian.json 校验目标是否为当前活动库，
 // 防止再出现「装到旧库快照、界面毫无变化」的事故。
 // 目标库可用环境变量 GROVE_VAULT 覆盖（默认 D:\Obsidian）。
+//
+// 部署闸门：Grove Reader 不做自动更新——只有用户明确说「更新插件」时才部署。
+// 构建（npm run build）随时可以跑，但写进库里必须显式加 --yes（或 GROVE_DEPLOY=1）。
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+const confirmed = process.argv.includes('--yes') || process.env.GROVE_DEPLOY === '1'
+if (!confirmed) {
+	console.error(
+		'✗ 部署已禁用：Grove Reader 只在用户明确要求更新时才写入库内插件目录。\n' +
+		'  · 只想验证代码：npm run build（产物留在仓库，不动库）\n' +
+		'  · 用户已确认更新：npm run deploy -- --yes\n' +
+		'  · 手机端同样只在用户确认后 adb push',
+	)
+	process.exit(1)
+}
 
 // 某些 Node 版本（实测 v25.2.1）的 fs.cpSync({recursive:true}) 有 bug：
 // 只建出空的子目录而不拷文件，导致 wasm/cmaps 解码资源丢失、扫描版 PDF 白屏。

@@ -552,14 +552,24 @@ export class PdfView extends ItemView {
 				const buf = await this.plugin.readBookBytes(target)
 				docParams.data = new Uint8Array(buf)
 			}
-			const wasmUrl = this.plugin.pdfjsAssetUrl('wasm/')
-			// 手机端 getResourcePath 给的是 /storage/... 文件路径，fetch 不到；
-			// 这类可选资源（wasm 解码 / cmaps / 标准字体）先跳过，需要时再走 Blob
-			if (wasmUrl && /^(https?|app|capacitor):/i.test(wasmUrl)) {
-				docParams.wasmUrl = wasmUrl
-				docParams.cMapUrl = this.plugin.pdfjsAssetUrl('cmaps/')
-				docParams.cMapPacked = true
-				docParams.standardFontDataUrl = this.plugin.pdfjsAssetUrl('standard_fonts/')
+			// pdf.js 的 wasm（JBIG2 / JPEG2000 解码）、CMap、标准字体一律从库里读字节。
+			// 原先靠 getResourcePath 拼 URL，桌面给的是 app:// 能 fetch，手机给的是
+			// /storage/... 读不到 —— 于是手机上扫描版 PDF 直接白页。
+			// useWorkerFetch:false 时 worker 会发 FetchBinaryData 回主线程，由这里的
+			// 工厂用 vault.adapter 读，桌面/手机同一条路，不再看 URL 能不能 fetch。
+			// 三个 URL 仍要给（worker 靠它判断「启用 wasm / 去要哪类资源」），
+			// 但只是占位：真正的字节由工厂按 kind 决定目录。
+			const readAsset = (rel: string): Promise<Uint8Array> => this.plugin.readPdfjsAsset(rel)
+			docParams.useWorkerFetch = false
+			docParams.wasmUrl = 'wasm/'
+			docParams.cMapUrl = 'cmaps/'
+			docParams.standardFontDataUrl = 'standard_fonts/'
+			docParams.cMapPacked = true
+			docParams.BinaryDataFactory = class {
+				async fetch({ kind, filename }: { kind: string; filename: string }): Promise<Uint8Array> {
+					const dir = kind === 'wasmUrl' ? 'wasm' : kind === 'standardFontDataUrl' ? 'standard_fonts' : 'cmaps'
+					return readAsset(`${dir}/${filename}`)
+				}
 			}
 			const task = pdfjsLib.getDocument(docParams as Parameters<typeof pdfjsLib.getDocument>[0])
 			this.pdfLoadingTask = task

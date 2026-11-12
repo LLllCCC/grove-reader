@@ -10,6 +10,21 @@
 	display: none;
 }
 
+/*
+ * ---------- 视图头 ----------
+ * 书名已经在标签页和工具栏上，Obsidian 自带的这一行（← → 与 ⋮）只白占高度。
+ * 四个视图统一在这里按 data-type 收掉，别再拆成 :has(.grove-xxx) 分散写：
+ * 2026-09-28 曾用 `.workspace-leaf-content:has(.grove-content) .view-header` 一次盖住
+ * EPUB/TXT/PDF，2026-11-09 那条被单独删掉（auto backup 直接提交了工作区），
+ * 于是 EPUB/TXT 的视图头又冒出来。改这里请保留全部四个选择器。
+ */
+.workspace-leaf-content[data-type="grove-reader-view"] .view-header,
+.workspace-leaf-content[data-type="grove-reader-text"] .view-header,
+.workspace-leaf-content[data-type="grove-pdf-view"] .view-header,
+.workspace-leaf-content[data-type="grove-bookshelf-view"] .view-header {
+	display: none;
+}
+
 /* ---------- 工具栏 ---------- */
 
 .grove-toolbar {
@@ -1009,11 +1024,6 @@ body.is-mobile .grove-appear-panel {
 
 /* ---------- 书架 ---------- */
 
-/* 标题已经在标签页上，整行视图头（含 ⋮）不再占用内容区高度 */
-.workspace-leaf-content[data-type="grove-bookshelf-view"] .view-header {
-	display: none;
-}
-
 .grove-shelf-content {
 	display: flex;
 	flex-direction: column;
@@ -1798,10 +1808,7 @@ body.is-mobile .grove-appear-panel {
 }
 
 /* ---------- 閱讀區空間優化 ---------- */
-.workspace-leaf-content:has(.grove-pdf-content) .view-header {
-	display: none;
-}
-
+/* 视图头在上面「视图头」一节统一隐藏（四个视图共用一条规则） */
 .workspace-leaf-content:has(.grove-content) .view-content,
 .workspace-leaf-content:has(.grove-pdf-content) .view-content {
 	padding: 0;
