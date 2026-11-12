@@ -3083,9 +3083,15 @@ body.is-mobile .grove-page-btns {
 	display: none;
 }
 
-/* 移动端：回跳胶囊同样避开 Obsidian 底部悬浮栏 */
+/* 移动端：Obsidian 底部有一层透明的手势/工具栏容器，会把底部区域的点击吃掉
+   （实测左下角的胶囊整条点不动，点在它身上反而选中了下面的正文）。
+   所以手机上把回跳胶囊挪到工具栏正下方。 */
 body.is-mobile .grove-jump-return {
-	bottom: calc(16px + 64px);
+	top: calc(44px + 10px);
+	bottom: auto;
+	left: 12px;
+	right: 12px;
+	max-width: none;
 }
 
 /* 移动端：工具栏贴顶。收起态是一条 20px 窄条（整条可点，提示「工具栏」）；

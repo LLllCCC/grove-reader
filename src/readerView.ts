@@ -118,6 +118,8 @@ export class ReaderView extends ItemView {
 	private lastSavedCfi: string | null = null
 	private touchStart: { x: number; y: number } | null = null
 	private sliderActive = false
+	/** 拖进度条前的位置，用于松手后显示「返回原位置」 */
+	private sliderFromCfi: string | null = null
 	private popup: HTMLElement | null = null
 	private popupTimer: number | null = null
 	private popupCloser: ((e: MouseEvent) => void) | null = null
@@ -277,16 +279,28 @@ export class ReaderView extends ItemView {
 		this.tocSelect.createEl('option', { value: '', text: '目录' })
 		this.tocSelect.addEventListener('change', () => {
 			const href = this.tocSelect.value
-			if (href && this.foliate) void this.foliate.goTo(href)
+			if (!href || !this.foliate) return
+			// 目录是最常用的跳转，同样要能回到原位置
+			const from = this.data?.lastLocation?.cfi ?? null
+			void Promise.resolve(this.foliate.goTo(href))
+				.then(() => {
+					if (from) this.#showJumpReturn(from)
+				})
+				.catch(() => undefined)
 		})
 
 		const progress = toolbar.createDiv('grove-progress')
 		this.slider = progress.createEl('input', { attr: { type: 'range', min: '0', max: '1', step: '0.001' } })
 		this.slider.addEventListener('pointerdown', () => {
 			this.sliderActive = true
+			// 拖动前的位置留一份：松手时 relocation 已经把它覆盖了
+			this.sliderFromCfi = this.data?.lastLocation?.cfi ?? null
 		})
 		this.slider.addEventListener('pointerup', () => {
 			this.sliderActive = false
+			const from = this.sliderFromCfi
+			this.sliderFromCfi = null
+			if (from) this.#showJumpReturn(from)
 		})
 		this.slider.addEventListener('input', () => {
 			const v = Number.parseFloat(this.slider.value)
@@ -1598,6 +1612,8 @@ export class ReaderView extends ItemView {
 			}
 		}
 		if (before && before !== cfi) this.#showJumpReturn(before)
+		// 手机上批注栏是覆盖式抽屉，会压住返回胶囊；点跳转就是要看原文，顺手收起
+		if (remember && this.plugin.isMobile) this.sidebarEl.classList.add('grove-hidden')
 	}
 
 	/** 跳转后在左下角留一条「返回原位置」，可以一直挂着，也能关掉 */

@@ -1222,12 +1222,18 @@ export class TextView extends ItemView {
 		const fromOffset = remember ? this.#currentOffset() : 0
 		this.#applyJump(offset, flashId, alignTop)
 		// 同一个位置附近就不必提示（比如点目录里当前所在的章）
-		if (!remember || Math.abs(fromOffset - offset) < 50) return
+		if (!remember || Math.abs(fromOffset - offset) < 50) {
+			if (remember && this.plugin.isMobile) this.sidebarEl.classList.add('grove-hidden')
+			return
+		}
 		const idx = this.#sectionIndexOf(fromOffset)
 		this.jumpReturn.show({
 			label: idx >= 0 ? (this.chapters[idx]?.title?.trim() ?? '') : '',
-			back: () => this.#jumpToOffset(fromOffset, undefined, false),
+			// 返回本身不能再记一次，否则刚点完又挂一条（alignTop=false 保持原列位置）
+			back: () => this.#jumpToOffset(fromOffset, undefined, false, false),
 		})
+		// 手机上批注栏是覆盖式抽屉，会压住返回胶囊；点跳转就是要看原文，顺手收起
+		if (this.plugin.isMobile) this.sidebarEl.classList.add('grove-hidden')
 	}
 
 	#applyJump(offset: number, flashId?: string, alignTop = true): void {

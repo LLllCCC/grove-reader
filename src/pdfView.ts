@@ -1161,6 +1161,9 @@ export class PdfView extends ItemView {
 	#jumpToPageWithReturn(page: number): void {
 		const from = this.currentPage
 		this.#scrollToPage(page)
+		// 手机上批注栏是覆盖式抽屉（z-index 70），会把返回胶囊压住；
+		// 而且用户点跳转就是要看原文，顺手收起抽屉
+		if (this.plugin.isMobile) this.sidebarEl.classList.add('grove-hidden')
 		if (from === page) return
 		this.jumpReturn.show({
 			label: `第 ${from} 页`,
