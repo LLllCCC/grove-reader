@@ -139,6 +139,118 @@
 	margin-left: auto;
 }
 
+/* ---------- 侧栏里的书签区（三视图共用） ---------- */
+
+.grove-bm-section {
+	flex: none;
+	padding: 2px 0 6px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.grove-bm-head {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 10px;
+	cursor: pointer;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	user-select: none;
+}
+
+.grove-bm-head:hover {
+	color: var(--text-normal);
+}
+
+.grove-bm-chev {
+	display: flex;
+	flex: none;
+}
+
+.grove-bm-chev .svg-icon {
+	width: 14px;
+	height: 14px;
+}
+
+.grove-bm-title {
+	font-weight: 600;
+}
+
+.grove-bm-count {
+	margin-left: auto;
+	padding: 0 6px;
+	border-radius: 9px;
+	background: var(--background-modifier-border);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-bm-add {
+	flex: none;
+	margin-left: 4px;
+}
+
+.grove-bm-body {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 0 8px;
+	max-height: 240px;
+	overflow-y: auto;
+}
+
+.grove-bm-item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 8px;
+	border-radius: 6px;
+	background: var(--background-secondary);
+}
+
+.grove-bm-main {
+	flex: 1;
+	min-width: 0;
+}
+
+.grove-bm-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+	cursor: pointer;
+}
+
+.grove-bm-label:hover {
+	color: var(--text-accent);
+}
+
+.grove-bm-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.grove-bm-time {
+	flex: none;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+.grove-bm-actions {
+	display: flex;
+	flex: none;
+	gap: 2px;
+}
+
+/* 工具栏书签按钮：当前位置已加书签时高亮 */
+.grove-bookmark-btn.is-active {
+	color: var(--text-accent);
+}
+
 .grove-ann-list {
 	overflow-y: auto;
 	padding: 8px;

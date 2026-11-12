@@ -11,6 +11,7 @@ import {
 } from './types'
 import { renderAppearancePanel } from './appearancePanel'
 import { JumpReturnBar } from './navReturn'
+import { createBookmarkSection, findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
 import { CommentModal, ConfirmModal } from './modals'
 import { closeAnnMenu, showAnnMenu } from './annMenu'
 import { AiPanel } from './aiPanel'
@@ -63,6 +64,9 @@ export class TextView extends ItemView {
 	private page = 0
 	/** 跳转后的「返回原位置」浮条（挂 contentEl：阅读区里的滚动容器会盖住它） */
 	private jumpReturn = new JumpReturnBar(() => this.contentEl ?? null)
+	/** 书签区的渲染句柄与工具栏按钮 */
+	private bookmarkSection: BookmarkSectionHandle | null = null
+	private bookmarkBtnEl: HTMLElement | null = null
 	private encoding = 'auto'
 	private detected = ''
 	private warning: string | undefined
@@ -312,6 +316,14 @@ export class TextView extends ItemView {
 		setIcon(noteBtn, 'file-text')
 		noteBtn.addEventListener('click', () => void this.plugin.generateNoteFor(this))
 
+		const bookmarkBtn = toolbar.createEl('button', {
+			cls: 'clickable-icon grove-icon-btn grove-bookmark-btn',
+			attr: { 'aria-label': '书签：标记 / 取消当前位置' },
+		})
+		setIcon(bookmarkBtn, 'bookmark')
+		bookmarkBtn.addEventListener('click', () => this.#toggleBookmark())
+		this.bookmarkBtnEl = bookmarkBtn
+
 		const sideBtn = toolbar.createEl('button', {
 			cls: 'clickable-icon grove-icon-btn',
 			attr: { 'aria-label': '批注列表' },
@@ -436,6 +448,9 @@ export class TextView extends ItemView {
 		const closeSidebar = sideHead.createEl('button', { cls: 'clickable-icon grove-sidebar-close', attr: { 'aria-label': '关闭批注栏', title: '关闭批注栏' } })
 		setIcon(closeSidebar, 'x')
 		closeSidebar.addEventListener('click', () => this.sidebarEl.classList.add('grove-hidden'))
+
+		// 书签区放在批注区之上：它是导航，不该被下面的搜索/筛选挡住
+		this.bookmarkSection = createBookmarkSection(this.sidebarEl, { onAdd: () => this.#toggleBookmark() })
 
 		// 正文全文搜索：与 EPUB 阅读器同一套 DOM/CSS，收起时不占空间
 		const fullTextSearch = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })
@@ -1211,6 +1226,8 @@ export class TextView extends ItemView {
 			updatedAt: Date.now(),
 		}
 		this.#scheduleSave()
+		// 翻页/滚动后当前位置变了：书签按钮的「已标记」状态要跟着变
+		this.#updateBookmarkBtn()
 	}
 
 	/** 跳到指定字符偏移（目录、进度条、回跳链接） */
@@ -1516,6 +1533,68 @@ export class TextView extends ItemView {
 			this.saveTimer = null
 		}
 		if (this.data) this.plugin.store.save(this.data)
+	}
+
+	// ------------------------------------------------------------------
+	// 书签
+	// ------------------------------------------------------------------
+
+	/** 当前位置的 CFI（书签用；TXT 是 `txt:<字符偏移>`） */
+	#currentCfi(): string | null {
+		const offset = this.#currentOffset()
+		return Number.isFinite(offset) ? `txt:${offset}` : null
+	}
+
+	#toggleBookmark(): void {
+		if (!this.data) {
+			new Notice('Grove Reader：还没加载完，稍等一下再试')
+			return
+		}
+		const cfi = this.#currentCfi()
+		if (!cfi) {
+			new Notice('Grove Reader：还没定位到当前位置')
+			return
+		}
+		const list = this.data.bookmarks ?? (this.data.bookmarks = [])
+		const idx = findBookmarkIndex(list, cfi)
+		if (idx >= 0) {
+			list.splice(idx, 1)
+			new Notice('Grove Reader：已移除当前位置的书签')
+		} else {
+			const offset = this.#currentOffset()
+			const si = this.#sectionIndexOf(offset)
+			const label = si >= 0 ? (this.chapters[si]?.title?.trim() ?? '') : ''
+			list.push(makeBookmark(cfi, label))
+			new Notice('Grove Reader：已加书签')
+		}
+		this.#afterBookmarksChanged()
+	}
+
+	#deleteBookmark(id: string): void {
+		if (!this.data) return
+		this.data.bookmarks = (this.data.bookmarks ?? []).filter(b => b.id !== id)
+		this.#afterBookmarksChanged()
+	}
+
+	#afterBookmarksChanged(): void {
+		this.#renderBookmarks()
+		this.#updateBookmarkBtn()
+		this.#scheduleSave(true)
+	}
+
+	#updateBookmarkBtn(): void {
+		const cfi = this.#currentCfi()
+		const on = !!cfi && findBookmarkIndex(this.data?.bookmarks ?? [], cfi) >= 0
+		this.bookmarkBtnEl?.toggleClass('is-active', on)
+		if (this.bookmarkBtnEl) setIcon(this.bookmarkBtnEl, on ? 'bookmark-check' : 'bookmark')
+	}
+
+	#renderBookmarks(): void {
+		this.bookmarkSection?.update(this.data?.bookmarks ?? [], {
+			onJump: b => this.jumpTo(b.cfi),
+			onDelete: b => this.#deleteBookmark(b.id),
+		})
+		this.#updateBookmarkBtn()
 	}
 
 	// ------------------------------------------------------------------
@@ -1859,6 +1938,7 @@ export class TextView extends ItemView {
 
 	#renderSidebar(): void {
 		if (!this.annListEl) return
+		this.#renderBookmarks()
 		const all = [...(this.data?.annotations ?? [])].sort((x, y) => {
 			const ix = x.sectionIndex ?? Number.MAX_SAFE_INTEGER
 			const iy = y.sectionIndex ?? Number.MAX_SAFE_INTEGER

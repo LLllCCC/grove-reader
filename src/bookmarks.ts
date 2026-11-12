@@ -37,11 +37,19 @@ export interface BookmarkSectionHandle {
 	update(list: Bookmark[], handlers: BookmarkHandlers): void
 }
 
+export interface BookmarkSectionOptions {
+	/** 点标题栏的「＋」时调用：把当前位置加为书签 */
+	onAdd: () => void
+	startCollapsed?: boolean
+}
+
 /**
  * 在侧栏里造一个可折叠的「书签」区。
  * 折叠状态只在内存里（跟着视图实例走），不写进设置——它不是需要记住的偏好。
+ * 标题栏带一个「＋」：手机上工具栏挤，从列表里直接加更顺手。
  */
-export function createBookmarkSection(parent: HTMLElement, startCollapsed = false): BookmarkSectionHandle {
+export function createBookmarkSection(parent: HTMLElement, options: BookmarkSectionOptions): BookmarkSectionHandle {
+	const { onAdd, startCollapsed = false } = options
 	const el = parent.createDiv('grove-bm-section')
 	const head = el.createDiv('grove-bm-head')
 	const chev = head.createSpan('grove-bm-chev')
@@ -49,6 +57,12 @@ export function createBookmarkSection(parent: HTMLElement, startCollapsed = fals
 	head.createSpan('grove-bm-title').setText('书签')
 	const count = head.createSpan('grove-bm-count')
 	count.setText('0')
+	const add = head.createEl('button', { cls: 'clickable-icon grove-mini-btn grove-bm-add', attr: { 'aria-label': '把当前位置加为书签' } })
+	setIcon(add, 'plus')
+	add.addEventListener('click', e => {
+		e.stopPropagation()
+		onAdd()
+	})
 	const body = el.createDiv('grove-bm-body')
 	let collapsed = startCollapsed
 	if (collapsed) body.addClass('grove-hidden')

@@ -6,6 +6,7 @@ import type GroveReaderPlugin from './main'
 import { Annotation, BookData, HIGHLIGHT_COLORS, VIEW_TYPE_GROVE_PDF, colorCss } from './types'
 import { CommentModal, ConfirmModal } from './modals'
 import { JumpReturnBar } from './navReturn'
+import { createBookmarkSection, findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
 import { basenameOf, isAbsolutePath, normalizeSelectionText, randomId, truncate } from './util'
 import { joinPath } from './platformIO'
 
@@ -151,6 +152,9 @@ export class PdfView extends ItemView {
 	private currentPage = 1
 	/** 跳转后的「返回原位置」浮条（挂 contentEl：pagesEl 是滚动容器，绝对定位会跟着页面滚走） */
 	private jumpReturn = new JumpReturnBar(() => this.contentEl ?? null)
+	/** 书签区的渲染句柄与工具栏按钮 */
+	private bookmarkSection: BookmarkSectionHandle | null = null
+	private bookmarkBtnEl: HTMLElement | null = null
 	private pages = new Map<number, PageEntry>()
 	private renderedPages = new Set<number>()
 	private renderingPages = new Set<number>()
@@ -325,6 +329,11 @@ export class PdfView extends ItemView {
 		setIcon(noteBtn, 'file-text')
 		noteBtn.addEventListener('click', () => void this.plugin.generateNoteFor(this))
 
+		const bookmarkBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn grove-bookmark-btn', attr: { 'aria-label': '书签：标记 / 取消当前位置' } })
+		setIcon(bookmarkBtn, 'bookmark')
+		bookmarkBtn.addEventListener('click', () => this.#toggleBookmark())
+		this.bookmarkBtnEl = bookmarkBtn
+
 		// grove-pdf-side-btn 供手机端样式把入口提到工具栏最左（内容多，否则要横滑才找得到）
 		const sideBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn grove-pdf-side-btn', attr: { 'aria-label': '批注列表' } })
 		setIcon(sideBtn, 'list')
@@ -397,6 +406,9 @@ export class PdfView extends ItemView {
 		const closeSidebar = sideHead.createEl('button', { cls: 'clickable-icon grove-sidebar-close', attr: { 'aria-label': '关闭批注栏', title: '关闭批注栏' } })
 		setIcon(closeSidebar, 'x')
 		closeSidebar.addEventListener('click', () => this.sidebarEl.classList.add('grove-hidden'))
+
+		// 书签区放在批注区之上：它是导航，不该被下面的搜索/筛选挡住
+		this.bookmarkSection = createBookmarkSection(this.sidebarEl, { onAdd: () => this.#toggleBookmark() })
 
 		// 全文搜索折叠区，与 EPUB 阅读器使用相同的侧栏结构。
 		this.fullTextSearchEl = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })
@@ -1018,6 +1030,8 @@ export class PdfView extends ItemView {
 				}
 				this.#scheduleSave()
 			}
+			// 翻页后当前位置变了：书签按钮的「已标记」状态要跟着变
+			this.#updateBookmarkBtn()
 			this.#bumpIdleCleanup()
 			// 释放远端页面内存：清空画布并调用 page.cleanup() 释放解码后的整页位图
 			//（扫描版每页一张大图，不解清理会累积到 GB 级）
@@ -1169,6 +1183,59 @@ export class PdfView extends ItemView {
 			label: `第 ${from} 页`,
 			back: () => this.#scrollToPage(from),
 		})
+	}
+
+	// ------------------------------------------------------------------
+	// 书签
+	// ------------------------------------------------------------------
+
+	/** 当前位置的 CFI（PDF 是 `page:N`，与批注同一套） */
+	#currentCfi(): string {
+		return `page:${this.currentPage}`
+	}
+
+	#toggleBookmark(): void {
+		if (!this.data) {
+			new Notice('Grove Reader：还没加载完，稍等一下再试')
+			return
+		}
+		const cfi = this.#currentCfi()
+		const list = this.data.bookmarks ?? (this.data.bookmarks = [])
+		const idx = findBookmarkIndex(list, cfi)
+		if (idx >= 0) {
+			list.splice(idx, 1)
+			new Notice('Grove Reader：已移除当前位置的书签')
+		} else {
+			list.push(makeBookmark(cfi, `第 ${this.currentPage} 页`))
+			new Notice('Grove Reader：已加书签')
+		}
+		this.#afterBookmarksChanged()
+	}
+
+	#deleteBookmark(id: string): void {
+		if (!this.data) return
+		this.data.bookmarks = (this.data.bookmarks ?? []).filter(b => b.id !== id)
+		this.#afterBookmarksChanged()
+	}
+
+	#afterBookmarksChanged(): void {
+		this.#renderBookmarks()
+		this.#updateBookmarkBtn()
+		this.#scheduleSave(true)
+	}
+
+	#updateBookmarkBtn(): void {
+		const on = findBookmarkIndex(this.data?.bookmarks ?? [], this.#currentCfi()) >= 0
+		this.bookmarkBtnEl?.toggleClass('is-active', on)
+		if (this.bookmarkBtnEl) setIcon(this.bookmarkBtnEl, on ? 'bookmark-check' : 'bookmark')
+	}
+
+	#renderBookmarks(): void {
+		this.bookmarkSection?.update(this.data?.bookmarks ?? [], {
+			onJump: b => this.#jumpToCfi(b.cfi),
+			onDelete: b => this.#deleteBookmark(b.id),
+		})
+		this.#updateBookmarkBtn()
 	}
 
 	/** 批注被外部改动（从笔记回写）后刷新侧栏 */
@@ -1601,6 +1668,8 @@ export class PdfView extends ItemView {
 	// ------------------------------------------------------------------
 
 	#renderSidebar(): void {
+		// 批注与书签在同一个侧栏里，刷新批注时顺手把书签也刷一次
+		this.#renderBookmarks()
 		const all = [...(this.data?.annotations ?? [])].sort((x, y) =>
 			this.sortMode === 'recent'
 				? y.createdAt - x.createdAt

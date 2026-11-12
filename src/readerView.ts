@@ -380,7 +380,7 @@ export class ReaderView extends ItemView {
 		closeSidebar.addEventListener('click', () => this.sidebarEl.classList.add('grove-hidden'))
 
 		// 书签区放在批注区之上：它是导航，不该被下面的搜索/筛选挡住
-		this.bookmarkSection = createBookmarkSection(this.sidebarEl)
+		this.bookmarkSection = createBookmarkSection(this.sidebarEl, { onAdd: () => this.#toggleBookmark() })
 
 
 		const fullTextSearch = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })
@@ -857,6 +857,8 @@ export class ReaderView extends ItemView {
 				updatedAt: Date.now(),
 			}
 			this.#scheduleSave()
+			// 翻页后当前位置变了：书签按钮的「已标记」状态要跟着变
+			this.#updateBookmarkBtn()
 		}
 	}
 
@@ -1410,6 +1412,8 @@ export class ReaderView extends ItemView {
 	}
 
 	#renderSidebar(): void {
+		// 批注与书签在同一个侧栏里，刷新批注时顺手把书签也刷一次
+		this.#renderBookmarks()
 		const all = [...(this.data?.annotations ?? [])].sort((x, y) => {
 			const ix = x.sectionIndex ?? Number.MAX_SAFE_INTEGER
 			const iy = y.sectionIndex ?? Number.MAX_SAFE_INTEGER
