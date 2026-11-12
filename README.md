@@ -112,18 +112,20 @@ SORT grove_last_read DESC
 ```bash
 npm install
 npm run build     # 类型检查 + 打包 main.js
-npm run smoke     # 数据层冒烟测试（无需 Obsidian）
+npm run smoke     # 数据层冒烟测试 + 样式守卫（无需 Obsidian）
 npm run sample    # 生成示例 EPUB
 npm run dev       # watch 模式
 npm run foliate:check  # 校验内置 foliate-js 与上游基准的差异（见 lib/foliate-js/UPSTREAM.md）
 npm run obsidian:eval "<js>"  # 在运行中的 Obsidian 里执行 JS（需以 --remote-debugging-port=9222 启动）
 ```
 
+**更新纪律**：本插件不做自动更新。`npm run build` 只产出构建物；写入库内插件目录必须 `npm run deploy -- --yes`（或 `GROVE_DEPLOY=1`），手机端同样只在明确要求后 adb push。视图头隐藏等关键样式由 `npm run smoke` 的样式守卫保护，误删选择器会直接构建失败。
+
 ## 已知限制
 
-- 仅桌面端（`isDesktopOnly`）；移动端不加载；
+- 手机端：PDF ≤64MB（整文件读入内存）；扫描版 PDF（JBIG2 / JPEG2000）已支持（wasm 从库内读取）；
 - 批注 JSON → 笔记默认单向；笔记里的改动需用「从笔记同步批注…」手动回写，不会自动删批注；
-- PDF 批注按页码定位：PDF 文件本身被重新编辑（增删页）后，旧批注的页码可能错位；
+- PDF 批注按页码定位：PDF 文件本身被重新编辑（增删页）后，旧批注的页码可能错位（笔记里的双链会按「摘录原文 → 章节 → 百分比」降级兜底）；
 - TXT 批注按「字符偏移」定位：TXT 文件内容被改写（增删字）后旧批注会偏移，换编码阅读不受影响。
 
 ## 本库目录约定
