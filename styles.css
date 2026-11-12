@@ -3054,7 +3054,9 @@ body.is-mobile .grove-sidebar {
 	right: 0;
 	bottom: 0;
 	width: min(88vw, 380px);
-	z-index: 30;
+	/* EPUB / TXT 的工具栏是 absolute 贴顶、z-index 60；抽屉必须压过它，
+	   否则抽屉顶部那行「N 个批注 + 关闭」会被工具栏盖住（PDF 工具栏是 static，不受影响） */
+	z-index: 70;
 	background: var(--background-primary);
 	box-shadow: -12px 0 28px -14px rgba(0, 0, 0, 0.45);
 	animation: grove-sidebar-slide-in 0.16s ease-out;
