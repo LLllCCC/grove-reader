@@ -957,13 +957,20 @@ export default class GroveReaderPlugin extends Plugin {
 			new Notice(`${APP_NAME}：笔记不存在（${row.sourcePath}）`)
 			return
 		}
-		const leaf = this.app.workspace.getLeaf('tab')
-		await leaf.openFile(file)
-		this.activateLeaf(leaf)
+		// 不用 getLeaf('tab') + openFile：工作区里若残留游离叶子（detach 过的），
+		// getLeaf 会把它发回来，openFile 在游离叶子上静默无效。openLinkText 走
+		// Obsidian 自己的解析路径，永远落在真实标签页上。
+		try {
+			await this.app.workspace.openLinkText(file.path, '', false)
+		} catch {
+			new Notice(`${APP_NAME}：打不开笔记（${row.noteTitle}）`)
+			return
+		}
 		const link = row.links[0]
 		if (!link) return
 		try {
-			const view = leaf.view as MarkdownView
+			const view = this.app.workspace.getMostRecentLeaf()?.view as MarkdownView | undefined
+			if (!view?.editor) return
 			const start = view.editor.offsetToPos(link.position.start.offset)
 			const end = view.editor.offsetToPos(link.position.end.offset)
 			view.editor.setCursor(start)
