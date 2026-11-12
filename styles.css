@@ -213,6 +213,26 @@
 	overflow-y: auto;
 }
 
+/* ---------- 引用页签：谁在引用这本书 ---------- */
+
+.grove-cite-section .grove-bm-body {
+	max-height: 300px;
+}
+
+.grove-cite-chapter {
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	color: var(--text-muted);
+	margin: 4px 2px 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.grove-cite-section .grove-bm-text {
+	color: var(--text-faint);
+}
+
 .grove-bm-item {
 	display: flex;
 	align-items: center;

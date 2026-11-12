@@ -29,6 +29,7 @@ import { appendCards, buildCardText, canvasColor, emptyCanvas, parseCanvas, seri
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate, resolveExcerptLinkStyle } from './notes'
 import type { NoteExtraFields } from './notes'
+import { collectExcerptBacklinks, type ExcerptBacklinkRow } from './backlinks'
 import { parseGroveHref } from './wikilink'
 import type { GroveLinkTarget, ParsedGroveLink } from './wikilink'
 import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
@@ -187,6 +188,11 @@ export default class GroveReaderPlugin extends Plugin {
 		// 摘录双链：`[[书.epub#grove-cfi=…|⤴ 回原文]]` 的点击接管。
 		// 捕获阶段先手，阅读视图与 Live Preview 都能拦；只认自家子路径，别的链接一律放行。
 		this.registerDomEvent(document, 'click', ev => this.#onGroveLinkClick(ev), { capture: true })
+		// 笔记里的摘录双链随编辑变化：解析完自动刷新打开中的「引用」页签
+		this.registerEvent(this.app.metadataCache.on('resolved', () => {
+			if (this.backlinkTimer != null) window.clearTimeout(this.backlinkTimer)
+			this.backlinkTimer = window.setTimeout(() => this.refreshCitations(), 1200)
+		}))
 		this.registerEvent(this.app.workspace.on('file-open', file => {
 			this.debug('workspace', 'file-open', file?.path ?? null)
 			const pend = this.#pendingGroveLink
@@ -849,6 +855,9 @@ export default class GroveReaderPlugin extends Plugin {
 	 * 双链点击接管：`[[书.epub#grove-cfi=…|⤴ 回原文]]`。
 	 * 捕获阶段先手（阅读视图与 Live Preview 都能拦），只认自家子路径，别的链接一律放行。
 	 */
+	/** metadataCache 解析完后延迟刷新「引用」页签 */
+	private backlinkTimer: number | null = null
+
 	/** 手机端双链的挂起跳转：等 Obsidian 自己的导航落地（file-open），再换成 Grove 视图 */
 	#pendingGroveLink: { link: ParsedGroveLink; timer: number } | null = null
 
@@ -934,6 +943,44 @@ export default class GroveReaderPlugin extends Plugin {
 			return
 		}
 		await this.openBookByPath(vaultPath, target.cfi, target)
+	}
+
+	/** 这本书被哪些笔记引用（按章节分组），供侧栏「引用」页签使用 */
+	collectExcerptBacklinks(bookPath: string) {
+		return collectExcerptBacklinks(this.app, bookPath)
+	}
+
+	/** 从引用页签跳到笔记里的那条摘录双链：打开笔记并滚到链接位置 */
+	async openCitation(row: ExcerptBacklinkRow): Promise<void> {
+		const file = this.app.vault.getAbstractFileByPath(row.sourcePath)
+		if (!(file instanceof TFile)) {
+			new Notice(`${APP_NAME}：笔记不存在（${row.sourcePath}）`)
+			return
+		}
+		const leaf = this.app.workspace.getLeaf('tab')
+		await leaf.openFile(file)
+		this.activateLeaf(leaf)
+		const link = row.links[0]
+		if (!link) return
+		try {
+			const view = leaf.view as MarkdownView
+			const start = view.editor.offsetToPos(link.position.start.offset)
+			const end = view.editor.offsetToPos(link.position.end.offset)
+			view.editor.setCursor(start)
+			view.editor.scrollIntoView({ from: start, to: end }, true)
+		} catch {
+			// 阅读模式下没有编辑器：只打开笔记，不滚动
+		}
+	}
+
+	/** 让打开中的三个视图刷新「引用」页签（metadataCache 解析完或手动触发） */
+	refreshCitations(): void {
+		for (const type of [VIEW_TYPE_GROVE_READER, VIEW_TYPE_GROVE_TEXT, VIEW_TYPE_GROVE_PDF]) {
+			for (const leaf of this.app.workspace.getLeavesOfType(type)) {
+				const view = leaf.view as { refreshCitations?: () => void }
+				view.refreshCitations?.()
+			}
+		}
 	}
 
 	/** 读书籍字节：优先走库文件，找不到时按本机路径读（库外书籍只有桌面端支持） */

@@ -7,6 +7,7 @@ import { Annotation, BookData, HIGHLIGHT_COLORS, VIEW_TYPE_GROVE_PDF, colorCss }
 import { CommentModal, ConfirmModal } from './modals'
 import { JumpReturnBar } from './navReturn'
 import { createBookmarkSection, findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
+import { createCitationSection, type CitationSectionHandle } from './backlinks'
 import { basenameOf, isAbsolutePath, normalizeSelectionText, pageFromFraction, randomId, truncate } from './util'
 import { joinPath } from './platformIO'
 import type { GroveLinkTarget } from './wikilink'
@@ -157,6 +158,7 @@ export class PdfView extends ItemView {
 	private jumpReturn = new JumpReturnBar(() => this.contentEl ?? null)
 	/** 书签区的渲染句柄与工具栏按钮 */
 	private bookmarkSection: BookmarkSectionHandle | null = null
+	private citationSection: CitationSectionHandle | null = null
 	private bookmarkBtnEl: HTMLElement | null = null
 	private pages = new Map<number, PageEntry>()
 	private renderedPages = new Set<number>()
@@ -413,6 +415,7 @@ export class PdfView extends ItemView {
 
 		// 书签区放在批注区之上：它是导航，不该被下面的搜索/筛选挡住
 		this.bookmarkSection = createBookmarkSection(this.sidebarEl, { onAdd: () => this.#toggleBookmark() })
+		this.citationSection = createCitationSection(this.sidebarEl)
 
 		// 全文搜索折叠区，与 EPUB 阅读器使用相同的侧栏结构。
 		this.fullTextSearchEl = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })
@@ -1256,7 +1259,15 @@ export class PdfView extends ItemView {
 			onDelete: b => this.#deleteBookmark(b.id),
 		})
 		this.#updateBookmarkBtn()
+		this.refreshCitations()
 	}
+	/** 引用页签：这本书被哪些笔记引用（metadataCache 实时解析） */
+	refreshCitations(): void {
+		this.citationSection?.update(this.plugin.collectExcerptBacklinks(this.bookPath), {
+			onJump: row => void this.plugin.openCitation(row),
+		})
+	}
+
 
 	/** 批注被外部改动（从笔记回写）后刷新侧栏 */
 	refreshAnnotations(): void {

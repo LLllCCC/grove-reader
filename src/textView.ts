@@ -12,6 +12,7 @@ import {
 import { renderAppearancePanel } from './appearancePanel'
 import { JumpReturnBar } from './navReturn'
 import { createBookmarkSection, findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
+import { createCitationSection, type CitationSectionHandle } from './backlinks'
 import { CommentModal, ConfirmModal } from './modals'
 import { closeAnnMenu, showAnnMenu } from './annMenu'
 import { AiPanel } from './aiPanel'
@@ -67,6 +68,7 @@ export class TextView extends ItemView {
 	private jumpReturn = new JumpReturnBar(() => this.contentEl ?? null)
 	/** 书签区的渲染句柄与工具栏按钮 */
 	private bookmarkSection: BookmarkSectionHandle | null = null
+	private citationSection: CitationSectionHandle | null = null
 	private bookmarkBtnEl: HTMLElement | null = null
 	private encoding = 'auto'
 	private detected = ''
@@ -455,6 +457,7 @@ export class TextView extends ItemView {
 
 		// 书签区放在批注区之上：它是导航，不该被下面的搜索/筛选挡住
 		this.bookmarkSection = createBookmarkSection(this.sidebarEl, { onAdd: () => this.#toggleBookmark() })
+		this.citationSection = createCitationSection(this.sidebarEl)
 
 		// 正文全文搜索：与 EPUB 阅读器同一套 DOM/CSS，收起时不占空间
 		const fullTextSearch = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })
@@ -1602,7 +1605,15 @@ export class TextView extends ItemView {
 			onDelete: b => this.#deleteBookmark(b.id),
 		})
 		this.#updateBookmarkBtn()
+		this.refreshCitations()
 	}
+	/** 引用页签：这本书被哪些笔记引用（metadataCache 实时解析） */
+	refreshCitations(): void {
+		this.citationSection?.update(this.plugin.collectExcerptBacklinks(this.bookPath), {
+			onJump: row => void this.plugin.openCitation(row),
+		})
+	}
+
 
 	// ------------------------------------------------------------------
 	// 划选与批注

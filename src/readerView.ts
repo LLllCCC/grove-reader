@@ -12,6 +12,7 @@ import {
 import { renderAppearancePanel } from './appearancePanel'
 import { JumpReturnBar } from './navReturn'
 import { createBookmarkSection, findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
+import { createCitationSection, type CitationSectionHandle } from './backlinks'
 import { CommentModal, ConfirmModal } from './modals'
 import { AiPanel } from './aiPanel'
 import { Overlayer } from '../lib/foliate-js/overlayer.js'
@@ -132,6 +133,7 @@ export class ReaderView extends ItemView {
 	private jumpReturn = new JumpReturnBar(() => this.contentEl ?? null)
 	/** 书签区的渲染句柄与工具栏按钮（按钮图标随当前位置是否已加书签变化） */
 	private bookmarkSection: BookmarkSectionHandle | null = null
+	private citationSection: CitationSectionHandle | null = null
 	private bookmarkBtnEl: HTMLElement | null = null
 	private aiPanel = new AiPanel()
 	/** spine 索引 → 该节里最具体的目录项（同文件下「第X章」优先于「第X部分」） */
@@ -385,6 +387,7 @@ export class ReaderView extends ItemView {
 
 		// 书签区放在批注区之上：它是导航，不该被下面的搜索/筛选挡住
 		this.bookmarkSection = createBookmarkSection(this.sidebarEl, { onAdd: () => this.#toggleBookmark() })
+		this.citationSection = createCitationSection(this.sidebarEl)
 
 
 		const fullTextSearch = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })
@@ -1818,7 +1821,15 @@ export class ReaderView extends ItemView {
 			onDelete: b => this.#deleteBookmark(b.id),
 		})
 		this.#updateBookmarkBtn()
+		this.refreshCitations()
 	}
+	/** 引用页签：这本书被哪些笔记引用（metadataCache 实时解析） */
+	refreshCitations(): void {
+		this.citationSection?.update(this.plugin.collectExcerptBacklinks(this.bookPath), {
+			onJump: row => void this.plugin.openCitation(row),
+		})
+	}
+
 
 	jumpTo(cfi: string, fallback?: GroveLinkTarget): void {
 		void this.#jumpToCfi(cfi, true, fallback)
