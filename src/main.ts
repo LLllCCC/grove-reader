@@ -1,4 +1,4 @@
-import { FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, TFile, TFolder, addIcon, normalizePath, setIcon } from 'obsidian'
+import { FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, TFile, TFolder, WorkspaceLeaf, addIcon, normalizePath, setIcon } from 'obsidian'
 import { BookStore } from './store'
 import { ShelfCache } from './bookshelf'
 import { ListsStore } from './lists'
@@ -578,10 +578,23 @@ export default class GroveReaderPlugin extends Plugin {
 	// 打开书籍 / 书架
 	// ------------------------------------------------------------------
 
+	/**
+	 * 把已有标签切到前台。
+	 * 只用 revealLeaf 时它只负责「露出来」（弹窗窗口/折叠侧栏），主区域里不会改激活标签，
+	 * 表现为「点了链接但书在后台打开」。setActiveLeaf 才是真正切前台的那个。
+	 */
+	private activateLeaf(leaf: WorkspaceLeaf): void {
+		try {
+			this.app.workspace.setActiveLeaf(leaf, { focus: true })
+		} catch {
+			this.app.workspace.revealLeaf(leaf)
+		}
+	}
+
 	async openBookshelf(): Promise<void> {
 		const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_BOOKSHELF).first()
 		if (existing) {
-			this.app.workspace.revealLeaf(existing)
+			this.activateLeaf(existing)
 			return
 		}
 		const leaf = this.app.workspace.getLeaf('tab')
@@ -731,7 +744,7 @@ export default class GroveReaderPlugin extends Plugin {
 			.getLeavesOfType(VIEW_TYPE_GROVE_READER)
 			.find(leaf => leaf.view instanceof ReaderView && leaf.view.bookPath === bookPath)
 		if (existing && existing.view instanceof ReaderView) {
-			this.app.workspace.revealLeaf(existing)
+			this.activateLeaf(existing)
 			if (cfi || fallback) existing.view.jumpTo(cfi ?? '', fallback)
 			return
 		}
@@ -750,7 +763,7 @@ export default class GroveReaderPlugin extends Plugin {
 			.getLeavesOfType(VIEW_TYPE_GROVE_TEXT)
 			.find(leaf => leaf.view instanceof TextView && leaf.view.bookPath === bookPath)
 		if (existing && existing.view instanceof TextView) {
-			this.app.workspace.revealLeaf(existing)
+			this.activateLeaf(existing)
 			if (cfi || fallback) existing.view.jumpTo(cfi ?? '', fallback)
 			return
 		}
@@ -769,7 +782,7 @@ export default class GroveReaderPlugin extends Plugin {
 			.getLeavesOfType(VIEW_TYPE_GROVE_PDF)
 			.find(leaf => this.#isPdfView(leaf.view) && leaf.view.bookPath === bookPath)
 		if (existing && this.#isPdfView(existing.view)) {
-			this.app.workspace.revealLeaf(existing)
+			this.activateLeaf(existing)
 			if (cfi || fallback) existing.view.jumpToCfi(cfi ?? '', fallback)
 			return
 		}
@@ -799,7 +812,7 @@ export default class GroveReaderPlugin extends Plugin {
 			.getLeavesOfType('pdf')
 			.find(leaf => (leaf.view as { file?: TFile }).file?.path === f.path)
 		if (existing) {
-			this.app.workspace.revealLeaf(existing)
+			this.activateLeaf(existing)
 			return
 		}
 		const leaf = this.app.workspace.getLeaf('tab')
@@ -1412,7 +1425,7 @@ export default class GroveReaderPlugin extends Plugin {
 			.getLeavesOfType('markdown')
 			.find(l => (l.view as { file?: TFile }).file?.path === target.path)
 		if (openLeaf) {
-			this.app.workspace.revealLeaf(openLeaf)
+			this.activateLeaf(openLeaf)
 			return
 		}
 		const leaf = this.app.workspace.getLeaf('split')
