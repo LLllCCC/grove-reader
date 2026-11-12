@@ -17,6 +17,7 @@ import { closeAnnMenu, showAnnMenu } from './annMenu'
 import { AiPanel } from './aiPanel'
 import { basenameOf, cleanBookTitle, contrastFg, isDarkColor, randomId, truncate } from './util'
 import { decodeTextBuffer, TextViewState, VIEW_TYPE_GROVE_TEXT } from './textCodec'
+import type { GroveLinkTarget } from './wikilink'
 
 export { VIEW_TYPE_GROVE_TEXT } from './textCodec'
 
@@ -73,6 +74,8 @@ export class TextView extends ItemView {
 	private bookTitle = 'TXT'
 	private loadingPath = ''
 	private pendingCfi: string | null = null
+	/** 双链降级信息（摘录前若干字 + 章节名），定位串失效时用 */
+	private pendingFallback: GroveLinkTarget | null = null
 	private lastWheel = 0
 	private touchStart: { x: number; y: number } | null = null
 	/** 按下那一刻是否已经存在文字选区（拖选手柄时抬手选区可能已空，不能单看抬手状态） */
@@ -189,6 +192,7 @@ export class TextView extends ItemView {
 			this.page = page
 		}
 		if (s.cfi) this.pendingCfi = s.cfi
+		if (s.fallback) this.pendingFallback = s.fallback
 		await super.setState(state, result ?? { history: false })
 		if (this.readerEl && this.bookPath) await this.#load()
 	}
@@ -589,13 +593,16 @@ export class TextView extends ItemView {
 
 		let target: number | null = null
 		const jump = this.pendingCfi ? parseTextCfi(this.pendingCfi) : null
-		if (jump) target = jump.start
+		const expected = (this.pendingFallback?.text ?? '').trim()
+		if (jump && this.#offsetMatches(jump.start, expected)) target = jump.start
+		else if (this.pendingFallback) target = this.#fallbackOffset(this.pendingFallback)
 		else if (fraction !== undefined) target = Math.round(fraction * this.#totalChars())
 		else if (this.data?.lastLocation?.cfi) {
 			const last = parseTextCfi(this.data.lastLocation.cfi)
 			if (last) target = last.start
 		}
 		this.pendingCfi = null
+		this.pendingFallback = null
 		this.page = target !== null ? this.#pageOfOffset(target) : 0
 		this.page = Math.max(0, Math.min(this.pages.length - 1, this.page))
 		this.screen = 0
@@ -2070,11 +2077,63 @@ export class TextView extends ItemView {
 	}
 
 	/** 跳转到某条批注：切到它所在的屏并让高亮闪一下 */
-	jumpTo(cfi: string): void {
+	jumpTo(cfi: string, fallback?: GroveLinkTarget): void {
 		const range = parseTextCfi(cfi)
-		if (!range) return
-		const ann = this.data?.annotations.find(a => a.cfi === cfi)
-		this.#jumpToOffset(range.start, ann?.id, false)
+		const ann = cfi ? this.data?.annotations.find(a => a.cfi === cfi) : undefined
+		const expected = (fallback?.text ?? '').trim()
+		// 偏移能解析不代表还在原文那句上：整本文件被替换/重新编码后，偏移会落在别处
+		if (range && this.#offsetMatches(range.start, expected)) {
+			this.#jumpToOffset(range.start, ann?.id, false)
+			return
+		}
+		// 三级降级：摘录原文 → 章节 → 百分比
+		if (fallback) {
+			const offset = this.#fallbackOffset(fallback)
+			if (offset != null) {
+				this.#jumpToOffset(offset, undefined, false)
+				return
+			}
+			new Notice('Grove Reader：找不到原句（文件可能换了版本），先停在当前位置')
+			return
+		}
+		if (range) this.#jumpToOffset(range.start, ann?.id, false)
+	}
+
+	/** 偏移处的内容是否还对得上摘录开头（对不上就走了形，应该降级） */
+	#offsetMatches(offset: number, expected: string): boolean {
+		if (!expected) return true
+		const text = this.#fullText()
+		if (!text || offset < 0 || offset >= text.length) return false
+		const norm = (s: string): string => s.replace(/\s+/g, '')
+		const head = norm(expected).slice(0, 8)
+		if (!head) return true
+		// 原文里的空白/换行与摘录里的不一致，比较前先抹平，窗口给宽一点
+		return norm(text.slice(offset, offset + head.length * 4 + 24)).startsWith(head)
+	}
+
+	/** 三级降级：摘录原文（前 24 字）→ 章节名 → 百分比，返回字符偏移 */
+	#fallbackOffset(fb: GroveLinkTarget): number | null {
+		if (!this.pages.length) return null
+		const q = (fb.text ?? '').trim()
+		if (q) {
+			const { text, fold } = this.#searchHaystack()
+			const at = fold ? text.indexOf(q.toLowerCase()) : text.indexOf(q)
+			if (at >= 0) return at
+		}
+		const norm = (s: string): string => s.replace(/\s+/g, '').trim()
+		const want = norm(fb.chapter ?? '')
+		if (want) {
+			const exact = this.chapters.find(c => norm(c.title) === want)
+			const loose = exact ?? this.chapters.find(c => {
+				const t = norm(c.title)
+				return t.includes(want) || want.includes(t)
+			})
+			if (loose) return loose.offset
+		}
+		if (typeof fb.pct === 'number' && Number.isFinite(fb.pct)) {
+			return Math.round(Math.max(0, Math.min(1, fb.pct)) * this.#totalChars())
+		}
+		return null
 	}
 
 	/** 书架手动编辑信息后同步标题 */

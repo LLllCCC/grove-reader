@@ -313,6 +313,18 @@ export class GroveSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings()
 				}))
 		new Setting(containerEl)
+			.setName('摘录回跳链接样式')
+			.setDesc('双链：笔记里的「⤴ 回原文」写成指向书文件的 [[双链]]，能在图谱和反向链接里看到「哪些笔记引了这本书」，插件关掉时也能打开书；协议链接：旧的 obsidian://grove 写法。改完只影响你手动「生成/更新笔记」的笔记，自动刷新不会悄悄改写旧笔记；想一次性换掉，用命令「刷新全部阅读笔记」')
+			.addDropdown(dropdown =>
+				dropdown
+					.addOption('wikilink', '双链（推荐）')
+					.addOption('protocol', '协议链接（旧）')
+					.setValue(this.plugin.settings.excerptLinkStyle === 'protocol' ? 'protocol' : 'wikilink')
+					.onChange(async value => {
+						this.plugin.settings.excerptLinkStyle = value === 'protocol' ? 'protocol' : 'wikilink'
+						await this.plugin.saveSettings()
+					}))
+		new Setting(containerEl)
 			.setName('笔记文件夹')
 			.setDesc('生成的阅读笔记保存位置（相对库根目录，输入时可从建议中选择；修改后旧笔记会在下次生成时自动移过去）')
 			.addText(text => {

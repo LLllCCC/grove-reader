@@ -340,3 +340,13 @@ export function contrastFg(bg: string): string {
 	return isDarkColor(bg) ? '#c9c9ce' : '#2b2b2b'
 }
 
+
+/**
+ * 进度百分比 → 页码（1 起）。
+ * PDF 换版本后页数会变，`page:N` 失效时按百分比落一页；夹到 1..total，坏数值退到第 1 页。
+ */
+export function pageFromFraction(fraction: number, total: number): number {
+	if (!Number.isFinite(total) || total <= 0) return 1
+	const f = Number.isFinite(fraction) ? Math.max(0, Math.min(1, fraction)) : 0
+	return Math.max(1, Math.min(total, Math.round(f * (total - 1)) + 1))
+}

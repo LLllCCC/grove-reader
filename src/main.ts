@@ -1,4 +1,4 @@
-import { FileSystemAdapter, Notice, Platform, Plugin, TFile, TFolder, addIcon, normalizePath, setIcon } from 'obsidian'
+import { FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, TFile, TFolder, addIcon, normalizePath, setIcon } from 'obsidian'
 import { BookStore } from './store'
 import { ShelfCache } from './bookshelf'
 import { ListsStore } from './lists'
@@ -27,8 +27,10 @@ import type { CanvasExportPayload } from './modals'
 import { applySync, planSync } from './noteSync'
 import { appendCards, buildCardText, canvasColor, emptyCanvas, parseCanvas, serializeCanvas } from './canvas'
 import { GroveSettingTab } from './settings'
-import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate } from './notes'
+import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate, resolveExcerptLinkStyle } from './notes'
 import type { NoteExtraFields } from './notes'
+import { parseGroveHref } from './wikilink'
+import type { GroveLinkTarget, ParsedGroveLink } from './wikilink'
 import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
 import { isReaderExt, isShelfExt } from './types'
 import { usageDocMarkdown, USAGE_DOC_NAME } from './usageDoc'
@@ -182,6 +184,9 @@ export default class GroveReaderPlugin extends Plugin {
 			}
 			void this.openByBookId(params['book'] ?? '', params['cfi'] ?? '')
 		})
+		// 摘录双链：`[[书.epub#grove-cfi=…|⤴ 回原文]]` 的点击接管。
+		// 捕获阶段先手，阅读视图与 Live Preview 都能拦；只认自家子路径，别的链接一律放行。
+		this.registerDomEvent(document, 'click', ev => this.#onGroveLinkClick(ev), { capture: true })
 		// 文件列表里的 TXT 也提供「用 Grove Reader 打开」，自动识别 GBK/GB18030
 		this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
 			if (file instanceof TFile && file.extension.toLowerCase() === 'txt') {
@@ -602,7 +607,8 @@ export default class GroveReaderPlugin extends Plugin {
 		void (async () => {
 			try {
 				const existing = await this.app.vault.read(file)
-				const markdown = await this.#composeNoteMarkdown(data, existing, false)
+				// 这个入口只被用户主动操作调用（清空批注 / 切模板），跟随当前设置
+				const markdown = await this.#composeNoteMarkdown(data, existing, false, true)
 				if (markdown !== existing) await this.app.vault.modify(file, markdown)
 			} catch (e) {
 				console.error('[Grove Reader] 刷新阅读笔记失败', e)
@@ -696,11 +702,11 @@ export default class GroveReaderPlugin extends Plugin {
 		new BookPickerModal(this.app, file => void this.openBook(file)).open()
 	}
 
-	async openBook(file: TFile, cfi?: string): Promise<void> {
-		await this.openBookByPath(file.path, cfi)
+	async openBook(file: TFile, cfi?: string, fallback?: GroveLinkTarget): Promise<void> {
+		await this.openBookByPath(file.path, cfi, fallback)
 	}
 
-	async openBookByPath(bookPath: string, cfi?: string): Promise<void> {
+	async openBookByPath(bookPath: string, cfi?: string, fallback?: GroveLinkTarget): Promise<void> {
 		if (!this.app.vault.getAbstractFileByPath(bookPath) && !this.#fileExistsOnDisk(bookPath)) {
 			new Notice(isAbsolutePath(bookPath) && this.isMobile
 				? `${APP_NAME}：手机端暂不支持打开库外文件：${bookPath}`
@@ -710,11 +716,11 @@ export default class GroveReaderPlugin extends Plugin {
 		const ext = (bookPath.split('.').pop() ?? '').toLowerCase()
 		this.debug('reader', 'open', bookPath)
 		if (ext === 'pdf') {
-			await this.#openPdfBook(bookPath, cfi)
+			await this.#openPdfBook(bookPath, cfi, fallback)
 			return
 		}
 		if (ext === 'txt') {
-			await this.#openTextBook(bookPath, cfi)
+			await this.#openTextBook(bookPath, cfi, fallback)
 			return
 		}
 		if (!isReaderExt(ext)) {
@@ -726,52 +732,52 @@ export default class GroveReaderPlugin extends Plugin {
 			.find(leaf => leaf.view instanceof ReaderView && leaf.view.bookPath === bookPath)
 		if (existing && existing.view instanceof ReaderView) {
 			this.app.workspace.revealLeaf(existing)
-			if (cfi) existing.view.jumpTo(cfi)
+			if (cfi || fallback) existing.view.jumpTo(cfi ?? '', fallback)
 			return
 		}
 		const leaf = this.app.workspace.getLeaf('tab')
 		await leaf.setViewState({
 			type: VIEW_TYPE_GROVE_READER,
 			active: true,
-			state: { bookPath, cfi },
+			state: { bookPath, cfi, fallback },
 		})
 		this.app.workspace.revealLeaf(leaf)
 	}
 
 	/** 在 Grove Reader 内打开 TXT（自动识别 UTF-8 / GB18030 / Big5）；cfi 为批注回跳定位 */
-	async #openTextBook(bookPath: string, cfi?: string): Promise<void> {
+	async #openTextBook(bookPath: string, cfi?: string, fallback?: GroveLinkTarget): Promise<void> {
 		const existing = this.app.workspace
 			.getLeavesOfType(VIEW_TYPE_GROVE_TEXT)
 			.find(leaf => leaf.view instanceof TextView && leaf.view.bookPath === bookPath)
 		if (existing && existing.view instanceof TextView) {
 			this.app.workspace.revealLeaf(existing)
-			if (cfi) existing.view.jumpTo(cfi)
+			if (cfi || fallback) existing.view.jumpTo(cfi ?? '', fallback)
 			return
 		}
 		const leaf = this.app.workspace.getLeaf('tab')
 		await leaf.setViewState({
 			type: VIEW_TYPE_GROVE_TEXT,
 			active: true,
-			state: { bookPath, cfi },
+			state: { bookPath, cfi, fallback },
 		})
 		this.app.workspace.revealLeaf(leaf)
 	}
 
 	/** 在 Grove Reader 内打开 PDF（专用视图：渲染 + 文字层划选批注） */
-	async #openPdfBook(bookPath: string, cfi?: string): Promise<void> {
+	async #openPdfBook(bookPath: string, cfi?: string, fallback?: GroveLinkTarget): Promise<void> {
 		const existing = this.app.workspace
 			.getLeavesOfType(VIEW_TYPE_GROVE_PDF)
 			.find(leaf => this.#isPdfView(leaf.view) && leaf.view.bookPath === bookPath)
 		if (existing && this.#isPdfView(existing.view)) {
 			this.app.workspace.revealLeaf(existing)
-			if (cfi) existing.view.jumpToCfi(cfi)
+			if (cfi || fallback) existing.view.jumpToCfi(cfi ?? '', fallback)
 			return
 		}
 		const leaf = this.app.workspace.getLeaf('tab')
 		await leaf.setViewState({
 			type: VIEW_TYPE_GROVE_PDF,
 			active: true,
-			state: { bookPath, cfi },
+			state: { bookPath, cfi, fallback },
 		})
 		this.app.workspace.revealLeaf(leaf)
 	}
@@ -812,6 +818,65 @@ export default class GroveReaderPlugin extends Plugin {
 			return
 		}
 		await this.openBookByPath(bookPath, cfi || undefined)
+	}
+
+	/**
+	 * 双链点击接管：`[[书.epub#grove-cfi=…|⤴ 回原文]]`。
+	 * 捕获阶段先手（阅读视图与 Live Preview 都能拦），只认自家子路径，别的链接一律放行。
+	 */
+	#onGroveLinkClick(ev: MouseEvent): void {
+		if (ev.defaultPrevented) return
+		const target = ev.target as HTMLElement | null
+		const anchor = target?.closest?.('[data-href], a[href]') as HTMLElement | null
+		let raw = anchor ? (anchor.getAttribute('data-href') || anchor.getAttribute('href') || '') : ''
+		// 实时预览里的内部链接是 CM6 节点（只有 class，没有 data-href），
+		// 位置得从编辑器文档里反查：定位到点击处所在行，再挑包住它的那对 [[ ]]
+		if (!raw && target) raw = this.#hrefFromLivePreview(target) ?? ''
+		if (!raw.includes('grove-')) return
+		const parsed = parseGroveHref(raw)
+		if (!parsed) return
+		ev.preventDefault()
+		ev.stopPropagation()
+		ev.stopImmediatePropagation()
+		void this.openGroveLink(parsed)
+	}
+
+	/** 从实时预览的链接节点反查它的 `路径#定位` 源码；不是链接节点返回 null */
+	#hrefFromLivePreview(target: HTMLElement): string | null {
+		const span = target.closest('.cm-hmd-internal-link') as HTMLElement | null
+		if (!span) return null
+		try {
+			const leaves = this.app.workspace.getLeavesOfType('markdown')
+			const leaf = leaves.find(l => l.view.containerEl.contains(span))
+			const view = leaf?.view as MarkdownView | undefined
+			if (!view?.editor) return null
+			// editor.cm 是 CM6 的 EditorView，官方 API 没收录，只能按运行时形状取
+			const cm = (view.editor as unknown as { cm?: { posAtDOM(node: Node, offset?: number): number } }).cm
+			if (!cm?.posAtDOM) return null
+			const pos = cm.posAtDOM(span, 0)
+			const at = view.editor.offsetToPos(pos)
+			const line = view.editor.getLine(at.line) ?? ''
+			const re = /\[\[([^[\]]+)\]\]/g
+			for (let m = re.exec(line); m; m = re.exec(line)) {
+				const start = m.index
+				const end = m.index + m[0].length
+				if (at.ch >= start && at.ch <= end) return m[1]
+			}
+			return null
+		} catch {
+			return null
+		}
+	}
+
+	/** 打开双链指向的书并落到那一句；CFI 失效时由视图内继续三级降级 */
+	async openGroveLink(link: ParsedGroveLink): Promise<void> {
+		const { vaultPath, target } = link
+		const file = this.app.vault.getAbstractFileByPath(vaultPath)
+		if (!(file instanceof TFile)) {
+			new Notice(`${APP_NAME}：找不到这本书（${vaultPath}）`)
+			return
+		}
+		await this.openBookByPath(vaultPath, target.cfi, target)
 	}
 
 	/** 读书籍字节：优先走库文件，找不到时按本机路径读（库外书籍只有桌面端支持） */
@@ -1165,7 +1230,7 @@ export default class GroveReaderPlugin extends Plugin {
 					skipped++
 					continue
 				}
-				const markdown = await this.#composeNoteMarkdown(data, existing, false)
+				const markdown = await this.#composeNoteMarkdown(data, existing, false, true)
 				if (markdown !== existing) await this.app.vault.modify(file, markdown)
 				if (data.notePath !== file.path) {
 					data.notePath = file.path
@@ -1394,21 +1459,28 @@ export default class GroveReaderPlugin extends Plugin {
 		}
 	}
 
-	async #composeNoteMarkdown(data: BookData, existing: string | null, announce: boolean): Promise<string> {
+	async #composeNoteMarkdown(data: BookData, existing: string | null, announce: boolean, force = announce): Promise<string> {
 		const tplPath = this.templatePathFor(data)
+		const style = resolveExcerptLinkStyle(
+			this.settings.excerptLinkStyle === 'protocol' ? 'protocol' : 'wikilink',
+			existing,
+			// 自动刷新不改旧笔记的链接样式；手动生成/刷新才跟随设置
+			force,
+		)
+		const link = { style }
 		let template: string | null = null
 		const tplFile = this.app.vault.getAbstractFileByPath(tplPath)
 		if (tplFile instanceof TFile) template = await this.app.vault.read(tplFile)
 		if (template) {
 			try {
-				renderNoteTemplate(template, buildTemplateContext(data, bookIdFor(data.bookPath)))
+				renderNoteTemplate(template, buildTemplateContext(data, bookIdFor(data.bookPath), link))
 			} catch (e) {
 				console.error('[Grove Reader] 笔记模板解析失败', e)
 				if (announce) new Notice('Grove Reader：笔记模板解析失败，本次使用默认模板')
 				template = null
 			}
 		}
-		return buildNote(data, bookIdFor(data.bookPath), existing, template, this.#noteExtra(data))
+		return buildNote(data, bookIdFor(data.bookPath), existing, template, this.#noteExtra(data), link)
 	}
 
 	private noteRefreshTimer: number | null = null

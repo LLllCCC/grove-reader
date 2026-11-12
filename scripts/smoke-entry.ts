@@ -5,16 +5,17 @@ import os from 'node:os'
 import assert from 'node:assert'
 import { BookStore } from '../src/store'
 import { DesktopIO } from '../src/desktopIO'
-import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, NOTE_BEGIN, NOTE_END, renderNoteTemplate } from '../src/notes'
+import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, NOTE_BEGIN, NOTE_END, renderNoteTemplate, resolveExcerptLinkStyle } from '../src/notes'
 import { STATS_IDLE_MS, STATS_TICK_MS, StatsStore, accrueTick, todayKey } from '../src/stats'
 import { BookData } from '../src/types'
-import { bookIdFor, compareCfi, formatDuration, relativeTime } from '../src/util'
+import { bookIdFor, compareCfi, formatDuration, pageFromFraction, relativeTime } from '../src/util'
 import { applySync, normalizeExcerpt, parseNoteEntries, planSync } from '../src/noteSync'
 import { buildSearchIndex, searchDocs } from '../src/search'
 import { TrashStore } from '../src/trash'
 import { buildHealthReport, healthCleanupCount } from '../src/health'
 import { checkMigrateTarget, exportDataBackup, migrateDataFolder } from '../src/backup'
 import { appendCards, buildCardText, emptyCanvas, parseCanvas, serializeCanvas, shortTitle } from '../src/canvas'
+import { buildSubpath, parseGroveHref, parseSubpath, snippetOf, wikilinkFor } from '../src/wikilink'
 
 async function main(): Promise<void> {
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-data-'))
@@ -105,7 +106,12 @@ const data: BookData = {
 
 const fresh = buildNote(data, 'id123', null)
 assert.ok(fresh.startsWith('---\ntitle: "测试书"'))
-assert.ok(fresh.includes('obsidian://grove?book=id123&cfi=epubcfi%28'))
+// 默认写双链；显式要 protocol 时才写 obsidian://
+assert.ok(fresh.includes('[[Books/林间漫步.epub#grove-cfi='), '默认应写双链')
+assert.ok(!fresh.includes('obsidian://grove?'), '默认不应再写协议链接')
+const freshProtocol = buildNote(data, 'id123', null, null, undefined, { style: 'protocol' })
+assert.ok(freshProtocol.includes('obsidian://grove?book=id123&cfi=epubcfi%28'), 'protocol 样式应保留旧链接')
+assert.ok(!freshProtocol.includes('#grove-cfi='), 'protocol 样式不应出现双链')
 assert.ok(fresh.includes('%%\n评论一\n%%'))
 assert.ok(fresh.includes('GROVE:BEGIN'))
 
@@ -127,7 +133,7 @@ assert.ok(rendered.includes('## 第一章'))
 assert.ok(rendered.includes('### 高亮一'), '摘录首行应成为批注标题')
 assert.ok(rendered.includes('> 高亮一\n>\n> 第二行'))
 assert.ok(rendered.includes('%%\n评论一\n%%'))
-assert.ok(rendered.includes('epubcfi%28'))
+assert.ok(rendered.includes('grove-cfi=epubcfi(/6/4!/2%5BChap%5D,/2,/4)'), 'CFI 里的方括号应转义进双链')
 assert.ok(rendered.includes('^grove-a1'))
 assert.ok(rendered.includes('^grove-a2'))
 assert.ok(!rendered.includes('{{'), '模板变量应全部被替换')
@@ -535,6 +541,67 @@ const editedRW = JSON.parse(fs.readFileSync(sfile, 'utf8')) as { title: string }
 editedRW.title = 'Y'
 fs.writeFileSync(sfile, JSON.stringify(editedRW, null, 2))
 assert.equal(await storeDedupe.reloadFromDisk(bookIdFor('Books/x.epub')), true, '外部改写后应判定为有更新')
+
+// 32. 摘录双链：生成 → 解析往返、特殊字符、库外书降级、笔记回写不误判
+{
+	const target = {
+		cfi: 'epubcfi(/6/4!/2[Chap],/2,/4)',
+		text: snippetOf('高亮一\n第二行（很长很长的一段摘录文字，超过二十四个字符后要被截断）'),
+		chapter: '第一章 起风了',
+	}
+	const link = wikilinkFor('Grove Reader/书籍/围城.epub', target, '⤴ 回原文')
+	assert.ok(link.startsWith('[[Grove Reader/书籍/围城.epub#grove-cfi='), '应是指向书文件的双链')
+	assert.ok(link.endsWith('|⤴ 回原文]]'))
+	assert.ok(!link.includes('[Chap]'), '方括号必须转义，否则会提前闭合链接')
+	const back = parseGroveHref(link)!
+	assert.equal(back.vaultPath, 'Grove Reader/书籍/围城.epub')
+	assert.equal(back.target.cfi, target.cfi, 'CFI 应能原样还原')
+	assert.equal(back.target.text, target.text, '摘录片段应能原样还原')
+	assert.equal(back.target.chapter, '第一章 起风了')
+	// DOM 里给的是 app:// 外壳，路径是 URL 编码的
+	const dom = parseGroveHref('app://obsidian.md/Grove%20Reader/%E4%B9%A6%E7%B1%8D/%E5%9B%B4%E5%9F%8E.epub#grove-cfi=epubcfi(/6/4)')!
+	assert.equal(dom.vaultPath, 'Grove Reader/书籍/围城.epub')
+	// 书名带 # → 退化成 markdown 链接形态，仍能解析回来
+	const hashLink = wikilinkFor('Grove Reader/书籍/C# 入门.pdf', { cfi: 'page:3' }, '⤴ 回原文')
+	assert.ok(hashLink.startsWith('[⤴ 回原文](Grove%20Reader/'), '带 # 的书名应退化为 markdown 链接')
+	assert.equal(parseGroveHref(hashLink)!.vaultPath, 'Grove Reader/书籍/C# 入门.pdf')
+	// 不是自家定位串的链接一律不接管
+	assert.equal(parseGroveHref('[[某篇笔记#某个标题]]'), null)
+	assert.equal(parseGroveHref('[[Grove Reader/书籍/围城.epub]]'), null)
+	assert.equal(parseGroveHref('obsidian://grove?book=id&cfi=x'), null)
+	assert.equal(parseSubpath('bzr-cfi=x'), null)
+	// 库外书（绝对路径）写不了双链，模板层退回协议链接
+	const absNote = buildNote({ ...data, bookPath: 'D:/Books/围城.epub' }, 'id123', null)
+	assert.ok(absNote.includes('obsidian://grove?'), '库外书应退回协议链接')
+	assert.ok(!absNote.includes('#grove-cfi='), '库外书不应写双链')
+	// 双链笔记的回写解析：链接行不能被当成摘录或未知条目
+	const wikiNote = buildNote(data, 'id123', null)
+	const wikiPlan = planSync(data, wikiNote)
+	assert.equal(wikiPlan.changes.length, 0, '双链笔记不应产生回写差异')
+	assert.equal(wikiPlan.unknown.length, 0)
+	assert.equal(wikiPlan.entries, 2)
+}
+
+// 33. PDF 换版本：页码失效 → 百分比换算落一页
+{
+	assert.equal(pageFromFraction(0, 7), 1)
+	assert.equal(pageFromFraction(1, 7), 7)
+	assert.equal(pageFromFraction(0.5, 7), 4)
+	assert.equal(pageFromFraction(2, 7), 7, '超界百分比应夹到末页')
+	assert.equal(pageFromFraction(Number.NaN, 7), 1, '坏数值退回首页')
+	assert.equal(pageFromFraction(0.5, 0), 1, '页数未知退回首页')
+}
+
+// 34. 旧笔记不悄悄换格式：自动刷新保持旧链接，手动生成才跟随设置
+{
+	const oldNote = buildNote(data, 'id123', null, null, undefined, { style: 'protocol' })
+	const newNote = buildNote(data, 'id123', null, null, undefined, { style: 'wikilink' })
+	assert.equal(resolveExcerptLinkStyle('wikilink', oldNote, false), 'protocol', '自动刷新不该改写旧笔记的链接样式')
+	assert.equal(resolveExcerptLinkStyle('wikilink', newNote, false), 'wikilink')
+	assert.equal(resolveExcerptLinkStyle('wikilink', oldNote, true), 'wikilink', '手动生成应跟随设置')
+	assert.equal(resolveExcerptLinkStyle('wikilink', null, false), 'wikilink')
+	assert.equal(resolveExcerptLinkStyle('protocol', newNote, true), 'protocol')
+}
 
 console.log('SMOKE OK')
 }

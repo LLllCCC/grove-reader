@@ -7,8 +7,9 @@ import { Annotation, BookData, HIGHLIGHT_COLORS, VIEW_TYPE_GROVE_PDF, colorCss }
 import { CommentModal, ConfirmModal } from './modals'
 import { JumpReturnBar } from './navReturn'
 import { createBookmarkSection, findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
-import { basenameOf, isAbsolutePath, normalizeSelectionText, randomId, truncate } from './util'
+import { basenameOf, isAbsolutePath, normalizeSelectionText, pageFromFraction, randomId, truncate } from './util'
 import { joinPath } from './platformIO'
+import type { GroveLinkTarget } from './wikilink'
 
 /** 常量定义在 types.ts（main.ts 不 import 本模块也要能判断 PDF 视图），这里保持原导出名 */
 export { VIEW_TYPE_GROVE_PDF }
@@ -146,6 +147,8 @@ export class PdfView extends ItemView {
 	private data: BookData | null = null
 	private loadedPath: string | null = null
 	private pendingCfi: string | null = null
+	/** 双链降级信息：PDF 只有页码，页码失效时按百分比落一页 */
+	private pendingFallback: GroveLinkTarget | null = null
 	private numPages = 0
 	private scale = 1
 	private zoom = 1
@@ -249,11 +252,12 @@ export class PdfView extends ItemView {
 	}
 
 	async setState(state: unknown, result?: ViewStateResult): Promise<void> {
-		const s = (state ?? {}) as { bookPath?: string; file?: string; cfi?: string }
+		const s = (state ?? {}) as { bookPath?: string; file?: string; cfi?: string; fallback?: GroveLinkTarget }
 		const newCfi = s.cfi ?? null
 		const incoming = s.bookPath ?? (s.file ? String(s.file) : '')
 		if (incoming) this.bookPath = incoming
 		if (newCfi) this.pendingCfi = newCfi
+		if (s.fallback) this.pendingFallback = s.fallback
 		await super.setState(state, result ?? { history: false })
 		if (!this.pagesEl) return
 		if (!this.bookPath) return
@@ -262,7 +266,7 @@ export class PdfView extends ItemView {
 			await this.#openBook(this.pendingCfi ?? undefined)
 			return
 		}
-		if (newCfi) this.#jumpToCfi(newCfi)
+		if (newCfi || this.pendingFallback) this.#jumpToCfi(newCfi ?? '', true, this.pendingFallback ?? undefined)
 	}
 
 	// ------------------------------------------------------------------
@@ -611,11 +615,13 @@ export class PdfView extends ItemView {
 			if (data.lastLocation?.page && data.lastLocation.page > 1) {
 				this.#scrollToPage(data.lastLocation.page)
 			}
-			if (this.pendingCfi) {
-				const c = this.pendingCfi
+			if (this.pendingCfi || this.pendingFallback) {
+				const c = this.pendingCfi ?? ''
+				const fb = this.pendingFallback ?? undefined
 				this.pendingCfi = null
+				this.pendingFallback = null
 				// 从笔记链接进来：这是本视图的初始位置，没有「上一处」可回
-				this.#jumpToCfi(c, false)
+				this.#jumpToCfi(c, false, fb)
 			}
 			// 换书时重置搜索状态，恢复本书的记忆筛选
 			this.searchTaskId++
@@ -1100,8 +1106,8 @@ export class PdfView extends ItemView {
 		this.pagesEl.scrollTo({ top: Math.max(0, p.wrap.offsetTop - 8), behavior: 'smooth' })
 	}
 
-	jumpToCfi(cfi: string): void {
-		this.#jumpToCfi(cfi)
+	jumpToCfi(cfi: string, fallback?: GroveLinkTarget): void {
+		this.#jumpToCfi(cfi, true, fallback)
 	}
 
 	/** 书架手动编辑信息后同步：更新内存数据并落盘，标题即时生效 */
@@ -1160,10 +1166,14 @@ export class PdfView extends ItemView {
 		el.addClass('grove-ann-revealed')
 	}
 
-	#jumpToCfi(cfi: string, remember = true): void {
-		const m = /^page:(\d+)$/.exec(cfi.trim())
-		if (!m) return
-		const page = Number.parseInt(m[1], 10)
+	#jumpToCfi(cfi: string, remember = true, fb?: GroveLinkTarget): void {
+		const m = /^page:(\d+)$/.exec((cfi ?? '').trim())
+		let page = m ? Number.parseInt(m[1], 10) : 0
+		// 页码失效（文件换了版本、页数变少）时按章节百分比落一页
+		if ((!page || page < 1 || page > this.numPages) && fb && typeof fb.pct === 'number') {
+			page = pageFromFraction(fb.pct, this.numPages)
+		}
+		if (!page || page < 1 || page > this.numPages) return
 		if (!remember) {
 			this.#scrollToPage(page)
 			return

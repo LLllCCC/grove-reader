@@ -275,6 +275,12 @@ export interface GroveSettings {
 	openSidebarWithBook: boolean
 	/** 新增/修改批注时，自动刷新已生成的阅读笔记（标记区外手写内容保留） */
 	autoUpdateNote: boolean
+	/**
+	 * 阅读笔记里每条摘录的回跳链接样式：
+	 * wikilink＝指向书文件的 Obsidian 双链（能进图谱/反向链接），protocol＝旧的 obsidian:// 链接。
+	 * 只影响「生成/更新笔记」写出来的内容，已有笔记下次刷新时才变。
+	 */
+	excerptLinkStyle: 'wikilink' | 'protocol'
 	/** 「备份批注数据到库内」执行时额外复制一份的本机路径（另一块盘/优盘）；空 = 关闭 */
 	backupTargetDir?: string
 	/** 「备份批注数据到库内」写入的库内文件夹（相对路径）；改路径后旧备份自动转移 */
@@ -312,6 +318,7 @@ export const DEFAULT_SETTINGS: GroveSettings = {
 	shelfDisplay: { ...DEFAULT_SHELF_DISPLAY },
 	openSidebarWithBook: true,
 	autoUpdateNote: true,
+	excerptLinkStyle: 'wikilink',
 	backupFolder: BACKUP_FOLDER_NAME,
 	appearance: { ...DEFAULT_APPEARANCE },
 	txtLayout: 'auto',

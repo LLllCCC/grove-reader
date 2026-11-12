@@ -1,14 +1,41 @@
 import { Annotation, BookData, colorName } from './types'
 import { compareCfi, encodeParam, truncate } from './util'
+import { canLinkBook, snippetOf, wikilinkFor } from './wikilink'
 
 export const NOTE_BEGIN = '<!-- GROVE:BEGIN 由 Grove Reader 生成，重新生成时会覆盖此区间内的内容 -->'
 export const NOTE_END = '<!-- GROVE:END -->'
 
 export const DEFAULT_TEMPLATE_PATH = 'Grove Reader/阅读笔记/Grove 笔记模板.md'
 
-/** 从笔记回跳原文的协议链接，由 main.ts 中注册的 obsidian://grove 处理 */
+/** 从笔记回跳原文的协议链接，由 main.ts 中注册的 obsidian://grove 处理（旧格式，保留兼容） */
 export function jumpLink(bookId: string, cfi: string): string {
 	return `[⤴ 回原文](obsidian://grove?book=${encodeParam(bookId)}&cfi=${encodeParam(cfi)})`
+}
+
+/** 摘录回跳链接的样式：双链（可进图谱/反向链接）或旧版协议链接 */
+export type ExcerptLinkStyle = 'wikilink' | 'protocol'
+
+export interface NoteLinkOptions {
+	style?: ExcerptLinkStyle
+}
+
+/**
+ * 决定这次生成用哪种链接。
+ * 自动刷新（force=false）时不让旧笔记悄悄换格式——路线图定的策略是
+ * 「新笔记用双链、旧笔记保持不动」，用户点「生成/更新笔记」或「刷新全部笔记」
+ * 才算明确表态（force=true），那时跟随设置。
+ */
+export function resolveExcerptLinkStyle(
+	configured: ExcerptLinkStyle,
+	existing: string | null,
+	force: boolean,
+): ExcerptLinkStyle {
+	if (force || configured === 'protocol' || !existing) return configured
+	const begin = existing.indexOf(NOTE_BEGIN)
+	const end = existing.lastIndexOf(NOTE_END)
+	const region = begin >= 0 && end > begin ? existing.slice(begin, end) : existing
+	// 旧笔记里只有 obsidian:// 链接，还没有任何双链 → 继续用协议链接
+	return region.includes('](obsidian://grove?') && !region.includes('#grove-cfi=') ? 'protocol' : configured
 }
 
 // ------------------------------------------------------------------
@@ -25,7 +52,12 @@ export interface TemplateAnnotation {
 	chapter: string
 	color: string
 	colorName: string
+	/** 当前设置下的回跳链接（默认双链；库外书或关掉双链时是 obsidian:// 链接） */
 	jumpLink: string
+	/** 永远是 obsidian:// 协议链接，供自定义模板两种都写时使用 */
+	protocolLink: string
+	/** 双链形态；书在库外时为空串 */
+	wikiLink: string
 	/** 摘录首行净化截断，适合做标题 */
 	excerptHeading: string
 	/** 稳定块 id（配合 ^ 使用） */
@@ -74,8 +106,9 @@ function sortAnnotations(list: Annotation[]): Annotation[] {
 	})
 }
 
-export function buildTemplateContext(data: BookData, bookId: string): TemplateContext {
+export function buildTemplateContext(data: BookData, bookId: string, opts: NoteLinkOptions = {}): TemplateContext {
 	const sorted = sortAnnotations(data.annotations)
+	const style = opts.style ?? 'wikilink'
 	const chapters: TemplateChapter[] = []
 	const index = new Map<string, TemplateChapter>()
 	let i = 0
@@ -89,6 +122,15 @@ export function buildTemplateContext(data: BookData, bookId: string): TemplateCo
 			chapters.push(group)
 		}
 		group.count++
+		const protocol = jumpLink(bookId, a.cfi)
+		// 指向书文件的双链：带上摘录前 24 字与章节名，CFI 失效时靠它们降级
+		const wiki = canLinkBook(data.bookPath)
+			? wikilinkFor(
+				data.bookPath,
+				{ cfi: a.cfi, text: snippetOf(a.text), chapter: key === '未命名章节' ? undefined : key },
+				'⤴ 回原文',
+			)
+			: ''
 		group.annotations.push({
 			index: i,
 			text: a.text,
@@ -97,7 +139,9 @@ export function buildTemplateContext(data: BookData, bookId: string): TemplateCo
 			chapter: group.chapter,
 			color: a.color,
 			colorName: colorName(a.color),
-			jumpLink: jumpLink(bookId, a.cfi),
+			jumpLink: style === 'wikilink' && wiki ? wiki : protocol,
+			protocolLink: protocol,
+			wikiLink: wiki,
 			excerptHeading: cleanHeading(a.text || '（空摘录）', 30),
 			blockId: `grove-${a.id}`,
 			date: new Date(a.createdAt || Date.now()).toLocaleDateString('zh-CN'),
@@ -330,14 +374,15 @@ export function buildNote(
 	existing: string | null,
 	template?: string | null,
 	extra?: NoteExtraFields,
+	link: NoteLinkOptions = {},
 ): string {
 	const tpl = template && template.trim() ? template : DEFAULT_NOTE_TEMPLATE
 	let body: string
 	try {
-		body = renderNoteTemplate(tpl, buildTemplateContext(data, bookId))
+		body = renderNoteTemplate(tpl, buildTemplateContext(data, bookId, link))
 	} catch (e) {
 		console.error('[Grove Reader] 笔记模板渲染失败，使用默认模板', e)
-		body = renderNoteTemplate(DEFAULT_NOTE_TEMPLATE, buildTemplateContext(data, bookId))
+		body = renderNoteTemplate(DEFAULT_NOTE_TEMPLATE, buildTemplateContext(data, bookId, link))
 	}
 	const inner = `${NOTE_BEGIN}\n\n${body}\n\n${NOTE_END}`
 

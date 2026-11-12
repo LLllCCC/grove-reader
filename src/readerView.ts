@@ -16,6 +16,7 @@ import { CommentModal, ConfirmModal } from './modals'
 import { AiPanel } from './aiPanel'
 import { Overlayer } from '../lib/foliate-js/overlayer.js'
 import { basenameOf, contrastFg, formatAuthor, formatLanguageMap, isDarkColor, randomId, stripNumericTitlePrefix, truncate } from './util'
+import type { GroveLinkTarget } from './wikilink'
 import '../lib/foliate-js/view.js'
 
 /** 按 cfi 里的数字路径比较先后：纯字符串比较会把 /4,/104 排到 /4/56 之前 */
@@ -114,6 +115,8 @@ export class ReaderView extends ItemView {
 	private data: BookData | null = null
 	private loadedPath: string | null = null
 	private pendingCfi: string | null = null
+	/** 双链带来的降级信息（摘录前若干字 + 章节名），CFI 失效时用 */
+	private pendingFallback: GroveLinkTarget | null = null
 	private pending: PendingSelection | null = null
 	private saveTimer: number | null = null
 	private lastSavedCfi: string | null = null
@@ -220,12 +223,13 @@ export class ReaderView extends ItemView {
 	}
 
 	async setState(state: unknown, result?: ViewStateResult): Promise<void> {
-		const s = (state ?? {}) as { bookPath?: string; file?: string; cfi?: string }
+		const s = (state ?? {}) as { bookPath?: string; file?: string; cfi?: string; fallback?: GroveLinkTarget }
 		const newCfi = s.cfi ?? null
 		// 点击文件列表中的电子书时，Obsidian 通过 state.file 传入路径
 		const incoming = s.bookPath ?? (s.file ? String(s.file) : '')
 		if (incoming) this.bookPath = incoming
 		if (newCfi) this.pendingCfi = newCfi
+		if (s.fallback) this.pendingFallback = s.fallback
 		await super.setState(state, result ?? { history: false })
 		if (!this.readerEl) return // onOpen 尚未执行，onOpen 会带上 pendingCfi
 		if (!this.bookPath) return
@@ -234,7 +238,7 @@ export class ReaderView extends ItemView {
 			await this.#openBook(this.pendingCfi ?? undefined)
 			return
 		}
-		if (newCfi) void this.#jumpToCfi(newCfi)
+		if (newCfi) void this.#jumpToCfi(newCfi, true, this.pendingFallback ?? undefined)
 	}
 
 	// ------------------------------------------------------------------
@@ -526,10 +530,12 @@ export class ReaderView extends ItemView {
 			this.#applyAppearance()
 			this.#buildToc(foliate.book?.toc ?? [])
 			await foliate.init({ lastLocation: data.lastLocation?.cfi || undefined })
-			if (this.pendingCfi) {
-				const c = this.pendingCfi
+			if (this.pendingCfi || this.pendingFallback) {
+				const c = this.pendingCfi ?? ''
+				const fb = this.pendingFallback ?? undefined
 				this.pendingCfi = null
-				await this.#jumpToCfi(c)
+				this.pendingFallback = null
+				await this.#jumpToCfi(c, true, fb)
 			}
 			this.#resetSidebarFilters()
 			this.#renderSidebar()
@@ -1614,23 +1620,120 @@ export class ReaderView extends ItemView {
 	// 跳转与持久化
 	// ------------------------------------------------------------------
 
-	async #jumpToCfi(cfi: string, remember = true): Promise<void> {
+	async #jumpToCfi(cfi: string, remember = true, fb?: GroveLinkTarget): Promise<void> {
 		if (!this.foliate) return
 		const before = remember ? (this.data?.lastLocation?.cfi ?? null) : null
 		// 用 goTo 而不是 select：select 会把目标处的文字整段选中，
 		// 从「返回」跳回来时会留下一片蓝色选区
-		try {
-			await this.foliate.goTo(cfi)
-		} catch {
+		let landed = false
+		// 先探一次：章节号超出 spine 范围就是「书换了版本」，连 goTo 都不用试，
+		// 否则 foliate 会静默落在最近的节上，看起来像跳成功了
+		if (cfi && this.#cfiLooksValid(cfi)) {
 			try {
-				await this.foliate.select(cfi)
-			} catch (err) {
-				console.error('[Grove Reader] 跳转失败', err)
+				landed = (await this.foliate.goTo(cfi)) !== undefined
+			} catch {
+				landed = false
 			}
+			if (!landed) {
+				try {
+					landed = (await this.foliate.select(cfi)) !== undefined
+				} catch {
+					landed = false
+				}
+			}
+		}
+		// 双链里的 CFI 失效（书换了版本）时，按摘录原文 → 章节 → 百分比继续找
+		if (!landed && fb) {
+			const ok = await this.#fallbackJump(fb)
+			if (!ok) new Notice('Grove Reader：找不到原句（书可能换了版本），先停在当前位置')
 		}
 		if (before && before !== cfi) this.#showJumpReturn(before)
 		// 手机上批注栏是覆盖式抽屉，会压住返回胶囊；点跳转就是要看原文，顺手收起
 		if (remember && this.plugin.isMobile) this.sidebarEl.classList.add('grove-hidden')
+	}
+
+	/** CFI 的章节号是否落在当前 spine 里（foliate 自己 Resolve 失败时不抛错，只能先探） */
+	#cfiLooksValid(cfi: string): boolean {
+		try {
+			const resolved = this.foliate?.resolveNavigation(cfi) as { index?: number } | undefined
+			if (!resolved || typeof resolved.index !== 'number') return false
+			const total = this.foliate?.book?.sections?.length ?? 0
+			if (!total) return true
+			return resolved.index >= 0 && resolved.index < total
+		} catch {
+			return false
+		}
+	}
+
+	/**
+	 * 三级降级：摘录原文（前 24 字）→ 章节名 → 章节百分比。
+	 * 链接里带 t= / c= / p= 就是为了这一步：同一本书换个文件是真实会发生的。
+	 */
+	async #fallbackJump(fb: GroveLinkTarget): Promise<boolean> {
+		const foliate = this.foliate
+		if (!foliate) return false
+		const q = (fb.text ?? '').trim()
+		if (q) {
+			try {
+				for await (const result of foliate.search({ query: q })) {
+					if (result === 'done') break
+					// 全书搜索会先逐节吐进度对象，命中以「分组 + subitems」的形式到达
+					if ('progress' in result) continue
+					const matches = 'subitems' in result ? result.subitems : [result]
+					const hit = matches.find(m => typeof m?.cfi === 'string')
+					if (hit?.cfi) {
+						await foliate.goTo(hit.cfi)
+						foliate.clearSearch?.()
+						return true
+					}
+					if (matches.length) break
+				}
+				foliate.clearSearch?.()
+			} catch (e) {
+				console.error('[Grove Reader] 按摘录原文定位失败', e)
+			}
+		}
+		const href = this.#tocHrefFor(fb.chapter)
+		if (href) {
+			try {
+				await foliate.goTo(href)
+				return true
+			} catch {
+				// 章节 href 也失效，继续下一步
+			}
+		}
+		if (typeof fb.pct === 'number' && Number.isFinite(fb.pct)) {
+			try {
+				await foliate.goToFraction(Math.max(0, Math.min(1, fb.pct)))
+				return true
+			} catch {
+				// 三步全落空
+			}
+		}
+		return false
+	}
+
+	/** 章节名 → 目录项 href（完全相等优先，其次互相包含） */
+	#tocHrefFor(chapter?: string): string | null {
+		const norm = (s: string): string => s.replace(/\s+/g, '').trim()
+		const want = norm(chapter ?? '')
+		if (!want) return null
+		const flat: FoliateTOCItem[] = []
+		const walk = (items: FoliateTOCItem[]): void => {
+			for (const item of items) {
+				flat.push(item)
+				if (item.subitems?.length) walk(item.subitems)
+			}
+		}
+		walk(this.foliate?.book?.toc ?? [])
+		const exact = flat.find(it => it.href && it.label && norm(it.label) === want)
+		if (exact?.href) return exact.href
+		const loose = flat.find(it => {
+			if (!it.href || !it.label) return false
+			const l = norm(it.label)
+			return l.includes(want) || want.includes(l)
+		})
+		return loose?.href ?? null
 	}
 
 	/** 跳转后在左下角留一条「返回原位置」，可以一直挂着，也能关掉 */
@@ -1717,8 +1820,8 @@ export class ReaderView extends ItemView {
 		this.#updateBookmarkBtn()
 	}
 
-	jumpTo(cfi: string): void {
-		void this.#jumpToCfi(cfi)
+	jumpTo(cfi: string, fallback?: GroveLinkTarget): void {
+		void this.#jumpToCfi(cfi, true, fallback)
 	}
 
 	/** 书架手动编辑信息后同步：更新内存数据并落盘，标题即时生效 */

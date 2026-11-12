@@ -18,6 +18,8 @@ export interface TextViewState {
 	page?: number
 	/** 回跳链接带来的定位（txt:<start>-<end>） */
 	cfi?: string
+	/** 定位串失效时的降级信息（摘录原文 / 章节名 / 百分比） */
+	fallback?: { cfi?: string; text?: string; chapter?: string; pct?: number }
 }
 
 /**

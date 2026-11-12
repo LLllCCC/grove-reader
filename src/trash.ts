@@ -213,7 +213,18 @@ export class TrashStore {
 	}
 
 	async purge(id: string): Promise<void> {
-		await this.io.removeDir(joinPath(this.root, id))
+		const dir = joinPath(this.root, id)
+		// Windows 上刚移进来的文件可能还被索引/杀软占着，直接删会报 ENOTEMPTY：
+		// 等一拍重试两次再放弃，避免用户点「永久删除」当场看到失败
+		for (let attempt = 0; ; attempt++) {
+			try {
+				await this.io.removeDir(dir)
+				return
+			} catch (e) {
+				if (attempt >= 2) throw e
+				await new Promise(resolve => setTimeout(resolve, 120))
+			}
+		}
 	}
 
 	async empty(): Promise<number> {
