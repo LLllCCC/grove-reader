@@ -84,6 +84,18 @@ export interface Annotation {
 	updatedAt: number
 }
 
+/** 书签：只记位置，不含原文（与划线批注分开存） */
+export interface Bookmark {
+	id: string
+	/** 与 Annotation.cfi 同一套定位：电子书是 CFI / `txt:<offset>`，PDF 是 `page:N` */
+	cfi: string
+	/** 列表里显示的位置名：章节名或「第 N 页」 */
+	label?: string
+	/** 加书签时那一段的开头，帮助回忆为什么标记 */
+	text?: string
+	createdAt: number
+}
+
 export interface LastLocation {
 	cfi: string
 	index: number
@@ -107,6 +119,8 @@ export interface BookData {
 	templateId?: string
 	lastLocation?: LastLocation
 	annotations: Annotation[]
+	/** 书签；旧数据没有该字段（读取时补空数组） */
+	bookmarks?: Bookmark[]
 }
 
 /** 一套可命名的笔记模板；path 为库内 Markdown 路径 */

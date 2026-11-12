@@ -11,6 +11,7 @@ import {
 } from './types'
 import { renderAppearancePanel } from './appearancePanel'
 import { JumpReturnBar } from './navReturn'
+import { createBookmarkSection, findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
 import { CommentModal, ConfirmModal } from './modals'
 import { AiPanel } from './aiPanel'
 import { Overlayer } from '../lib/foliate-js/overlayer.js'
@@ -126,6 +127,9 @@ export class ReaderView extends ItemView {
 	/** 跳转后的「返回原位置」浮条。挂 contentEl 而不是 readerEl：
 	 *  手机上 readerEl 里 foliate 的 iframe 会盖住它，点不到（PDF 侧同理，统一挂根节点） */
 	private jumpReturn = new JumpReturnBar(() => this.contentEl ?? null)
+	/** 书签区的渲染句柄与工具栏按钮（按钮图标随当前位置是否已加书签变化） */
+	private bookmarkSection: BookmarkSectionHandle | null = null
+	private bookmarkBtnEl: HTMLElement | null = null
 	private aiPanel = new AiPanel()
 	/** spine 索引 → 该节里最具体的目录项（同文件下「第X章」优先于「第X部分」） */
 	private tocBySection = new Map<number, { label: string; depth: number }>()
@@ -335,6 +339,11 @@ export class ReaderView extends ItemView {
 		setIcon(noteBtn, 'file-text')
 		noteBtn.addEventListener('click', () => void this.plugin.generateNoteFor(this))
 
+		const bookmarkBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn grove-bookmark-btn', attr: { 'aria-label': '书签：标记 / 取消当前位置' } })
+		setIcon(bookmarkBtn, 'bookmark')
+		bookmarkBtn.addEventListener('click', () => this.#toggleBookmark())
+		this.bookmarkBtnEl = bookmarkBtn
+
 		const sideBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '批注列表' } })
 		setIcon(sideBtn, 'list')
 		sideBtn.addEventListener('click', () => this.sidebarEl.classList.toggle('grove-hidden'))
@@ -369,6 +378,9 @@ export class ReaderView extends ItemView {
 		const closeSidebar = sideHead.createEl('button', { cls: 'clickable-icon grove-sidebar-close', attr: { 'aria-label': '关闭批注栏', title: '关闭批注栏' } })
 		setIcon(closeSidebar, 'x')
 		closeSidebar.addEventListener('click', () => this.sidebarEl.classList.add('grove-hidden'))
+
+		// 书签区放在批注区之上：它是导航，不该被下面的搜索/筛选挡住
+		this.bookmarkSection = createBookmarkSection(this.sidebarEl)
 
 
 		const fullTextSearch = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })
@@ -1638,6 +1650,67 @@ export class ReaderView extends ItemView {
 
 	#hideJumpReturn(): void {
 		this.jumpReturn.hide()
+	}
+
+	// ------------------------------------------------------------------
+	// 书签
+	// ------------------------------------------------------------------
+
+	/** 某个 CFI 所属的章节名（书签标签用；取不到就空着，列表里显示「未命名位置」） */
+	#chapterLabelFor(cfi: string): string {
+		try {
+			const nav = this.foliate?.resolveNavigation?.(cfi)
+			const label = nav?.label?.trim() || (typeof nav?.index === 'number' ? (this.tocBySection.get(nav.index)?.label ?? '') : '')
+			return label
+		} catch {
+			return ''
+		}
+	}
+
+	/** 工具栏书签按钮：当前位置没有就加，有就取消 */
+	#toggleBookmark(): void {
+		const cfi = this.data?.lastLocation?.cfi
+		if (!this.data || !cfi) {
+			new Notice('Grove Reader：还没定位到当前位置，等页面加载完再试')
+			return
+		}
+		const list = this.data.bookmarks ?? (this.data.bookmarks = [])
+		const idx = findBookmarkIndex(list, cfi)
+		if (idx >= 0) {
+			list.splice(idx, 1)
+			new Notice('Grove Reader：已移除当前位置的书签')
+		} else {
+			list.push(makeBookmark(cfi, this.#chapterLabelFor(cfi)))
+			new Notice('Grove Reader：已加书签')
+		}
+		this.#afterBookmarksChanged()
+	}
+
+	#deleteBookmark(id: string): void {
+		if (!this.data) return
+		this.data.bookmarks = (this.data.bookmarks ?? []).filter(b => b.id !== id)
+		this.#afterBookmarksChanged()
+	}
+
+	#afterBookmarksChanged(): void {
+		this.#renderBookmarks()
+		this.#updateBookmarkBtn()
+		this.#scheduleSave(true)
+	}
+
+	#updateBookmarkBtn(): void {
+		const cfi = this.data?.lastLocation?.cfi
+		const on = !!cfi && findBookmarkIndex(this.data?.bookmarks ?? [], cfi) >= 0
+		this.bookmarkBtnEl?.toggleClass('is-active', on)
+		if (this.bookmarkBtnEl) setIcon(this.bookmarkBtnEl, on ? 'bookmark-check' : 'bookmark')
+	}
+
+	#renderBookmarks(): void {
+		this.bookmarkSection?.update(this.data?.bookmarks ?? [], {
+			onJump: b => void this.#jumpToCfi(b.cfi),
+			onDelete: b => this.#deleteBookmark(b.id),
+		})
+		this.#updateBookmarkBtn()
 	}
 
 	jumpTo(cfi: string): void {

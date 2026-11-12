@@ -264,6 +264,9 @@ export class BookStore {
 		for (const a of data.annotations) {
 			if (typeof a.text !== 'string') (a as unknown as { text: string }).text = String((a as unknown as { text?: unknown }).text ?? '')
 		}
+		// 书签是后加的字段：旧数据没有，补空数组；坏的条目直接丢掉
+		if (!Array.isArray(data.bookmarks)) data.bookmarks = []
+		else data.bookmarks = data.bookmarks.filter(b => b && typeof b.cfi === 'string' && typeof b.id === 'string')
 		if (typeof data.version !== 'number') data.version = DATA_VERSION
 		if (typeof data.title !== 'string') data.title = ''
 		if (typeof data.author !== 'string') data.author = ''
