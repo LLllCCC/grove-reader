@@ -20,6 +20,8 @@ import { AiPanel } from './aiPanel'
 import { basenameOf, cleanBookTitle, contrastFg, isDarkColor, randomId, truncate } from './util'
 import { decodeTextBuffer, TextViewState, VIEW_TYPE_GROVE_TEXT } from './textCodec'
 import type { GroveLinkTarget } from './wikilink'
+import type { SourceSection } from './portrait'
+import { BookAskModal } from './bookAskModal'
 
 export { VIEW_TYPE_GROVE_TEXT } from './textCodec'
 
@@ -76,7 +78,7 @@ export class TextView extends ItemView {
 	private encoding = 'auto'
 	private detected = ''
 	private warning: string | undefined
-	private bookTitle = 'TXT'
+	bookTitle = 'TXT'
 	private loadingPath = ''
 	private pendingCfi: string | null = null
 	/** 双链降级信息（摘录前若干字 + 章节名），定位串失效时用 */
@@ -312,6 +314,10 @@ export class TextView extends ItemView {
 			e.stopPropagation()
 			this.#toggleAppearancePanel()
 		})
+
+		const askBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': 'AI 全书问答' } })
+		setIcon(askBtn, 'sparkles')
+		askBtn.addEventListener('click', () => new BookAskModal(this.app, this.plugin, this).open())
 
 		const noteBtn = toolbar.createEl('button', {
 			cls: 'clickable-icon grove-icon-btn',
@@ -1314,6 +1320,27 @@ export class TextView extends ItemView {
 		return { text: this.fullTextLowerCache, fold: this.fullTextLowerCache.length === text.length }
 	}
 
+	/** AI 全书问答：按识别出的章节切正文；没有章节就整本当一节 */
+	extractAiSections(): SourceSection[] {
+		const text = this.#fullText()
+		if (!text) return []
+		const marks = this.chapters.filter(c => c.offset >= 0 && c.offset < text.length)
+		if (!marks.length) return [{ label: this.bookTitle || '正文', text }]
+		const out: SourceSection[] = []
+		const first = marks[0].offset
+		if (first > 0) {
+			const head = text.slice(0, first).trim()
+			if (head) out.push({ label: '开头', text: head })
+		}
+		for (let i = 0; i < marks.length; i++) {
+			const start = marks[i].offset
+			const end = i + 1 < marks.length ? marks[i + 1].offset : text.length
+			const part = text.slice(start, end).trim()
+			if (part) out.push({ label: marks[i].title, text: part })
+		}
+		return out
+	}
+
 	/** 命令面板「搜索当前书全文」复用侧栏面板 */
 	searchFullText(query: string): void {
 		const q = query.trim()
@@ -1790,6 +1817,7 @@ export class TextView extends ItemView {
 				void navigator.clipboard.writeText(a.text).then(() => new Notice('Grove Reader：已复制'))
 			},
 			onDelete: () => this.#confirmDelete(a),
+			onMakeCard: () => void this.plugin.exportQuoteCard(this, a.id),
 			onSendToCanvas: () => void this.plugin.exportToCanvas(this, [a.id]),
 		})
 	}

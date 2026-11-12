@@ -34,6 +34,15 @@ export interface GroveLinkTarget {
 	chapter?: string
 	/** 章节内百分比 0..1 */
 	pct?: number
+	/** PDF 专有：归一化到页面宽高的框选矩形（链接里的 `r=`），用于精确到句 */
+	pdfRects?: PdfRect[]
+}
+
+export interface PdfRect {
+	l: number
+	t: number
+	w: number
+	h: number
 }
 
 /**
@@ -74,12 +83,40 @@ export function buildSubpath(target: GroveLinkTarget): string {
 	if (text) parts.push(`t=${encodeURIComponent(text)}`)
 	const chapter = target.chapter?.trim()
 	if (chapter) parts.push(`c=${encodeURIComponent(chapter)}`)
+	const rects = encodeRects(target.pdfRects)
+	if (rects) parts.push(`r=${rects}`)
 	if (typeof target.pct === 'number' && Number.isFinite(target.pct)) {
 		const p = Math.max(0, Math.min(1, target.pct))
 		parts.push(`p=${p.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}`)
 	}
 	if (!parts.length) return ''
 	return `${PREFIX}${parts.join('&')}`
+}
+
+const clamp01 = (n: number): number => Math.max(0, Math.min(1, n))
+const round3 = (n: number): string => String(Math.round(n * 1000) / 1000)
+
+/** 矩形压成 `l,t,w,h;l,t,w,h`；最多 8 个，避免把链接撑得过长 */
+function encodeRects(rects?: PdfRect[]): string {
+	if (!rects?.length) return ''
+	return rects
+		.slice(0, 8)
+		.filter(r => Number.isFinite(r.l) && Number.isFinite(r.t) && r.w > 0 && r.h > 0)
+		.map(r => [r.l, r.t, r.w, r.h].map(clamp01).map(round3).join(','))
+		.join(';')
+}
+
+function parseRects(raw?: string): PdfRect[] | undefined {
+	if (!raw) return undefined
+	const out: PdfRect[] = []
+	for (const part of raw.split(';')) {
+		const nums = part.split(',').map(Number)
+		if (nums.length !== 4 || nums.some(n => !Number.isFinite(n))) continue
+		const [l, t, w, h] = nums
+		if (w <= 0 || h <= 0) continue
+		out.push({ l: clamp01(l), t: clamp01(t), w: clamp01(w), h: clamp01(h) })
+	}
+	return out.length ? out : undefined
 }
 
 /** 子路径串 → 定位；不是本插件的子路径返回 null */
@@ -94,7 +131,8 @@ export function parseSubpath(sub: string): GroveLinkTarget | null {
 	}
 	const cfi = params.get('cfi')
 	const text = params.get('t')
-	if (!cfi && !text) return null
+	const pdfRects = parseRects(params.get('r'))
+	if (!cfi && !text && !pdfRects) return null
 	const chapter = params.get('c')
 	const pctRaw = params.get('p')
 	const pct = pctRaw == null ? NaN : Number(pctRaw)
@@ -103,6 +141,7 @@ export function parseSubpath(sub: string): GroveLinkTarget | null {
 		text: text ? safeDecode(text) : undefined,
 		chapter: chapter ? safeDecode(chapter) : undefined,
 		pct: Number.isFinite(pct) ? Math.max(0, Math.min(1, pct)) : undefined,
+		pdfRects,
 	}
 }
 
@@ -151,6 +190,18 @@ export function wikilinkFor(bookPath: string, target: GroveLinkTarget, label: st
 	const path = bookPath.trim()
 	if (UNSAFE_PATH.test(path)) return `[${text}](${encodePathForMarkdown(path)}#${sub})`
 	return `[[${path}#${sub}|${text}]]`
+}
+
+/**
+ * PDF 页嵌入：库内书用 Obsidian 原生的 `![[书.pdf#page=N]]`；
+ * 路径带 `# | [ ]` 时改走 markdown 图片链接形态。
+ */
+export function pdfPageEmbed(bookPath: string, page: number, label?: string): string {
+	const path = bookPath.trim()
+	if (!path || !Number.isFinite(page) || page < 1) return ''
+	const alt = aliasOf(label ?? `第 ${page} 页`)
+	if (UNSAFE_PATH.test(path)) return `![${alt}](${encodePathForMarkdown(path)}#page=${page})`
+	return `![[${path}#page=${page}]]`
 }
 
 export interface ParsedGroveLink {

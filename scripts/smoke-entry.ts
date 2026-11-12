@@ -15,10 +15,23 @@ import { TrashStore } from '../src/trash'
 import { buildHealthReport, healthCleanupCount } from '../src/health'
 import { checkMigrateTarget, exportDataBackup, migrateDataFolder } from '../src/backup'
 import { appendCards, buildCardText, emptyCanvas, parseCanvas, serializeCanvas, shortTitle } from '../src/canvas'
-import { buildSubpath, parseGroveHref, parseSubpath, snippetOf, wikilinkFor } from '../src/wikilink'
+import { buildSubpath, parseGroveHref, parseSubpath, pdfPageEmbed, snippetOf, wikilinkFor } from '../src/wikilink'
+import { filterBacklinkGroupsByCfi } from '../src/backlinkFilter'
 import { markupColorCss, markupOpacity, markupRects, markupSubtype } from '../src/pdfAnnots'
 import { collectGlobalBookmarks, filterGlobalBookmarks } from '../src/globalBookmarks'
 import { hasNoteFragment, isMarkerLikeText, looksLikeFootnoteRef } from '../src/footnotes'
+import { quoteCardFileName, wrapText } from '../src/cardImage'
+import {
+	buildAskPrompt,
+	chunkSections,
+	loadPortrait,
+	pickChunks,
+	portraitPath,
+	previewOf,
+	removePortrait,
+	savePortrait,
+	tokenizeQuery,
+} from '../src/portrait'
 
 async function main(): Promise<void> {
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-data-'))
@@ -573,6 +586,38 @@ assert.equal(await storeDedupe.reloadFromDisk(bookIdFor('Books/x.epub')), true, 
 	assert.equal(parseGroveHref('[[Grove Reader/书籍/围城.epub]]'), null)
 	assert.equal(parseGroveHref('obsidian://grove?book=id&cfi=x'), null)
 	assert.equal(parseSubpath('bzr-cfi=x'), null)
+	// PDF 框选矩形：r= 往返（3 位小数），坏数据忽略
+	const rectSub = buildSubpath({ cfi: 'page:3', text: '测试摘录', pdfRects: [{ l: 0.1234, t: 0.5678, w: 0.25, h: 0.01 }] })
+	assert.ok(rectSub.includes('r=0.123,0.568,0.25,0.01'), rectSub)
+	const rectBack = parseSubpath(rectSub)!
+	assert.equal(rectBack.cfi, 'page:3')
+	assert.equal(rectBack.pdfRects?.length, 1)
+	assert.ok(Math.abs((rectBack.pdfRects?.[0].l ?? 0) - 0.123) < 1e-9, '矩形应能还原')
+	assert.equal(parseSubpath('grove-cfi=page:1&r=1,2,3')?.pdfRects, undefined, '坏矩形应忽略')
+	assert.ok(parseSubpath('grove-r=0,0,0.5,0.5'), '只有矩形也算有效定位')
+	// PDF 页嵌入与「本页引用」过滤
+	assert.equal(pdfPageEmbed('Grove Reader/书籍/围城.pdf', 3), '![[Grove Reader/书籍/围城.pdf#page=3]]')
+	assert.ok(pdfPageEmbed('Books/C# 入门.pdf', 2).startsWith('!['), '带 # 的路径退化为 markdown 图片链接')
+	const groups = [
+		{ chapter: '第 1 页', rows: [{ sourcePath: 'a.md', noteTitle: 'a', chapter: '第 1 页', count: 1, links: [{ link: 'x' } as never], snippet: '', target: { cfi: 'page:1' } }] },
+		{ chapter: '第 2 页', rows: [{ sourcePath: 'b.md', noteTitle: 'b', chapter: '第 2 页', count: 1, links: [{ link: 'y' } as never], snippet: '', target: { cfi: 'page:2' } }] },
+	]
+	assert.equal(filterBacklinkGroupsByCfi(groups, 'page:1').length, 1)
+	assert.equal(filterBacklinkGroupsByCfi(groups, 'page:1')[0].rows[0].noteTitle, 'a')
+	assert.equal(filterBacklinkGroupsByCfi(groups, 'page:9').length, 0)
+	// PDF 笔记里应真的写进 r=
+	const pdfData = {
+		...data,
+		bookPath: 'Grove Reader/书籍/围城.pdf',
+		kind: 'pdf' as const,
+		annotations: [{
+			...data.annotations[0],
+			cfi: 'page:2',
+			pdf: { page: 2, rects: [{ l: 0.1, t: 0.2, w: 0.3, h: 0.01 }] },
+		}],
+	}
+	const pdfNote = buildNote(pdfData, 'idpdf', null)
+	assert.ok(pdfNote.includes('r=0.1,0.2,0.3,0.01'), 'PDF 笔记链接应带框选矩形')
 	// 库外书（绝对路径）写不了双链，模板层退回协议链接
 	const absNote = buildNote({ ...data, bookPath: 'D:/Books/围城.epub' }, 'id123', null)
 	assert.ok(absNote.includes('obsidian://grove?'), '库外书应退回协议链接')
@@ -718,6 +763,65 @@ assert.equal(await storeDedupe.reloadFromDisk(bookIdFor('Books/x.epub')), true, 
 	assert.ok(!isMarkerLikeText('第一章') && !isMarkerLikeText('参见'))
 	assert.ok(hasNoteFragment('text.html#note1n') && hasNoteFragment('ch2.xhtml#fn3'))
 	assert.ok(!hasNoteFragment('ch2.xhtml#chapter1'))
+}
+
+// 39. 书摘卡：中英断行、标点行首、段落、文件名
+{
+	const measure = (s: string): number => Array.from(s).length * 10
+	const cn = wrapText('阅读的意义不在于把书从头到尾扫一遍，而在于和作者对话。', 100, measure)
+	assert.ok(cn.every(l => Array.from(l).length <= 10), '每行不超过 10 字')
+	assert.equal(cn.join(''), '阅读的意义不在于把书从头到尾扫一遍，而在于和作者对话。')
+	assert.ok(!cn.slice(1).some(l => /^[，。、；：？！]/.test(l)), '标点不落在行首')
+	const en = wrapText('hello world example', 60, measure)
+	assert.deepEqual(en, ['hello', 'world', 'example'], '英文整词断行，超长词独占一行')
+	assert.deepEqual(wrapText('a\n\nb', 100, measure), ['a', '', 'b'], '保留段落间隔')
+	const name = quoteCardFileName('置身事内：中国政府与经济发展', new Date(2026, 10, 13, 15, 30, 12).getTime())
+	assert.ok(/^书摘卡-置身事内-\d{8}-\d{6}\.png$/.test(name), name)
+}
+
+// 40. AI 全书问答：分块、分词、检索、提示词、索引落盘
+{
+	const longText = '这是一段用于测试分块的中文内容。'.repeat(200)
+	const chunks = chunkSections([{ label: '第一章', text: longText }], 1300)
+	assert.ok(chunks.length >= 3, '长正文应切成多块')
+	assert.ok(chunks.every(c => c.text.length <= 1320), '块不应远超上限')
+	assert.ok(chunks.every(c => c.chapter === '第一章'))
+	const merged = chunkSections([
+		{ label: '第一章', text: '一段。'.repeat(400) },
+		{ label: '第二章', text: '二段。'.repeat(400) },
+	], 1300)
+	assert.ok(merged.some(c => c.chapter === '第一章') && merged.some(c => c.chapter === '第二章'))
+	const terms = tokenizeQuery('地方政府的权力是什么')
+	assert.ok(terms.includes('地方') && terms.includes('政府'), terms.join(','))
+	assert.ok(!terms.includes('什么'))
+	const docs = [
+		{ index: 0, chapter: '第一章', summary: '地方政府的财政与权力', preview: '土地财政', chars: 100 },
+		{ index: 1, chapter: '第二章', summary: '企业的市场化改革', preview: '国企', chars: 100 },
+	]
+	assert.equal(pickChunks(tokenizeQuery('地方财政'), docs, 1)[0].chapter, '第一章')
+	assert.equal(pickChunks(tokenizeQuery('完全无关的词'), docs, 2).length, 2, '无命中时均匀抽样')
+	const prompt = buildAskPrompt('测试书', '地方财政是什么？', pickChunks(tokenizeQuery('地方财政'), docs, 1))
+	assert.ok(prompt.includes('《测试书》') && prompt.includes('地方财政是什么'))
+	assert.ok(prompt.includes('[1] 第一章'))
+	assert.equal(portraitPath('Grove Reader', 'abc'), 'Grove Reader/portraits/abc.json')
+	assert.equal(previewOf('a'.repeat(400)).length, 361)
+	const io = new DesktopIO()
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-portrait-'))
+	const doc = {
+		version: 1 as const,
+		bookPath: 'Books/a.epub',
+		title: '甲',
+		createdAt: 1,
+		updatedAt: 2,
+		status: 'ready' as const,
+		chunks: docs,
+	}
+	await savePortrait(io, root, 'abc', doc)
+	const loaded = await loadPortrait(io, root, 'abc')
+	assert.equal(loaded?.chunks.length, 2)
+	assert.equal(loaded?.title, '甲')
+	await removePortrait(io, root, 'abc')
+	assert.equal(await loadPortrait(io, root, 'abc'), null)
 }
 
 console.log('SMOKE OK')

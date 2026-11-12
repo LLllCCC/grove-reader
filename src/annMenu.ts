@@ -14,6 +14,8 @@ export interface AnnMenuActions {
 	onDelete: () => void
 	/** 有值时才显示「发送到 Canvas」 */
 	onSendToCanvas?: () => void
+	/** 有值时才显示「生成书摘卡」 */
+	onMakeCard?: () => void
 }
 
 let currentMenu: HTMLElement | null = null
@@ -73,6 +75,7 @@ export function showAnnMenu(
 		{ icon: 'message-square', label: '编辑评论', run: actions.onEditComment },
 		{ icon: 'copy', label: '复制原文', run: actions.onCopyText },
 	]
+	if (actions.onMakeCard) rows.push({ icon: 'image', label: '生成书摘卡', run: actions.onMakeCard })
 	if (actions.onSendToCanvas) rows.push({ icon: 'layout-dashboard', label: '发送到 Canvas', run: actions.onSendToCanvas })
 	rows.push({ icon: 'trash-2', label: '删除批注', run: actions.onDelete })
 	for (const row of rows) {

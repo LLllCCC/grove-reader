@@ -1,21 +1,9 @@
 import { Notice, setIcon } from 'obsidian'
-import { AiConfig, explainSelection, isAiConfigured } from './ai'
+import { AiConfig, explainSelection, hintFor, isAiConfigured } from './ai'
 import { truncate } from './util'
 
 const NOT_CONFIGURED =
 	'Grove Reader：还没有配置 AI。设置 → 阅读 → AI 解释 里填入接口地址与 API Key（推荐智谱 GLM-4-Flash，免费）'
-
-/** 常见失败给一句可执行的补救提示，不要只丢网络层错误码 */
-function hintFor(message: string): string {
-	if (/net::|ERR_CONNECTION|ERR_NAME_NOT_RESOLVED|Failed to fetch|ECONNREFUSED/i.test(message)) {
-		return '（检查接口地址是否写错、网络是否可达）'
-	}
-	if (/\b401\b|\b403\b|invalid.*api.*key|unauthorized/i.test(message)) {
-		return '（API Key 无效或没有该模型的权限）'
-	}
-	if (/\b429\b|rate limit/i.test(message)) return '（请求太频繁或额度用尽，稍后再试）'
-	return ''
-}
 
 /**
  * 划词解释浮层。EPUB / TXT 共用一套 DOM 与定位逻辑：

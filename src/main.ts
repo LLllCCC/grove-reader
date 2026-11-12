@@ -28,10 +28,12 @@ import { applySync, planSync } from './noteSync'
 import { collectGlobalBookmarks } from './globalBookmarks'
 import type { GlobalBookmarkRow } from './globalBookmarks'
 import { appendCards, buildCardText, canvasColor, emptyCanvas, parseCanvas, serializeCanvas } from './canvas'
+import { quoteCardFileName, renderQuoteCard } from './cardImage'
 import { GroveSettingTab } from './settings'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate, resolveExcerptLinkStyle } from './notes'
 import type { NoteExtraFields } from './notes'
 import { collectExcerptBacklinks, type ExcerptBacklinkRow } from './backlinks'
+import { BookAskModal } from './bookAskModal'
 import { parseGroveHref } from './wikilink'
 import type { GroveLinkTarget, ParsedGroveLink } from './wikilink'
 import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
@@ -629,6 +631,11 @@ export default class GroveReaderPlugin extends Plugin {
 		return leaf && this.#isPdfView(leaf.view) ? leaf.view : null
 	}
 
+	/** 数据根目录：书摘卡、要点索引等模块通过它定位自己的文件 */
+	getDataRoot(): string {
+		return this.dataRoot
+	}
+
 	private withAnyReader(checking: boolean, run: (view: ReaderView | PdfView | TextView) => unknown): boolean {
 		const r = this.activeReader()
 		if (r?.ready) {
@@ -1191,6 +1198,11 @@ export default class GroveReaderPlugin extends Plugin {
 			checkCallback: checking => this.withAnyReader(checking, v => this.generateNoteFor(v)),
 		})
 		this.addCommand({
+			id: 'book-ask',
+			name: '问这本书（AI 全书问答）',
+			checkCallback: checking => this.withAnyReader(checking, v => new BookAskModal(this.app, this, v).open()),
+		})
+		this.addCommand({
 			id: 'rescan-bookshelf',
 			name: '重新扫描书架',
 			callback: () => {
@@ -1303,6 +1315,52 @@ export default class GroveReaderPlugin extends Plugin {
 			name: '阅读统计',
 			callback: () => new ReadingStatsModal(this.app, this).open(),
 		})
+	}
+
+	/** 把单条批注画成书摘卡 PNG，存到 Grove Reader/书摘卡 */
+	async exportQuoteCard(view: ReaderView | PdfView | TextView, annotationId: string): Promise<void> {
+		const data = view.snapshot()
+		const a = data?.annotations.find(x => x.id === annotationId)
+		if (!data || !a) {
+			new Notice('Grove Reader：找不到这条批注')
+			return
+		}
+		let canvas: HTMLCanvasElement
+		try {
+			canvas = renderQuoteCard({
+				text: a.text,
+				note: a.note,
+				bookTitle: data.title || '未命名',
+				author: data.author,
+				chapter: a.chapter,
+				color: a.color,
+			})
+		} catch (e) {
+			new Notice(`Grove Reader：生成书摘卡失败（${e instanceof Error ? e.message : String(e)}）`)
+			return
+		}
+		const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+		if (!blob) {
+			new Notice('Grove Reader：生成书摘卡失败（导出图片为空）')
+			return
+		}
+		const folder = normalizePath(`${LIBRARY_ROOT}/书摘卡`)
+		if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder)
+		let path = normalizePath(`${folder}/${sanitizeFileName(quoteCardFileName(data.title || '未命名', Date.now()))}`)
+		// 同一秒内连续生成同名卡片时加序号，别让用户看到「保存失败」
+		if (this.app.vault.getAbstractFileByPath(path)) {
+			const base = path.replace(/\.png$/i, '')
+			let i = 2
+			while (this.app.vault.getAbstractFileByPath(`${base}-${i}.png`)) i++
+			path = `${base}-${i}.png`
+		}
+		try {
+			await this.app.vault.createBinary(path, await blob.arrayBuffer())
+		} catch (e) {
+			new Notice(`Grove Reader：保存书摘卡失败（${e instanceof Error ? e.message : String(e)}）`)
+			return
+		}
+		new Notice(`Grove Reader：书摘卡已保存到 ${path}`)
 	}
 
 	// ------------------------------------------------------------------

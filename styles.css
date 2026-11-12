@@ -3565,3 +3565,154 @@ body.is-mobile .grove-pdf-content > .grove-toolbar > .grove-pdf-side-btn {
 	padding-bottom: env(safe-area-inset-bottom, 0px);
 	box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.3);
 }
+
+/* 从笔记回跳到 PDF 时短暂标出目标句 */
+.grove-pdf-jump-mark {
+	position: absolute;
+	z-index: 3;
+	border-radius: 2px;
+	background: var(--interactive-accent);
+	pointer-events: none;
+	animation: grove-pdf-jump-pulse 2.4s ease-out forwards;
+}
+
+@keyframes grove-pdf-jump-pulse {
+	0% { opacity: 0.45; }
+	70% { opacity: 0.28; }
+	100% { opacity: 0; }
+}
+
+/* ---- AI 全书问答 ---- */
+
+.modal.grove-ask-modal-shell {
+	width: min(640px, 92vw);
+	max-width: min(640px, 92vw);
+}
+
+.grove-ask-modal {
+	width: 100%;
+}
+
+.grove-ask-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.grove-ask-icon {
+	display: flex;
+	flex: none;
+	color: var(--interactive-accent);
+}
+
+.grove-ask-title {
+	font-size: var(--font-ui-large);
+	font-weight: 600;
+}
+
+.grove-ask-book {
+	margin-left: auto;
+	max-width: 50%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-ask-status {
+	margin: 8px 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.5;
+}
+
+.grove-ask-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.grove-ask-progress {
+	min-height: 18px;
+	margin: 6px 0;
+	color: var(--text-accent);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-ask-hint {
+	margin: 6px 0;
+	padding: 8px 10px;
+	border-radius: 6px;
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.5;
+}
+
+.grove-ask-input-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: end;
+	gap: 8px;
+	margin-top: 10px;
+}
+
+.grove-ask-input {
+	min-width: 0;
+	min-height: 44px;
+	resize: vertical;
+}
+
+.grove-ask-answer {
+	margin-top: 12px;
+	max-height: 40vh;
+	overflow-y: auto;
+	line-height: 1.7;
+	font-size: var(--font-text-size);
+	-webkit-user-select: text;
+	user-select: text;
+}
+
+.grove-ask-answer p {
+	margin: 0 0 0.7em;
+}
+
+.grove-ask-loading,
+.grove-ask-empty {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-ask-refs {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	margin-top: 8px;
+}
+
+.grove-ask-refs-label {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-ask-ref {
+	max-width: 180px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	padding: 2px 8px;
+	border-radius: 10px;
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+body.is-mobile .grove-ask-modal {
+	width: 94vw;
+}
+
+body.is-mobile .grove-ask-answer {
+	max-height: 34vh;
+}

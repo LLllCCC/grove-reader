@@ -1,5 +1,5 @@
 import './pdfjsPolyfill'
-import { ItemView, Notice, TFile, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
+import { ItemView, Menu, Notice, TFile, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
 import * as pdfjsLib from 'pdfjs-dist'
 import type { PDFDocumentProxy, PDFWorker } from 'pdfjs-dist'
 import type GroveReaderPlugin from './main'
@@ -8,10 +8,14 @@ import { CommentModal, ConfirmModal } from './modals'
 import { JumpReturnBar } from './navReturn'
 import { createBookmarkSection, findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
 import { createColorControls } from './colorMenu'
-import { createCitationSection, type CitationSectionHandle } from './backlinks'
-import { basenameOf, isAbsolutePath, normalizeSelectionText, pageFromFraction, randomId, truncate } from './util'
+import { createCitationSection, filterBacklinkGroupsByCfi, type CitationSectionHandle, type ExcerptBacklinkGroup } from './backlinks'
+import { basenameOf, encodeParam, isAbsolutePath, normalizeSelectionText, pageFromFraction, randomId, truncate } from './util'
 import { joinPath } from './platformIO'
-import type { GroveLinkTarget } from './wikilink'
+import { canLinkBook, pdfPageEmbed, snippetOf, wikilinkFor } from './wikilink'
+import type { GroveLinkTarget, PdfRect } from './wikilink'
+import { shortTitle } from './canvas'
+import type { SourceSection } from './portrait'
+import { BookAskModal } from './bookAskModal'
 import { markupColorCss, markupOpacity, markupRects, markupSubtype, type PdfMarkupAnnotation } from './pdfAnnots'
 
 /** 常量定义在 types.ts（main.ts 不 import 本模块也要能判断 PDF 视图），这里保持原导出名 */
@@ -168,6 +172,10 @@ export class PdfView extends ItemView {
 	/** 手机端颜色弹层的清理函数（桌面是 5 个色点，返回空函数） */
 	private colorMenuClose: (() => void) | null = null
 	private citationSection: CitationSectionHandle | null = null
+	/** 本页引用：只列指向当前 `page:N` 的笔记 */
+	private pageCitationSection: CitationSectionHandle | null = null
+	/** 全书的引用分组缓存，翻页时只做过滤，不重复扫 metadataCache */
+	private citationGroups: ExcerptBacklinkGroup[] = []
 	private bookmarkBtnEl: HTMLElement | null = null
 	private pages = new Map<number, PageEntry>()
 	private renderedPages = new Set<number>()
@@ -338,6 +346,10 @@ export class PdfView extends ItemView {
 
 		toolbar.createDiv('grove-flex-spacer')
 
+		const askBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': 'AI 全书问答' } })
+		setIcon(askBtn, 'sparkles')
+		askBtn.addEventListener('click', () => new BookAskModal(this.app, this.plugin, this).open())
+
 		const noteBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '生成 / 更新阅读笔记' } })
 		setIcon(noteBtn, 'file-text')
 		noteBtn.addEventListener('click', () => void this.plugin.generateNoteFor(this))
@@ -346,6 +358,10 @@ export class PdfView extends ItemView {
 		setIcon(bookmarkBtn, 'bookmark')
 		bookmarkBtn.addEventListener('click', () => this.#toggleBookmark())
 		this.bookmarkBtnEl = bookmarkBtn
+
+		const linkBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '复制页链接 / 本页批注链接' } })
+		setIcon(linkBtn, 'link')
+		linkBtn.addEventListener('click', () => this.#showLinkMenu(linkBtn))
 
 		// grove-pdf-side-btn 供手机端样式把入口提到工具栏最左（内容多，否则要横滑才找得到）
 		const sideBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn grove-pdf-side-btn', attr: { 'aria-label': '批注列表' } })
@@ -422,6 +438,11 @@ export class PdfView extends ItemView {
 
 		// 书签区放在批注区之上：它是导航，不该被下面的搜索/筛选挡住
 		this.bookmarkSection = createBookmarkSection(this.sidebarEl, { onAdd: () => this.#toggleBookmark() })
+		this.pageCitationSection = createCitationSection(this.sidebarEl, {
+			title: '本页引用',
+			startCollapsed: true,
+			emptyText: '本页还没有笔记引用。',
+		})
 		this.citationSection = createCitationSection(this.sidebarEl)
 
 		// 全文搜索折叠区，与 EPUB 阅读器使用相同的侧栏结构。
@@ -1104,6 +1125,7 @@ export class PdfView extends ItemView {
 			}
 			// 翻页后当前位置变了：书签按钮的「已标记」状态要跟着变
 			this.#updateBookmarkBtn()
+			this.#renderPageCitations()
 			this.#bumpIdleCleanup()
 			// 释放远端页面内存：清空画布并调用 page.cleanup() 释放解码后的整页位图
 			//（扫描版每页一张大图，不解清理会累积到 GB 级）
@@ -1166,14 +1188,55 @@ export class PdfView extends ItemView {
 		this.tocSelect.disabled = this.tocSelect.options.length <= 1
 	}
 
-	#scrollToPage(n: number): void {
+	#scrollToPage(n: number, rects?: PdfRect[]): void {
 		const p = this.pages.get(n)
 		if (!p) return
-		this.pagesEl.scrollTo({ top: Math.max(0, p.wrap.offsetTop - 8), behavior: 'smooth' })
+		const rect = rects?.[0]
+		// 有框选就滚到那一句（留一点页眉的余量）；没有就停在页顶
+		const top = rect
+			? p.wrap.offsetTop + rect.t * p.wrap.offsetHeight - Math.max(24, this.pagesEl.clientHeight * 0.18)
+			: p.wrap.offsetTop - 8
+		this.pagesEl.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+		if (rects?.length) this.#flashJumpRects(p, rects)
+	}
+
+	/** 回跳后短暂标出目标句，2 秒后淡出（不写进数据，不挡划选） */
+	#flashJumpRects(p: PageEntry, rects: PdfRect[]): void {
+		p.wrap.querySelectorAll('.grove-pdf-jump-mark').forEach(el => el.remove())
+		for (const r of rects.slice(0, 12)) {
+			const mark = p.wrap.createDiv('grove-pdf-jump-mark')
+			mark.style.left = `${r.l * 100}%`
+			mark.style.top = `${r.t * 100}%`
+			mark.style.width = `${r.w * 100}%`
+			mark.style.height = `${r.h * 100}%`
+		}
+		window.setTimeout(() => {
+			p.wrap.querySelectorAll('.grove-pdf-jump-mark').forEach(el => el.remove())
+		}, 2400)
 	}
 
 	jumpToCfi(cfi: string, fallback?: GroveLinkTarget): void {
 		this.#jumpToCfi(cfi, true, fallback)
+	}
+
+	/** AI 全书问答：逐页取文字层；扫描版可能几乎为空 */
+	async extractAiSections(onProgress?: (done: number, total: number) => void): Promise<SourceSection[]> {
+		if (!this.pdfDoc) return []
+		const out: SourceSection[] = []
+		const total = this.numPages
+		for (let n = 1; n <= total; n++) {
+			try {
+				const page = await this.pdfDoc.getPage(n)
+				const content = await page.getTextContent()
+				const text = content.items.map(item => item.str ?? '').join(' ').replace(/\s+/g, ' ').trim()
+				if (text) out.push({ label: `第 ${n} 页`, text })
+			} catch {
+				// 单页取文失败就跳过
+			}
+			onProgress?.(n, total)
+			if (n % 8 === 0) await new Promise(resolve => setTimeout(resolve, 0))
+		}
+		return out
 	}
 
 	/** 书架手动编辑信息后同步：更新内存数据并落盘，标题即时生效 */
@@ -1240,17 +1303,18 @@ export class PdfView extends ItemView {
 			page = pageFromFraction(fb.pct, this.numPages)
 		}
 		if (!page || page < 1 || page > this.numPages) return
+		const rects = fb?.pdfRects
 		if (!remember) {
-			this.#scrollToPage(page)
+			this.#scrollToPage(page, rects)
 			return
 		}
-		this.#jumpToPageWithReturn(page)
+		this.#jumpToPageWithReturn(page, rects)
 	}
 
 	/** 明确跳页（批注 / 目录）：跳完在左下角留「返回原位置」。翻页按钮不走这里 */
-	#jumpToPageWithReturn(page: number): void {
+	#jumpToPageWithReturn(page: number, rects?: PdfRect[]): void {
 		const from = this.currentPage
-		this.#scrollToPage(page)
+		this.#scrollToPage(page, rects)
 		// 手机上批注栏是覆盖式抽屉（z-index 70），会把返回胶囊压住；
 		// 而且用户点跳转就是要看原文，顺手收起抽屉
 		if (this.plugin.isMobile) this.sidebarEl.classList.add('grove-hidden')
@@ -1316,9 +1380,91 @@ export class PdfView extends ItemView {
 	}
 	/** 引用页签：这本书被哪些笔记引用（metadataCache 实时解析） */
 	refreshCitations(): void {
-		this.citationSection?.update(this.plugin.collectExcerptBacklinks(this.bookPath), {
+		this.citationGroups = this.plugin.collectExcerptBacklinks(this.bookPath)
+		this.citationSection?.update(this.citationGroups, {
 			onJump: row => void this.plugin.openCitation(row),
 		})
+		this.#renderPageCitations()
+	}
+
+	/** 本页引用：从全书缓存里过滤当前 `page:N`，翻页只做内存过滤 */
+	#renderPageCitations(): void {
+		this.pageCitationSection?.update(filterBacklinkGroupsByCfi(this.citationGroups, `page:${this.currentPage}`), {
+			onJump: row => void this.plugin.openCitation(row),
+		})
+	}
+
+	// ------------------------------------------------------------------
+	// 复制页链接 / 批注链接
+	// ------------------------------------------------------------------
+
+	#pageLabel(page: number): string {
+		return `第 ${page} 页`
+	}
+
+	#pageLink(page: number): string {
+		const label = `${shortTitle(this.bookTitle || 'PDF')} · ${this.#pageLabel(page)}`
+		if (canLinkBook(this.bookPath)) {
+			const link = wikilinkFor(this.bookPath, { cfi: `page:${page}`, chapter: this.#pageLabel(page) }, label)
+			if (link) return link
+		}
+		return `[${label}](obsidian://grove?path=${encodeParam(this.bookPath)}&cfi=${encodeParam(`page:${page}`)})`
+	}
+
+	#annotationLink(a: Annotation, page: number): string {
+		const label = `${shortTitle(this.bookTitle || 'PDF')} · ${this.#pageLabel(page)} · ${truncate(a.text.replace(/\s+/g, ' ').trim(), 18)}`
+		const target: GroveLinkTarget = {
+			cfi: a.cfi,
+			text: snippetOf(a.text),
+			chapter: this.#pageLabel(page),
+			pdfRects: a.pdf?.rects,
+		}
+		if (canLinkBook(this.bookPath)) {
+			const link = wikilinkFor(this.bookPath, target, label)
+			if (link) return link
+		}
+		return `[${label}](obsidian://grove?path=${encodeParam(this.bookPath)}&cfi=${encodeParam(a.cfi)})`
+	}
+
+	#showLinkMenu(anchor: HTMLElement): void {
+		const page = this.currentPage
+		const menu = new Menu()
+		menu.addItem(item => item.setTitle('复制页码').setIcon('hash').onClick(() => void this.#copyText(this.#pageLabel(page))))
+		menu.addItem(item => item.setTitle('复制页链接').setIcon('link').onClick(() => void this.#copyText(this.#pageLink(page))))
+		if (canLinkBook(this.bookPath)) {
+			menu.addItem(item => item
+				.setTitle('复制页嵌入')
+				.setIcon('image')
+				.onClick(() => void this.#copyText(pdfPageEmbed(this.bookPath, page, `${shortTitle(this.bookTitle || 'PDF')} · ${this.#pageLabel(page)}`))))
+		}
+		const anns = [...(this.data?.annotations ?? [])]
+			.filter(a => a.pdf?.page === page)
+			.sort((a, b) => a.createdAt - b.createdAt)
+		if (!anns.length) {
+			menu.addItem(item => item.setTitle('本页没有批注').setIcon('quote').setDisabled(true))
+		} else if (anns.length === 1) {
+			menu.addItem(item => item.setTitle('复制批注链接').setIcon('quote').onClick(() => void this.#copyText(this.#annotationLink(anns[0], page))))
+		} else {
+			menu.addItem(item => {
+				const sub = (item.setTitle('复制批注链接').setIcon('quote') as unknown as { setSubmenu(): Menu }).setSubmenu()
+				for (const a of anns) {
+					sub.addItem(si => si
+						.setTitle(truncate(a.text.replace(/\s+/g, ' ').trim(), 24))
+						.onClick(() => void this.#copyText(this.#annotationLink(a, page))))
+				}
+			})
+		}
+		const rect = anchor.getBoundingClientRect()
+		menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 })
+	}
+
+	async #copyText(text: string): Promise<void> {
+		try {
+			await navigator.clipboard.writeText(text)
+			new Notice('Grove Reader：已复制')
+		} catch {
+			new Notice('Grove Reader：复制失败，请检查剪贴板权限')
+		}
 	}
 
 
@@ -1806,6 +1952,10 @@ export class PdfView extends ItemView {
 			const edit = actions.createEl('button', { cls: 'clickable-icon grove-mini-btn', attr: { 'aria-label': '编辑评论' } })
 			setIcon(edit, 'message-square')
 			edit.addEventListener('click', () => this.#editComment(a))
+
+			const card = actions.createEl('button', { cls: 'clickable-icon grove-mini-btn', attr: { 'aria-label': '生成书摘卡' } })
+			setIcon(card, 'image')
+			card.addEventListener('click', () => void this.plugin.exportQuoteCard(this, a.id))
 
 			const del = actions.createEl('button', { cls: 'clickable-icon grove-mini-btn', attr: { 'aria-label': '删除批注' } })
 			setIcon(del, 'trash-2')

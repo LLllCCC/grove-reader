@@ -6,6 +6,7 @@ import { App, LinkCache, setIcon } from 'obsidian'
 import { basenameOf, compareCfi } from './util'
 import { parseGroveHref } from './wikilink'
 import type { GroveLinkTarget } from './wikilink'
+export { filterBacklinkGroupsByCfi } from './backlinkFilter'
 
 /** 一条引用：某笔记里的一个摘录双链 */
 export interface ExcerptBacklink {
@@ -112,13 +113,18 @@ export interface CitationHandlers {
  * 侧栏里的可折叠「引用」区：谁在引用这本书、引了哪些章。
  * 复用书签区的样式与交互（折叠状态只在内存里）。
  */
-export function createCitationSection(parent: HTMLElement, opts: { startCollapsed?: boolean } = {}): CitationSectionHandle {
+export function createCitationSection(
+	parent: HTMLElement,
+	opts: { startCollapsed?: boolean; title?: string; emptyText?: string } = {},
+): CitationSectionHandle {
 	const startCollapsed = opts.startCollapsed ?? false
+	const title = opts.title ?? '引用'
+	const emptyText = opts.emptyText ?? '还没有笔记引用这本书。在笔记里写一条 [[书#grove-cfi=…]] 摘录双链，这里就会列出来。'
 	const el = parent.createDiv('grove-bm-section grove-cite-section')
 	const head = el.createDiv('grove-bm-head')
 	const chev = head.createSpan('grove-bm-chev')
 	setIcon(chev, startCollapsed ? 'chevron-right' : 'chevron-down')
-	head.createSpan('grove-bm-title').setText('引用')
+	head.createSpan('grove-bm-title').setText(title)
 	const count = head.createSpan('grove-bm-count')
 	count.setText('0')
 	const body = el.createDiv('grove-bm-body')
@@ -136,7 +142,7 @@ export function createCitationSection(parent: HTMLElement, opts: { startCollapse
 		count.setText(noteCount ? `${noteCount}` : '0')
 		body.empty()
 		if (!groups.length) {
-			body.createDiv('grove-ann-empty').setText('还没有笔记引用这本书。在笔记里写一条 [[书#grove-cfi=…]] 摘录双链，这里就会列出来。')
+			body.createDiv('grove-ann-empty').setText(emptyText)
 			return
 		}
 		for (const group of groups) {

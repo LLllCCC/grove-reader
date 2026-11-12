@@ -152,7 +152,13 @@ export function buildTemplateContext(data: BookData, bookId: string, opts: NoteL
 		const wiki = canLinkBook(data.bookPath)
 			? wikilinkFor(
 				data.bookPath,
-				{ cfi: a.cfi, text: snippetOf(a.text), chapter: key === '未命名章节' ? undefined : key },
+				{
+					cfi: a.cfi,
+					text: snippetOf(a.text),
+					chapter: key === '未命名章节' ? undefined : key,
+					// PDF 带上框选矩形，回跳能精确到句；电子书没有 pdf 字段
+					pdfRects: a.pdf?.rects,
+				},
 				'⤴ 回原文',
 			)
 			: ''

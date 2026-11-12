@@ -15,6 +15,8 @@ import { createBookmarkSection, findBookmarkIndex, makeBookmark, type BookmarkSe
 import { createColorControls } from './colorMenu'
 import { createCitationSection, type CitationSectionHandle } from './backlinks'
 import { blockForNote, footnoteFactsFrom, footnoteTextFrom, isInsideNoteBlock, looksLikeFootnoteRef } from './footnotes'
+import type { SourceSection } from './portrait'
+import { BookAskModal } from './bookAskModal'
 import { CommentModal, ConfirmModal } from './modals'
 import { AiPanel } from './aiPanel'
 import { Overlayer } from '../lib/foliate-js/overlayer.js'
@@ -350,6 +352,10 @@ export class ReaderView extends ItemView {
 			this.#toggleAppearancePanel()
 		})
 
+		const askBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': 'AI 全书问答' } })
+		setIcon(askBtn, 'sparkles')
+		askBtn.addEventListener('click', () => new BookAskModal(this.app, this.plugin, this).open())
+
 		const noteBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '生成 / 更新阅读笔记' } })
 		setIcon(noteBtn, 'file-text')
 		noteBtn.addEventListener('click', () => void this.plugin.generateNoteFor(this))
@@ -606,6 +612,30 @@ export class ReaderView extends ItemView {
 		this.fullTextSearchEl.open = true
 		this.fullTextSearchInput.value = q
 		void this.#runFullTextSearch()
+	}
+
+	/** AI 全书问答：按 spine 逐节取正文，章节名取目录里最具体的一项 */
+	async extractAiSections(onProgress?: (done: number, total: number) => void): Promise<SourceSection[]> {
+		const book = this.foliate?.book
+		const sections = book?.sections ?? []
+		const out: SourceSection[] = []
+		for (let i = 0; i < sections.length; i++) {
+			const section = sections[i]
+			if (section?.createDocument) {
+				try {
+					const doc = await section.createDocument()
+					const text = doc?.body ? footnoteTextFrom(doc.body) : ''
+					if (text.trim()) {
+						const label = this.tocBySection.get(i)?.label?.replace(/\u00a0/g, ' ').trim() || `第 ${i + 1} 节`
+						out.push({ label, text })
+					}
+				} catch {
+					// 单节解析失败就跳过，别让整本索引失败
+				}
+			}
+			onProgress?.(i + 1, sections.length)
+		}
+		return out
 	}
 
 	async #runFullTextSearch(): Promise<void> {
@@ -924,6 +954,8 @@ export class ReaderView extends ItemView {
 			}
 		})
 		menu.addSeparator()
+		menu.addItem(item =>
+			item.setTitle('生成书摘卡').setIcon('image').onClick(() => void this.plugin.exportQuoteCard(this, a.id)))
 		menu.addItem(item =>
 			item.setTitle('发送到 Canvas').setIcon('layout-dashboard').onClick(() => void this.plugin.exportToCanvas(this, [a.id])))
 		menu.addItem(item =>
