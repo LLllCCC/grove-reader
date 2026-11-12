@@ -187,6 +187,16 @@ export default class GroveReaderPlugin extends Plugin {
 		// 摘录双链：`[[书.epub#grove-cfi=…|⤴ 回原文]]` 的点击接管。
 		// 捕获阶段先手，阅读视图与 Live Preview 都能拦；只认自家子路径，别的链接一律放行。
 		this.registerDomEvent(document, 'click', ev => this.#onGroveLinkClick(ev), { capture: true })
+		this.registerEvent(this.app.workspace.on('file-open', file => {
+			this.debug('workspace', 'file-open', file?.path ?? null)
+			const pend = this.#pendingGroveLink
+			if (!pend || !file) return
+			if (file.path !== pend.link.vaultPath) return
+			window.clearTimeout(pend.timer)
+			this.#pendingGroveLink = null
+			// 稍等一拍让 Obsidian 的导航完全收尾，再换成 Grove 视图
+			window.setTimeout(() => void this.openGroveLink(pend.link), 30)
+		}))
 		// 文件列表里的 TXT 也提供「用 Grove Reader 打开」，自动识别 GBK/GB18030
 		this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
 			if (file instanceof TFile && file.extension.toLowerCase() === 'txt') {
@@ -754,7 +764,8 @@ export default class GroveReaderPlugin extends Plugin {
 			active: true,
 			state: { bookPath, cfi, fallback },
 		})
-		this.app.workspace.revealLeaf(leaf)
+		this.debug('reader', 'open done', { kind: 'epub-new' })
+		this.activateLeaf(leaf)
 	}
 
 	/** 在 Grove Reader 内打开 TXT（自动识别 UTF-8 / GB18030 / Big5）；cfi 为批注回跳定位 */
@@ -773,7 +784,8 @@ export default class GroveReaderPlugin extends Plugin {
 			active: true,
 			state: { bookPath, cfi, fallback },
 		})
-		this.app.workspace.revealLeaf(leaf)
+		this.debug('reader', 'open done', { kind: 'txt-new' })
+		this.activateLeaf(leaf)
 	}
 
 	/** 在 Grove Reader 内打开 PDF（专用视图：渲染 + 文字层划选批注） */
@@ -837,17 +849,41 @@ export default class GroveReaderPlugin extends Plugin {
 	 * 双链点击接管：`[[书.epub#grove-cfi=…|⤴ 回原文]]`。
 	 * 捕获阶段先手（阅读视图与 Live Preview 都能拦），只认自家子路径，别的链接一律放行。
 	 */
+	/** 手机端双链的挂起跳转：等 Obsidian 自己的导航落地（file-open），再换成 Grove 视图 */
+	#pendingGroveLink: { link: ParsedGroveLink; timer: number } | null = null
+
+	/** 手机端双链的挂起跳转：等 Obsidian 自己的导航落地（file-open），再换成 Grove 视图 */
+
 	#onGroveLinkClick(ev: MouseEvent): void {
-		if (ev.defaultPrevented) return
 		const target = ev.target as HTMLElement | null
 		const anchor = target?.closest?.('[data-href], a[href]') as HTMLElement | null
 		let raw = anchor ? (anchor.getAttribute('data-href') || anchor.getAttribute('href') || '') : ''
 		// 实时预览里的内部链接是 CM6 节点（只有 class，没有 data-href），
 		// 位置得从编辑器文档里反查：定位到点击处所在行，再挑包住它的那对 [[ ]]
 		if (!raw && target) raw = this.#hrefFromLivePreview(target) ?? ''
+		// 手机上没有 CDP、console 也不进 logcat：疑似链接点击就记进 debug 日志（开着调试模式时）
+		const cls = typeof target?.className === 'string' ? target.className.slice(0, 80) : String(target?.className ?? '')
+		this.debug('link', 'click', { prevented: ev.defaultPrevented, target: cls, raw: raw.slice(0, 100) })
+		if (ev.defaultPrevented) return
 		if (!raw.includes('grove-')) return
 		const parsed = parseGroveHref(raw)
 		if (!parsed) return
+
+		if (this.isMobile) {
+			// 手机端实测：Obsidian 自己的链接处理器（mobile-tap）也会打开这个文件，
+			// 而且晚于我们的 setViewState 落地，把 Grove 视图顶回原生编辑器（0.33.2 回归）。
+			// 所以这里不拦截：让 Obsidian 先导航，file-open 里再换成 Grove 并精确跳转。
+			if (this.#pendingGroveLink) window.clearTimeout(this.#pendingGroveLink.timer)
+			const timer = window.setTimeout(() => {
+				const pend = this.#pendingGroveLink
+				if (!pend) return
+				this.#pendingGroveLink = null
+				this.debug('link', 'file-open 未到达，兜底直接打开')
+				void this.openGroveLink(pend.link)
+			}, 900)
+			this.#pendingGroveLink = { link: parsed, timer }
+			return
+		}
 		ev.preventDefault()
 		ev.stopPropagation()
 		ev.stopImmediatePropagation()
@@ -862,13 +898,20 @@ export default class GroveReaderPlugin extends Plugin {
 			const leaves = this.app.workspace.getLeavesOfType('markdown')
 			const leaf = leaves.find(l => l.view.containerEl.contains(span))
 			const view = leaf?.view as MarkdownView | undefined
-			if (!view?.editor) return null
+			if (!view?.editor) {
+				this.debug('link', 'LP 反查：找不到所属 markdown leaf')
+				return null
+			}
 			// editor.cm 是 CM6 的 EditorView，官方 API 没收录，只能按运行时形状取
 			const cm = (view.editor as unknown as { cm?: { posAtDOM(node: Node, offset?: number): number } }).cm
-			if (!cm?.posAtDOM) return null
+			if (!cm?.posAtDOM) {
+				this.debug('link', 'LP 反查：editor.cm 不可用')
+				return null
+			}
 			const pos = cm.posAtDOM(span, 0)
 			const at = view.editor.offsetToPos(pos)
 			const line = view.editor.getLine(at.line) ?? ''
+			this.debug('link', 'LP 反查', { line: at.line, ch: at.ch, text: line.slice(0, 60) })
 			const re = /\[\[([^[\]]+)\]\]/g
 			for (let m = re.exec(line); m; m = re.exec(line)) {
 				const start = m.index
@@ -876,7 +919,8 @@ export default class GroveReaderPlugin extends Plugin {
 				if (at.ch >= start && at.ch <= end) return m[1]
 			}
 			return null
-		} catch {
+		} catch (e) {
+			this.debug('link', 'LP 反查异常', e instanceof Error ? e.message : String(e))
 			return null
 		}
 	}
