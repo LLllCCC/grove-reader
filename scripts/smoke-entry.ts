@@ -603,6 +603,40 @@ assert.equal(await storeDedupe.reloadFromDisk(bookIdFor('Books/x.epub')), true, 
 	assert.equal(resolveExcerptLinkStyle('protocol', newNote, true), 'protocol')
 }
 
+// 35. 书签写进笔记：位置排序、链接样式跟随、零书签不出空段、不干扰回写解析
+{
+	const bmBook: BookData = {
+		...data,
+		bookmarks: [
+			{ id: 'b2', cfi: 'epubcfi(/6/6!/4)', label: '第二章', createdAt: 200 },
+			{ id: 'b1', cfi: 'epubcfi(/6/4!/2,/2,/4)', label: '第一章', text: '  一段开头  ', createdAt: 100 },
+		],
+	}
+	const bmNote = buildNote(bmBook, 'id123', null)
+	assert.ok(bmNote.includes('## 书签'))
+	assert.ok(bmNote.includes('- 第一章 — 一段开头'), '书签应写位置名与片段')
+	const i1 = bmNote.indexOf('- 第一章')
+	const i2 = bmNote.indexOf('- 第二章')
+	assert.ok(i1 >= 0 && i1 < i2, '书签应按书中位置排序，而不是添加时间')
+	assert.ok(bmNote.includes('#grove-cfi='), '书签默认也写双链')
+	const bmProtocol = buildNote(bmBook, 'id123', null, null, undefined, { style: 'protocol' })
+	assert.ok(bmProtocol.includes('obsidian://grove?book=id123&cfi=epubcfi%28'), 'protocol 样式下书签也用协议链接')
+	assert.ok(!buildNote(data, 'id123', null).includes('## 书签'), '没有书签时不应出现空章节')
+	// 书签段没有块 id，不能被回写解析当成批注条目
+	const bmPlan = planSync(bmBook, bmNote)
+	assert.equal(bmPlan.changes.length, 0)
+	assert.equal(bmPlan.unknown.length, 0)
+	assert.equal(bmPlan.entries, 2, '书签不应计入批注条目')
+	// PDF 书签用页码当位置名
+	const pdfNote = buildNote({
+		...data,
+		bookPath: 'Books/林间漫步.pdf',
+		annotations: [],
+		bookmarks: [{ id: 'p1', cfi: 'page:12', label: '第 12 页', createdAt: 1 }],
+	}, 'pid', null)
+	assert.ok(pdfNote.includes('- 第 12 页'), 'PDF 书签应写页码')
+}
+
 console.log('SMOKE OK')
 }
 

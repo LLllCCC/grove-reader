@@ -73,14 +73,33 @@ export interface TemplateChapter {
 	annotations: TemplateAnnotation[]
 }
 
+/** 书签只有位置，没有摘录与评论；字段按批注的同名含义给，模板写法保持一致 */
+export interface TemplateBookmark {
+	/** 章节名 / 「第 N 页」；没取到位置名时为「未命名位置」 */
+	label: string
+	/** 加书签时那一段的开头（可能为空） */
+	text: string
+	/** 当前设置下的回跳链接 */
+	jumpLink: string
+	/** 永远是 obsidian:// 协议链接 */
+	protocolLink: string
+	/** 双链形态；书在库外时为空串 */
+	wikiLink: string
+	date: string
+	/** PDF 页码（电子书为 null，渲染为空） */
+	page: number | null
+}
+
 export interface TemplateContext {
 	title: string
 	author: string
 	bookId: string
 	bookPath: string
 	count: number
+	bookmarkCount: number
 	date: string
 	chapters: TemplateChapter[]
+	bookmarks: TemplateBookmark[]
 }
 
 function cleanHeading(text: string, max: number): string {
@@ -104,6 +123,12 @@ function sortAnnotations(list: Annotation[]): Annotation[] {
 		if (ix !== iy) return ix - iy
 		return compareCfi(x.cfi, y.cfi)
 	})
+}
+
+/** 书签的 PDF 页码从 `page:N` 里取；电子书 / TXT 返回 null */
+function pageOfCfi(cfi: string): number | null {
+	const m = /^page:(\d+)$/.exec((cfi ?? '').trim())
+	return m ? Number(m[1]) : null
 }
 
 export function buildTemplateContext(data: BookData, bookId: string, opts: NoteLinkOptions = {}): TemplateContext {
@@ -148,14 +173,38 @@ export function buildTemplateContext(data: BookData, bookId: string, opts: NoteL
 			page: a.pdf?.page ?? null,
 		})
 	}
+	// 书签按书中位置排序（不是按添加时间），和批注的阅读顺序一致
+	const bookmarks: TemplateBookmark[] = [...(data.bookmarks ?? [])]
+		.sort((x, y) => compareCfi(x.cfi, y.cfi))
+		.map(b => {
+			const protocol = jumpLink(bookId, b.cfi)
+			const wiki = canLinkBook(data.bookPath)
+				? wikilinkFor(
+					data.bookPath,
+					{ cfi: b.cfi, text: snippetOf(b.text ?? ''), chapter: b.label },
+					'⤴ 回原文',
+				)
+				: ''
+			return {
+				label: cleanHeading((b.label ?? '').trim() || '未命名位置', 60),
+				text: (b.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 120),
+				jumpLink: style === 'wikilink' && wiki ? wiki : protocol,
+				protocolLink: protocol,
+				wikiLink: wiki,
+				date: new Date(b.createdAt || Date.now()).toLocaleDateString('zh-CN'),
+				page: pageOfCfi(b.cfi),
+			}
+		})
 	return {
 		title: data.title || '未命名',
 		author: data.author || '未知',
 		bookId,
 		bookPath: data.bookPath,
 		count: sorted.length,
+		bookmarkCount: bookmarks.length,
 		date: new Date().toLocaleString('zh-CN', { hour12: false }),
 		chapters,
+		bookmarks,
 	}
 }
 
@@ -263,6 +312,14 @@ export const DEFAULT_NOTE_TEMPLATE = `# {{title}}
 > - 高亮批注：{{count}} 条
 > - 最近更新：{{date}}
 
+{{#if bookmarkCount}}
+## 书签
+
+{{#each bookmarks}}
+- {{label}}{{#if text}} — {{text}}{{/if}}（{{date}}）{{jumpLink}}
+{{/each}}
+
+{{/if}}
 {{#each chapters}}
 ## {{chapter}}
 
