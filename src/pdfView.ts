@@ -324,7 +324,8 @@ export class PdfView extends ItemView {
 		setIcon(noteBtn, 'file-text')
 		noteBtn.addEventListener('click', () => void this.plugin.generateNoteFor(this))
 
-		const sideBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '批注列表' } })
+		// grove-pdf-side-btn 供手机端样式把入口提到工具栏最左（内容多，否则要横滑才找得到）
+		const sideBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn grove-pdf-side-btn', attr: { 'aria-label': '批注列表' } })
 		setIcon(sideBtn, 'list')
 		sideBtn.addEventListener('click', () => this.sidebarEl.classList.toggle('grove-hidden'))
 

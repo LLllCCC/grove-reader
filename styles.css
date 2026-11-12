@@ -3263,3 +3263,10 @@ body.is-mobile .grove-pdf-content > .grove-toolbar::-webkit-scrollbar {
 body.is-mobile .grove-pdf-content > .grove-toolbar > * {
 	flex: 0 0 auto;
 }
+
+/* 手机端 PDF 工具栏内容多（进度 + 6 个颜色点 + 缩放 + 目录），批注列表会被挤到横滑末端，
+   用户以为没有入口。把「目录 + 批注」提到最左——这两个是手机上主要的导航入口。 */
+body.is-mobile .grove-pdf-content > .grove-toolbar > .grove-toc,
+body.is-mobile .grove-pdf-content > .grove-toolbar > .grove-pdf-side-btn {
+	order: -1;
+}
