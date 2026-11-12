@@ -168,6 +168,27 @@ export function previewOf(text: string, max = 360): string {
 	return line.length > max ? `${line.slice(0, max)}…` : line
 }
 
+/**
+ * 续建：上次中途取消/失败时，前面已生成的块可以直接复用。
+ * 只认「partial + 下标连续 + 章节/长度/预览都对得上」的前缀；书改过就从头重建，
+ * 避免把旧摘要安到新正文上。
+ */
+export function resumableChunks(doc: PortraitDoc | null, chunks: TextChunk[]): PortraitChunk[] {
+	if (!doc || doc.status !== 'partial' || !doc.chunks.length || !chunks.length) return []
+	const reusable: PortraitChunk[] = []
+	const limit = Math.min(doc.chunks.length, chunks.length)
+	for (let i = 0; i < limit; i++) {
+		const old = doc.chunks[i]
+		const next = chunks[i]
+		if (!old || old.index !== i) break
+		if (old.chapter !== next.chapter) break
+		if (old.chars !== next.text.length) break
+		if (old.preview !== previewOf(next.text)) break
+		reusable.push(old)
+	}
+	return reusable
+}
+
 /** 全书问答的提示词：只依据检索到的要点与摘录，要求带章节依据 */
 export function buildAskPrompt(bookTitle: string, question: string, chunks: PortraitChunk[]): string {
 	const materials = chunks.map((chunk, i) => {
@@ -217,4 +238,21 @@ export async function removePortrait(io: PlatformIO, dataRoot: string, bookId: s
 	} catch {
 		// 不存在就算了
 	}
+}
+
+/** 书改名/移动时把索引迁到新 id 下，并更新里面的 bookPath */
+export async function movePortrait(
+	io: PlatformIO,
+	dataRoot: string,
+	fromId: string,
+	toId: string,
+	newBookPath?: string,
+): Promise<void> {
+	if (!fromId || !toId || fromId === toId) return
+	const doc = await loadPortrait(io, dataRoot, fromId)
+	if (!doc) return
+	if (newBookPath) doc.bookPath = newBookPath
+	doc.updatedAt = Date.now()
+	await savePortrait(io, dataRoot, toId, doc)
+	await removePortrait(io, dataRoot, fromId)
 }

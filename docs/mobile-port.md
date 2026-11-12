@@ -78,7 +78,7 @@ PDF 作为第二阶段：如果 pdf.js worker 在移动 WebView 上无法跑通�
 - 数据层是全同步实现，异步化会牵动很多调用点，容易回归；建议先做适配层 + 单测，再逐个替换
 - pdf.js worker 在移动端可能不可用，PNG/字体资源路径也可能失效
 - Obsidian 移动端插件 API 与桌面存在差异（`Platform.isMobile`、`vault.adapter` 能力）
-- 仓库有定时 auto backup 提交，看到陌生提交不要慌，也不要 reset
+- 仓库的 auto backup 自 2026-11-13 起改为快照模式：工作分支不再出现 auto backup 提交，快照推到 U 盘 `auto-backup-<branch>`；看到陌生提交先确认来源，不要 reset
 
 ## 8. 交付物
 

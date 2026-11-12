@@ -1,4 +1,4 @@
-// 打包并运行 scripts/smoke-entry.ts，对数据层做不依赖 Obsidian 的冒烟测试
+// 打包并运行 scripts/smoke-entry.ts，对数据层与书架窗口数学做不依赖 Obsidian 的冒烟测试
 import { build } from 'esbuild'
 import fs from 'node:fs'
 import path from 'node:path'

@@ -10,6 +10,7 @@ import {
 	pickChunks,
 	previewOf,
 	removePortrait,
+	resumableChunks,
 	savePortrait,
 	tokenizeQuery,
 	type PortraitChunk,
@@ -123,8 +124,9 @@ export class BookAskModal extends Modal {
 		}
 
 		const actions = root.createDiv('grove-ask-actions')
+		const resumable = this.portrait?.status === 'partial' && this.portrait.chunks.length > 0
 		const build = actions.createEl('button', {
-			text: this.portrait ? '重建索引' : '建立索引',
+			text: this.portrait ? (resumable ? '继续建立' : '重建索引') : '建立索引',
 			cls: 'mod-cta',
 		})
 		build.disabled = this.building || !this.loaded
@@ -141,7 +143,7 @@ export class BookAskModal extends Modal {
 				this.building = false
 				this.progress = ''
 				this.#render()
-				new Notice('Grove Reader：已取消，下次可继续重建索引')
+				new Notice('Grove Reader：已取消，下次点「继续建立」可接着生成')
 			})
 		}
 		this.progressEl = root.createDiv('grove-ask-progress')
@@ -226,23 +228,35 @@ export class BookAskModal extends Modal {
 				new Notice('Grove Reader：正文太短，没有可建立索引的内容')
 				return
 			}
-			const ok = await confirmAsync(
-				this.app,
-				`将为《${this.view.bookTitle || '未命名'}》建立 ${chunks.length} 段要点（约 ${chunks.length} 次 AI 请求，使用你自己的 API Key）。继续吗？`,
-				'开始建立',
-			)
+			const reuse = resumableChunks(this.portrait, chunks)
+			const remaining = chunks.length - reuse.length
+			const title = this.view.bookTitle || '未命名'
+			const message = reuse.length
+				? `《${title}》共 ${chunks.length} 段，上次已完成 ${reuse.length} 段；继续生成剩余 ${remaining} 段（约 ${remaining} 次 AI 请求，使用你自己的 API Key）。继续吗？`
+				: `将为《${title}》建立 ${chunks.length} 段要点（约 ${chunks.length} 次 AI 请求，使用你自己的 API Key）。继续吗？`
+			const ok = await confirmAsync(this.app, message, reuse.length ? '继续建立' : '开始建立')
 			if (!ok || token !== this.buildToken) return
-			const doc: PortraitDoc = {
-				version: 1,
-				bookPath: this.view.bookPath,
-				title: this.view.bookTitle || '未命名',
-				createdAt: Date.now(),
-				updatedAt: Date.now(),
-				status: 'partial',
-				chunks: [],
-			}
+			const now = Date.now()
+			const doc: PortraitDoc = reuse.length
+				? {
+					...this.portrait!,
+					bookPath: this.view.bookPath,
+					title,
+					updatedAt: now,
+					status: 'partial',
+					chunks: reuse.slice(),
+				}
+				: {
+					version: 1,
+					bookPath: this.view.bookPath,
+					title,
+					createdAt: now,
+					updatedAt: now,
+					status: 'partial',
+					chunks: [],
+				}
 			this.portrait = doc
-			for (let i = 0; i < chunks.length; i++) {
+			for (let i = doc.chunks.length; i < chunks.length; i++) {
 				if (token !== this.buildToken) {
 					doc.status = 'partial'
 					doc.updatedAt = Date.now()

@@ -17,6 +17,12 @@ export interface MissingNote {
 	bookExists: boolean
 }
 
+export interface OrphanPortrait {
+	file: string
+	bookPath: string
+	title: string
+}
+
 export interface HealthReport {
 	jsonCount: number
 	annotationCount: number
@@ -27,6 +33,8 @@ export interface HealthReport {
 	staleLists: string[]
 	staleStats: string[]
 	brokenNoteIds: Array<{ note: string; id: string }>
+	/** AI 要点索引对应的书已不存在（或没有批注数据） */
+	orphanPortraits: OrphanPortrait[]
 }
 
 /** 只读体检：检查批注 JSON、笔记、书架缓存、书单、统计之间的引用是否还对得上。
@@ -48,6 +56,7 @@ export async function buildHealthReport(
 		staleLists: [],
 		staleStats: [],
 		brokenNoteIds: [],
+		orphanPortraits: [],
 	}
 
 	const resolve = (p: string): string => (vaultPath && !isAbsolutePath(p) ? joinPath(vaultPath, p) : p)
@@ -100,6 +109,24 @@ export async function buildHealthReport(
 		if (files.length > 1) report.duplicates.push({ bookPath, files })
 	}
 
+	// AI 要点索引：书 id 没有对应批注数据，或 bookPath 已不存在，都算孤儿
+	const portraitsDir = joinPath(dataRoot, 'portraits')
+	try {
+		const portraitFiles = (await io.list(portraitsDir)).files.filter(f => f.endsWith('.json'))
+		for (const full of portraitFiles) {
+			const file = full.replace(/\\/g, '/').split('/').pop() ?? full
+			const id = file.slice(0, -5)
+			const doc = await readJsonFile<{ bookPath?: unknown; title?: unknown }>(io, full)
+			const bookPath = typeof doc?.bookPath === 'string' ? doc.bookPath : ''
+			const title = typeof doc?.title === 'string' ? doc.title : ''
+			const hasData = ids.has(id)
+			const bookOk = bookPath ? await exists(bookPath) : false
+			if (!hasData || !bookOk) report.orphanPortraits.push({ file, bookPath, title })
+		}
+	} catch {
+		// 没有索引目录
+	}
+
 	const shelf = await readJsonFile<{ entries?: Record<string, unknown> }>(io, joinPath(dataRoot, 'data', 'shelf.json'))
 	for (const key of Object.keys(shelf?.entries ?? {})) {
 		if (!(await exists(key))) report.staleShelf.push(key)
@@ -139,6 +166,7 @@ export async function buildHealthReport(
 export function healthCleanupCount(report: HealthReport): number {
 	const notes = report.missingNotes.filter(n => n.bookExists).length
 	return report.staleShelf.length + report.staleLists.length + report.staleStats.length + notes
+		+ report.orphanPortraits.length
 }
 
 async function walkMarkdown(io: PlatformIO, dir: string, out: string[] = []): Promise<string[]> {

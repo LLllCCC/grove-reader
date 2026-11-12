@@ -9,6 +9,7 @@ import { PlatformIO, joinPath, readJsonFile, writeJsonFile } from './platformIO'
 import { BookInfoModal, ConfirmModal, CoverUrlModal, DeleteBookModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
 import type { BookInfoValues } from './modals'
 import type { BookList } from './lists'
+import { computeShelfWindow, estimateRowHeight, spacerHeight } from './shelfWindow'
 
 export const VIEW_TYPE_GROVE_BOOKSHELF = 'grove-bookshelf-view'
 
@@ -401,8 +402,6 @@ export class BookshelfView extends ItemView {
 	private searchInput!: HTMLInputElement
 	private sortSelect!: HTMLSelectElement
 	private cardEls = new Map<string, HTMLElement>()
-	/** 每次刷新自增：分批补卡片时用它判断这批是否已经过期 */
-	private renderToken = 0
 	private searchTimer: number | null = null
 	private refreshTimer: number | null = null
 	/** 目录扫描缓存：手动刷新 / 文件夹变更 / 库内增删改名时递增 */
@@ -415,6 +414,25 @@ export class BookshelfView extends ItemView {
 	private coverOff: (() => void) | null = null
 	/** 等封面加载的卡片容器：封面文件名 → 占位元素（首次渲染时封面还没读进缓存） */
 	private coverWaiters = new Map<string, Set<HTMLElement>>()
+	/** 当前筛选后的完整路径列表（虚拟化窗口从里面切片） */
+	private allPaths: string[] = []
+	private filteredPaths: string[] = []
+	private statsMap = new Map<string, ShelfBookInfo>()
+	private dupesMap = new Map<string, string[]>()
+	/** 当前渲染的窗口 [start, end)（按 filteredPaths 下标） */
+	private windowStart = -1
+	private windowEnd = -1
+	private rowHeight = 0
+	private topSpacer: HTMLElement | null = null
+	private bottomSpacer: HTMLElement | null = null
+	private topRows = 0
+	private bottomRows = 0
+	private windowRaf = 0
+	private resizeObserver: ResizeObserver | null = null
+	/** 观察窗口里第一张卡：封面/字体加载后卡片高度变了，行高要跟着修正 */
+	private cardObserver: ResizeObserver | null = null
+	private lastWidth = 0
+	private lastSearch = ''
 
 	constructor(leaf: WorkspaceLeaf, private plugin: GroveReaderPlugin) {
 		super(leaf)
@@ -437,7 +455,10 @@ export class BookshelfView extends ItemView {
 		const root = this.contentEl
 		root.empty()
 		root.addClass('grove-shelf-content')
-		this.registerDomEvent(root, 'scroll', () => this.#hideTooltip(), true)
+		this.registerDomEvent(root, 'scroll', () => {
+			this.#hideTooltip()
+			this.#scheduleWindow()
+		}, true)
 		this.registerDomEvent(window, 'resize', () => this.#hideTooltip())
 
 		this.listsRowEl = root.createDiv('grove-shelf-list-row')
@@ -446,6 +467,14 @@ export class BookshelfView extends ItemView {
 		this.continueEl = root.createDiv('grove-shelf-continue grove-hidden')
 		this.gridEl = root.createDiv('grove-shelf-grid')
 		this.emptyEl = this.gridEl.createDiv('grove-shelf-empty grove-hidden')
+		// 只观察宽度：窗口内容变高变矮不该触发重排
+		this.resizeObserver = new ResizeObserver(entries => {
+			const width = entries[0]?.contentRect.width ?? 0
+			if (!width || Math.abs(width - this.lastWidth) < 1) return
+			this.lastWidth = width
+			this.#reflow()
+		})
+		this.resizeObserver.observe(root)
 
 		this.#registerVaultEvents()
 		this.coverOff = this.plugin.shelfCache.onCoverLoaded((filename, url) => this.#onCoverLoaded(filename, url))
@@ -481,7 +510,7 @@ export class BookshelfView extends ItemView {
 		this.searchInput.value = this.plugin.shelfSearch
 		this.searchInput.addEventListener('input', () => {
 			this.plugin.shelfSearch = this.searchInput.value.trim().toLowerCase()
-			// 搜索只切换已有卡片的显示状态，不再重扫目录 / 重建 DOM
+			// 搜索只重算筛选列表与虚拟化窗口，不重扫目录
 			if (this.searchTimer != null) window.clearTimeout(this.searchTimer)
 			this.searchTimer = window.setTimeout(() => {
 				this.searchTimer = null
@@ -519,6 +548,12 @@ export class BookshelfView extends ItemView {
 		this.refreshTimer = null
 		this.coverOff?.()
 		this.coverOff = null
+		this.resizeObserver?.disconnect()
+		this.resizeObserver = null
+		this.cardObserver?.disconnect()
+		this.cardObserver = null
+		if (this.windowRaf) cancelAnimationFrame(this.windowRaf)
+		this.windowRaf = 0
 		this.coverWaiters.clear()
 		this.#hideTooltip()
 		this.plugin.shelfCache.saveNow()
@@ -528,13 +563,16 @@ export class BookshelfView extends ItemView {
 	async refresh(opts: { rescan?: boolean } = {}): Promise<void> {
 		const { plugin } = this
 		if (!this.gridEl) return
-		this.renderToken++
-		// 封面在第一次渲染书架时才预热（挂机直接进阅读页时不必为封面读盘）
 		await plugin.shelfCache.ensureCoversLoaded()
 		this.#hideTooltip()
 		if (opts.rescan) this.scanToken++
 		this.cardEls.clear()
 		this.coverWaiters.clear()
+		this.allPaths = []
+		this.filteredPaths = []
+		this.windowStart = -1
+		this.windowEnd = -1
+		this.rowHeight = 0
 		this.gridEl.empty()
 		this.emptyEl = this.gridEl.createDiv('grove-shelf-empty grove-hidden')
 		this.continueEl.empty()
@@ -590,47 +628,127 @@ export class BookshelfView extends ItemView {
 		}
 
 		const pathsForCards = this.#sortPaths(inList, stats)
-		const tasks = this.#renderCardsInBatches(0, pathsForCards, stats, dupes)
+		this.allPaths = pathsForCards
+		this.statsMap = stats
+		this.dupesMap = dupes
 		this.#applySearch()
 		// 首屏卡片已建好：记一次「启动 → 书架可交互」（本次会话只记第一次）
 		plugin.markShelfInteractive(visiblePaths.length)
-		void this.#runQueue(tasks, 2).then(() => this.#applySearch())
-		if (pathsForCards.length > this.#batchSize()) this.#scheduleRestBatches(pathsForCards, stats, dupes)
 	}
 
-	/** 手机上一屏放不了几张，分批建卡片，首屏更快出图 */
-	#batchSize(): number {
-		return this.plugin.isMobile ? 36 : 120
+	/** 手机上一屏放不了几张，虚拟化窗口的上下缓冲按行算，不按本算 */
+	#scheduleWindow(): void {
+		if (this.windowRaf) return
+		this.windowRaf = window.requestAnimationFrame(() => {
+			this.windowRaf = 0
+			this.#renderWindow()
+		})
 	}
 
-	#renderCardsInBatches(
-		start: number,
-		paths: string[],
-		stats: Map<string, ShelfBookInfo>,
-		dupes: Map<string, string[]>,
-	): Array<() => Promise<void>> {
+	/** 宽度变化：列数/行高都会变，清掉缓存后整窗重排 */
+	#reflow(): void {
+		this.rowHeight = 0
+		this.windowStart = -1
+		this.windowEnd = -1
+		this.#renderWindow(true)
+	}
+
+	#columnCount(): number {
+		const template = getComputedStyle(this.gridEl).gridTemplateColumns
+		if (!template || template === 'none') return 1
+		return Math.max(1, template.trim().split(/\s+/).length)
+	}
+
+	/** 行高 = 卡片高 + 16px 间隙；先估一个，渲染后用真实卡片高度修正 */
+	#rowHeightFor(cols: number): number {
+		if (this.rowHeight > 0) return this.rowHeight
+		this.rowHeight = estimateRowHeight(this.gridEl.clientWidth, cols)
+		return this.rowHeight
+	}
+
+	#createSpacer(top: boolean): void {
+		const rows = top ? this.topRows : this.bottomRows
+		const spacer = this.gridEl.createDiv('grove-shelf-spacer')
+		spacer.style.gridColumn = '1 / -1'
+		spacer.style.height = `${spacerHeight(rows, this.rowHeight)}px`
+		if (top) this.topSpacer = spacer
+		else this.bottomSpacer = spacer
+	}
+
+	#remeasureRow(): void {
+		const cards = Array.from(this.gridEl.querySelectorAll('.grove-shelf-card')) as HTMLElement[]
+		if (!cards.length) return
+		const first = cards[0].getBoundingClientRect()
+		// 用相邻两行的 top 差算真实行距，避免只测一张卡时漏掉行高差异
+		const cols = this.#columnCount()
+		const next = cards.length > cols
+			? Math.abs(cards[cols].getBoundingClientRect().top - first.top)
+			: first.height + 16
+		if (!next || Math.abs(next - this.rowHeight) <= 1) return
+		this.rowHeight = next
+		if (this.topSpacer) this.topSpacer.style.height = `${spacerHeight(this.topRows, next)}px`
+		if (this.bottomSpacer) this.bottomSpacer.style.height = `${spacerHeight(this.bottomRows, next)}px`
+	}
+
+	#observeFirstCard(): void {
+		this.cardObserver?.disconnect()
+		const first = this.gridEl.querySelector('.grove-shelf-card') as HTMLElement | null
+		if (!first) return
+		this.cardObserver = new ResizeObserver(() => this.#remeasureRow())
+		this.cardObserver.observe(first)
+	}
+
+	/** 只渲染当前视口上下各 3 行的卡片，其余用上下 spacer 撑出滚动高度 */
+	#renderWindow(force = false): void {
+		if (!this.gridEl) return
+		const paths = this.filteredPaths
+		if (!paths.length) {
+			this.#resetGrid()
+			this.windowStart = -1
+			this.windowEnd = -1
+			return
+		}
+		const cols = this.#columnCount()
+		const rowHeight = this.#rowHeightFor(cols)
+		const contentRect = this.contentEl.getBoundingClientRect()
+		const gridRect = this.gridEl.getBoundingClientRect()
+		const gridTop = gridRect.top - contentRect.top + this.contentEl.scrollTop
+		const win = computeShelfWindow({
+			scrollTop: this.contentEl.scrollTop,
+			clientHeight: this.contentEl.clientHeight,
+			gridTop,
+			columns: cols,
+			rowHeight,
+			itemCount: paths.length,
+		})
+		const { start, end } = win
+		if (!force && start === this.windowStart && end === this.windowEnd) return
+
+		this.#resetGrid()
+		this.windowStart = start
+		this.windowEnd = end
+		this.topRows = win.topRows
+		this.bottomRows = win.bottomRows
+		if (this.topRows > 0) this.#createSpacer(true)
 		const tasks: Array<() => Promise<void>> = []
-		for (const p of paths.slice(start, start + this.#batchSize())) {
-			const card = this.#renderCard(p, stats.get(p), dupes.get(p))
-			// 分批补卡片时搜索词可能还在生效，先按当前搜索词隐藏，避免闪一下再消失
-			if (!this.#matches(p, this.plugin.shelfSearch)) card.addClass('is-hidden')
-			tasks.push(() => this.#ensureEntry(p, card))
+		for (let i = start; i < end; i++) {
+			const path = paths[i]
+			const card = this.#renderCard(path, this.statsMap.get(path), this.dupesMap.get(path))
+			tasks.push(() => this.#ensureEntry(path, card))
 		}
-		return tasks
+		if (this.bottomRows > 0) this.#createSpacer(false)
+		void this.#runQueue(tasks, 2)
+		this.#observeFirstCard()
+		window.requestAnimationFrame(() => this.#remeasureRow())
 	}
 
-	/** 首批之后剩下的卡片：空闲时逐批补上，避免一次性建几百个 DOM 节点 */
-	#scheduleRestBatches(paths: string[], stats: Map<string, ShelfBookInfo>, dupes: Map<string, string[]>): void {
-		const token = this.renderToken
-		let next = this.#batchSize()
-		const step = (): void => {
-			if (token !== this.renderToken) return // 已被新的刷新取代
-			const tasks = this.#renderCardsInBatches(next, paths, stats, dupes)
-			next += this.#batchSize()
-			void this.#runQueue(tasks, 2).then(() => this.#applySearch())
-			if (next < paths.length) window.setTimeout(step, 0)
-		}
-		window.setTimeout(step, 0)
+	#resetGrid(): void {
+		this.gridEl.empty()
+		this.emptyEl = this.gridEl.createDiv('grove-shelf-empty grove-hidden')
+		this.cardEls.clear()
+		this.coverWaiters.clear()
+		this.topSpacer = null
+		this.bottomSpacer = null
 	}
 
 	/** 扫描结果按「文件夹列表 + token」缓存：搜索/排序刷新不再走磁盘 */
@@ -661,20 +779,20 @@ export class BookshelfView extends ItemView {
 	}
 
 	/**
-	 * 搜索：只切换卡片可见性 + 更新计数，不动 DOM 结构。
-	 * 卡片在 refresh() 时按书单维度全量建好，清空搜索可即时恢复。
+	 * 搜索：重算筛选后的完整路径列表，再让虚拟化窗口按当前滚动位置重画。
+	 * 不再逐个切换几百张卡片的 display。
 	 */
 	#applySearch(): void {
-		if (!this.emptyEl) return
+		if (!this.emptyEl || !this.allPaths.length) return
 		const q = this.plugin.shelfSearch
-		let shown = 0
-		for (const [path, card] of this.cardEls) {
-			const match = this.#matches(path, q)
-			card.toggleClass('is-hidden', !match)
-			if (match) shown++
+		// 搜索词变了就回到顶部：结果变少时旧滚动位置会落到窗口之外
+		if (q !== this.lastSearch) {
+			this.lastSearch = q
+			this.contentEl.scrollTop = 0
 		}
-		const total = this.cardEls.size
-		if (shown === 0 && total > 0) {
+		this.filteredPaths = q ? this.allPaths.filter(path => this.#matches(path, q)) : this.allPaths.slice()
+		this.#renderWindow(true)
+		if (this.filteredPaths.length === 0 && this.allPaths.length > 0) {
 			this.#showEmpty('没有匹配的书。试试只输书名或作者里的关键词。')
 		} else {
 			this.emptyEl.addClass('grove-hidden')
@@ -868,6 +986,8 @@ export class BookshelfView extends ItemView {
 				lists.setMember(oldPath, null)
 			}
 			if (hasBookData) this.plugin.store.migrateData(oldPath, newPath)
+			// AI 要点索引按书 id 存，改名/移动也要跟着迁
+			this.plugin.migratePortrait(oldPath, newPath)
 		}
 		// 文件已彻底消失且条目无个性化数据（自定义封面/手改信息）：清掉，
 		// 避免书架缓存无限膨胀；有个性化数据的保留，防移动硬盘临时掉线时误删

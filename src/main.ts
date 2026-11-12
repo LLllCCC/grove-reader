@@ -34,6 +34,7 @@ import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLAT
 import type { NoteExtraFields } from './notes'
 import { collectExcerptBacklinks, type ExcerptBacklinkRow } from './backlinks'
 import { BookAskModal } from './bookAskModal'
+import { movePortrait } from './portrait'
 import { parseGroveHref } from './wikilink'
 import type { GroveLinkTarget, ParsedGroveLink } from './wikilink'
 import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
@@ -358,13 +359,13 @@ export default class GroveReaderPlugin extends Plugin {
 		}
 		new ConfirmModal(
 			this.app,
-			`将移除 ${count} 项失效引用（书架缓存、书单、统计、笔记路径），不会删除任何书籍或批注 JSON。继续？`,
+			`将移除 ${count} 项失效引用（书架缓存、书单、统计、笔记路径、AI 要点索引），不会删除任何书籍或批注 JSON。继续？`,
 			() => void this.cleanupHealth(report),
 		).open()
 	}
 
 	/** 只清理“指向不存在文件”的引用，不动孤儿批注 JSON 本身 */
-	cleanupHealth(report: HealthReport): void {
+	async cleanupHealth(report: HealthReport): Promise<void> {
 		let removed = 0
 		for (const path of report.staleShelf) {
 			this.shelfCache.remove(path)
@@ -383,6 +384,14 @@ export default class GroveReaderPlugin extends Plugin {
 			if (!issue.bookExists) continue
 			this.store.clearNotePath(issue.bookPath)
 			removed++
+		}
+		for (const item of report.orphanPortraits) {
+			try {
+				await this.io.remove(joinPath(this.dataRoot, 'portraits', item.file))
+				removed++
+			} catch {
+				// 已被手动删除或占用，下次体检再处理
+			}
 		}
 		this.shelfCache.saveNow()
 		this.lists.saveNow()
@@ -409,6 +418,7 @@ export default class GroveReaderPlugin extends Plugin {
 				notePath,
 				dataFile: hasData ? dataFile : undefined,
 				cover: entry?.cover,
+				portraitId: bookIdFor(bookPath),
 				shelfEntry: entry ?? null,
 				statsEntry: this.stats.peek(bookPath) ?? null,
 				listId: this.lists.listIdOf(bookPath),
@@ -634,6 +644,14 @@ export default class GroveReaderPlugin extends Plugin {
 	/** 数据根目录：书摘卡、要点索引等模块通过它定位自己的文件 */
 	getDataRoot(): string {
 		return this.dataRoot
+	}
+
+	/** 书改名/移动时迁移 AI 要点索引（与批注数据同步，避免索引变成孤儿） */
+	migratePortrait(oldPath: string, newPath: string): void {
+		const from = this.store.bookId(oldPath)
+		const to = this.store.bookId(newPath)
+		if (!from || !to || from === to) return
+		void movePortrait(this.io, this.dataRoot, from, to, newPath).catch(() => undefined)
 	}
 
 	private withAnyReader(checking: boolean, run: (view: ReaderView | PdfView | TextView) => unknown): boolean {

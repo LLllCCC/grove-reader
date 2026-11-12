@@ -12,7 +12,7 @@ import { baseName, joinPath, PlatformIO, readJsonFile, writeJsonFile } from './p
  */
 
 const MARKER = '.grove-backup'
-const CLASH_NAMES = ['books', 'covers', 'shelf.json', 'lists.json', 'data.json', 'oplog.json']
+const CLASH_NAMES = ['books', 'covers', 'portraits', 'shelf.json', 'lists.json', 'data.json', 'oplog.json']
 
 /** 备份里必须剥掉的设置字段：值是凭据，一旦随备份流出就得换 Key */
 export const SECRET_SETTING_KEYS = ['aiApiKey'] as const
@@ -132,6 +132,7 @@ export async function exportDataBackup(input: BackupInput): Promise<BackupResult
 	}
 	await prune(joinPath(root, 'books'), name => name.endsWith('.json'))
 	await prune(joinPath(root, 'covers'), () => true)
+	await prune(joinPath(root, 'portraits'), name => name.endsWith('.json'))
 	for (const name of ['shelf.json', 'lists.json', 'data.json', 'oplog.json']) {
 		try {
 			await io.remove(joinPath(root, name))
@@ -179,13 +180,25 @@ export async function exportDataBackup(input: BackupInput): Promise<BackupResult
 		// 尚无封面
 	}
 
+	// AI 要点索引：重建要重新消耗 API，跟批注一起备份
+	try {
+		const portraitsDir = joinPath(dataRoot, 'portraits')
+		const portraits = (await io.list(portraitsDir)).files.filter(f => f.endsWith('.json'))
+		if (portraits.length) {
+			await io.mkdir(joinPath(root, 'portraits'))
+			for (const full of portraits) await io.copy(full, joinPath(root, 'portraits', baseName(full)))
+		}
+	} catch {
+		// 尚无索引
+	}
+
 	const guide = [
 		'本文件夹由 Grove Reader 的「备份批注数据到库内」命令生成，是批注数据的保险副本。',
 		'它是普通库内文件：随库同步、随笔记一起备份，删除/重装插件都不受影响。',
 		'',
 		'恢复方法：',
 		'1. 关闭 Obsidian；',
-		'2. 把 books/、shelf.json、lists.json、covers/ 放回 <库>/.obsidian/plugins/grove-reader/data/；',
+		'2. 把 books/、portraits/、shelf.json、lists.json、covers/ 放回 <数据目录>/（默认是 <库>/Grove Reader/）；',
 		'3. 把 data.json 放回 <库>/.obsidian/plugins/grove-reader/（插件根目录）；',
 		'4. 重新打开 Obsidian。',
 		'',
@@ -241,6 +254,13 @@ export async function migrateDataFolder(
 	const source = joinPath(sourceRoot, 'data')
 	const target = joinPath(targetRoot, 'data')
 	const files = await copyDir(io, source, target)
+	// 要点索引不在 data/ 里，单独复制
+	try {
+		const srcPortraits = joinPath(sourceRoot, 'portraits')
+		if (await io.exists(srcPortraits)) await copyDir(io, srcPortraits, joinPath(targetRoot, 'portraits'))
+	} catch {
+		// 没有索引或复制失败不影响批注迁移
+	}
 	const srcBooks = await countJson(io, joinPath(source, 'books'))
 	const dstBooks = await countJson(io, joinPath(target, 'books'))
 	if (srcBooks !== dstBooks) throw new Error(`校验失败：源 ${srcBooks} 份批注，目标 ${dstBooks} 份`)

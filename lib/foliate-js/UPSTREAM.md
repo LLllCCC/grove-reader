@@ -66,9 +66,30 @@ bz 的 srcdoc 兜底与 `__bzrDbg` 埋点（与本插件 CSP/调试体系不同�
 ## 升级方法
 
 ```bash
-npm run foliate:check   # 对比当前内置文件与基准 commit，应只报上表 5 个已知差异
+npm run foliate:check              # 本地基线 + 上游对比
+npm run foliate:check -- --offline # 只校验本地基线（完全不联网）
+npm run foliate:baseline           # 刻意修改 foliate-js 后更新 BASELINE.json
 ```
 
-升级上游时：替换本目录文件 → 更新上面的 commit/date → 运行 `npm run foliate:check` →
-把新出现的差异逐个过目（上游可能改了 `foliate-view` 的方法签名，`src/readerView.ts`
-顶部的 `FoliateView` 接口就是插件依赖的全部契约，需要同步核对）→ 重新构建并跑冒烟。
+`BASELINE.json` 记录每个内置 `.js` 的 SHA-256（忽略行尾差异）。`foliate:check` 每次都先做这一层，
+所以 GitHub 不可达时仍能发现本地文件被误改；**刻意修改 foliate-js 后必须重跑
+`npm run foliate:baseline`，并把 `BASELINE.json` 与代码一起提交**，否则下次检查会报「改动」。
+
+网络层：单请求 12s 超时、整场上游对比默认 40s 预算；直连 `raw.githubusercontent.com` 失败时会自动切到
+`ghproxy.net` / `gh-proxy.com` 镜像，首次探测成功后复用同一条通道，避免逐文件重试。
+网络全部不可用时跳过上游对比，本地基线通过即输出 `FOLIATE CHECK OK（本地基线一致；上游对比跳过）`。
+可用环境变量覆盖：
+
+| 变量 | 作用 |
+| --- | --- |
+| `GROVE_FOLIATE_OFFLINE=1` | 只跑本地基线，不联网 |
+| `GROVE_FOLIATE_MIRROR` | 自定义镜像前缀，逗号分隔多个；镜像地址后直接拼原始 URL |
+| `GROVE_FOLIATE_FORCE_MIRROR=1` | 跳过直连，直接从镜像读（用于验证镜像通道） |
+| `GROVE_FOLIATE_TIMEOUT` | 单次请求超时毫秒数，默认 12000 |
+| `GROVE_FOLIATE_BUDGET` | 整场上游对比的网络预算，默认 40000 |
+
+上游 API 只用于提示「上游有而本地未内置」的文件；API 不可达时会跳过该项，不阻断逐文件对比。
+
+升级上游时：替换本目录文件 → 更新上面的 commit/date → 运行 `npm run foliate:baseline` 更新哈希 →
+运行 `npm run foliate:check` → 把新出现的差异逐个过目（上游可能改了 `foliate-view` 的方法签名，
+`src/readerView.ts` 顶部的 `FoliateView` 接口就是插件依赖的全部契约，需要同步核对）→ 重新构建并跑冒烟。

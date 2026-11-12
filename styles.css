@@ -3716,3 +3716,9 @@ body.is-mobile .grove-ask-modal {
 body.is-mobile .grove-ask-answer {
 	max-height: 34vh;
 }
+
+/* 书架虚拟化的上下占位：撑出未渲染行的滚动高度 */
+.grove-shelf-spacer {
+	width: 100%;
+	pointer-events: none;
+}

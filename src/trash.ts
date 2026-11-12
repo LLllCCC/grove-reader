@@ -11,6 +11,8 @@ export interface TrashEntry {
 	notePath?: string
 	dataFile?: string
 	cover?: string
+	/** AI 要点索引的书 id（portraits/<id>.json） */
+	portrait?: string
 	shelfEntry?: ShelfEntry | null
 	statsEntry?: StatsBook | null
 	listId?: string
@@ -20,6 +22,7 @@ export interface TrashEntry {
 		note?: string
 		data?: string
 		cover?: string
+		portrait?: string
 	}
 }
 
@@ -29,6 +32,7 @@ export interface TrashInput {
 	notePath?: string
 	dataFile?: string
 	cover?: string
+	portraitId?: string
 	shelfEntry?: ShelfEntry | null
 	statsEntry?: StatsBook | null
 	listId?: string
@@ -107,6 +111,7 @@ export class TrashStore {
 			if (destName.startsWith('book')) files.book = destName
 			else if (destName.startsWith('note')) files.note = destName
 			else if (destName.startsWith('cover')) files.cover = destName
+			else if (destName.startsWith('portrait')) files.portrait = destName
 			else files.data = destName
 			return true
 		}
@@ -116,6 +121,13 @@ export class TrashStore {
 			if (input.notePath) await moveOne(this.resolve(input.notePath), 'note.md')
 			if (input.dataFile) await moveOne(joinPath(this.dataRoot, 'data', 'books', input.dataFile), 'data.json')
 			if (input.cover) await moveOne(joinPath(this.dataRoot, 'data', 'covers', input.cover), `cover${extOf(input.cover)}`)
+			if (input.portraitId) {
+				try {
+					await moveOne(joinPath(this.dataRoot, 'portraits', `${input.portraitId}.json`), 'portrait.json')
+				} catch {
+					// 要点索引是辅助数据：移不进去也不能拖累删书
+				}
+			}
 			const entry: TrashEntry = {
 				id,
 				deletedAt: Date.now(),
@@ -124,6 +136,7 @@ export class TrashStore {
 				notePath: input.notePath,
 				dataFile: input.dataFile,
 				cover: input.cover,
+				portrait: files.portrait ? input.portraitId : undefined,
 				shelfEntry: input.shelfEntry ?? null,
 				statsEntry: input.statsEntry ?? null,
 				listId: input.listId,
@@ -158,6 +171,7 @@ export class TrashStore {
 		const noteTarget = entry.notePath ? this.resolve(entry.notePath) : ''
 		const dataTarget = entry.dataFile ? joinPath(this.dataRoot, 'data', 'books', entry.dataFile) : ''
 		const coverTarget = entry.cover ? joinPath(this.dataRoot, 'data', 'covers', entry.cover) : ''
+		const portraitTarget = entry.portrait ? joinPath(this.dataRoot, 'portraits', `${entry.portrait}.json`) : ''
 
 		if (entry.files.book && (await this.io.exists(bookTarget))) throw new Error('原位置已有同名书籍文件，请先移走再恢复')
 		if (entry.files.note && noteTarget && (await this.io.exists(noteTarget))) throw new Error('原位置已有同名笔记，请先移走再恢复')
@@ -191,6 +205,16 @@ export class TrashStore {
 					await this.moveFile(from, coverTarget)
 					moved.push([from, coverTarget])
 					coverRestored = true
+				}
+			}
+			// 要点索引：恢复失败不影响书本身；目标已有新索引时保留新的
+			if (entry.files.portrait && portraitTarget) {
+				try {
+					const from = joinPath(dir, entry.files.portrait)
+					if (await this.io.exists(portraitTarget)) await this.io.remove(from)
+					else await this.moveFile(from, portraitTarget)
+				} catch {
+					// 索引是辅助数据，忽略
 				}
 			}
 		} catch (e) {

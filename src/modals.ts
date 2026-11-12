@@ -657,11 +657,12 @@ export class HealthReportModal extends Modal {
 		this.contentEl.createEl('h3', { text: '数据体检' })
 		const issueCount = report.missingBooks.length + report.missingNotes.length + report.duplicates.length
 			+ report.staleShelf.length + report.staleLists.length + report.staleStats.length + report.brokenNoteIds.length
+			+ report.orphanPortraits.length
 		this.contentEl.createEl('p', {
 			text: `批注数据 ${report.jsonCount} 份 / ${report.annotationCount} 条；发现 ${issueCount} 项需要关注。`,
 		})
 		if (!issueCount) {
-			this.contentEl.createEl('p', { text: '没有发现结构性问题：书籍路径、笔记、书架、书单和统计都能对上。' })
+			this.contentEl.createEl('p', { text: '没有发现结构性问题：书籍路径、笔记、书架、书单、统计和 AI 要点索引都能对上。' })
 		} else {
 			const body = this.contentEl.createDiv('grove-health-body')
 			const section = (title: string, items: string[]): void => {
@@ -679,6 +680,8 @@ export class HealthReportModal extends Modal {
 			section('书单指向不存在的文件', report.staleLists)
 			section('阅读统计指向不存在的文件', report.staleStats)
 			section('笔记里的书籍 ID 找不到数据', report.brokenNoteIds.map(b => `${b.note} → ${b.id.slice(0, 12)}…`))
+			section('AI 要点索引对应的书已不存在', report.orphanPortraits.map(p =>
+				`《${p.title || '未命名'}》 · ${p.bookPath || '无路径'}`))
 			if (report.missingBooks.length) {
 				this.contentEl.createEl('p', {
 					cls: 'setting-item-description',
@@ -721,6 +724,7 @@ export class HealthReportModal extends Modal {
 		add('书单失效', report.staleLists)
 		add('统计失效', report.staleStats)
 		add('笔记 ID 失联', report.brokenNoteIds.map(b => `${b.note} ${b.id}`))
+		add('AI 要点索引孤儿', report.orphanPortraits.map(p => `《${p.title || '未命名'}》 ${p.bookPath}`))
 		return lines.join('\n')
 	}
 

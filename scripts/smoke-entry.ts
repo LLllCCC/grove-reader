@@ -25,13 +25,16 @@ import {
 	buildAskPrompt,
 	chunkSections,
 	loadPortrait,
+	movePortrait,
 	pickChunks,
 	portraitPath,
 	previewOf,
 	removePortrait,
+	resumableChunks,
 	savePortrait,
 	tokenizeQuery,
 } from '../src/portrait'
+import { computeShelfWindow, estimateRowHeight, spacerHeight } from '../src/shelfWindow'
 
 async function main(): Promise<void> {
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-data-'))
@@ -436,13 +439,16 @@ const vaultTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-vault-'))
 const trashRoot = path.join(vaultTmp, 'Grove Reader')
 const trashBooksDir = path.join(trashRoot, 'data', 'books')
 const trashCoversDir = path.join(trashRoot, 'data', 'covers')
+const trashPortraitsDir = path.join(trashRoot, 'portraits')
 fs.mkdirSync(trashBooksDir, { recursive: true })
 fs.mkdirSync(trashCoversDir, { recursive: true })
+fs.mkdirSync(trashPortraitsDir, { recursive: true })
 fs.mkdirSync(path.join(vaultTmp, 'Grove Reader', '书籍'), { recursive: true })
 const trashBookRel = 'Grove Reader/书籍/回收站测试.epub'
 fs.writeFileSync(path.join(vaultTmp, trashBookRel), 'book-bytes-0123456789')
 fs.writeFileSync(path.join(trashBooksDir, 'abc.json'), '{"version":1}')
 fs.writeFileSync(path.join(trashCoversDir, 'abc.jpg'), 'cover-bytes')
+fs.writeFileSync(path.join(trashPortraitsDir, 'abc.json'), '{"version":1,"chunks":[]}')
 
 const trashStore = new TrashStore(trashRoot, new DesktopIO(), vaultTmp)
 const trashEntry = await trashStore.move({
@@ -450,22 +456,27 @@ const trashEntry = await trashStore.move({
 	bookPath: trashBookRel,
 	dataFile: 'abc.json',
 	cover: 'abc.jpg',
+	portraitId: 'abc',
 })
 assert.equal(fs.existsSync(path.join(vaultTmp, trashBookRel)), false, '移入后原文件应已消失')
 assert.equal(fs.existsSync(path.join(trashBooksDir, 'abc.json')), false, '批注 JSON 应已移入回收站')
+assert.equal(fs.existsSync(path.join(trashPortraitsDir, 'abc.json')), false, 'AI 索引应随书移入回收站')
 assert.ok(trashEntry.size > 0, '回收站条目应记录大小')
 assert.equal((await trashStore.list()).length, 1)
 
 await trashStore.restore(trashEntry.id)
 assert.equal(fs.existsSync(path.join(vaultTmp, trashBookRel)), true, '恢复后原文件应回到原路径')
 assert.equal(fs.existsSync(path.join(trashBooksDir, 'abc.json')), true, '恢复后批注 JSON 应回到原路径')
+assert.equal(fs.existsSync(path.join(trashPortraitsDir, 'abc.json')), true, '恢复后 AI 索引应回到原路径')
 assert.equal((await trashStore.list()).length, 0, '恢复后回收站应为空')
 
-const trashEntry2 = await trashStore.move({ title: '回收站测试', bookPath: trashBookRel, dataFile: 'abc.json' })
+fs.writeFileSync(path.join(trashPortraitsDir, 'abc.json'), '{"version":1,"chunks":[]}')
+const trashEntry2 = await trashStore.move({ title: '回收站测试', bookPath: trashBookRel, dataFile: 'abc.json', portraitId: 'abc' })
 assert.equal((await trashStore.list()).length, 1)
 await trashStore.purge(trashEntry2.id)
 assert.equal((await trashStore.list()).length, 0, '永久删除后回收站应为空')
 assert.equal(fs.existsSync(path.join(vaultTmp, trashBookRel)), false, '永久删除后原文件不应存在')
+assert.equal(fs.existsSync(path.join(trashPortraitsDir, 'abc.json')), false, '永久删除后 AI 索引不应回来')
 
 let restoreRejected = false
 try {
@@ -491,12 +502,23 @@ fs.writeFileSync(path.join(hRoot, 'data', 'books', 'gone.json'), JSON.stringify(
 fs.writeFileSync(path.join(hRoot, 'data', 'shelf.json'), JSON.stringify({
 	entries: { 'Grove Reader/书籍/gone.epub': {} },
 }))
+fs.mkdirSync(path.join(hRoot, 'portraits'), { recursive: true })
+fs.writeFileSync(path.join(hRoot, 'portraits', 'ok.json'), JSON.stringify({
+	version: 1, bookPath: 'Grove Reader/书籍/ok.epub', title: '正常', chunks: [],
+}))
+fs.writeFileSync(path.join(hRoot, 'portraits', 'gone.json'), JSON.stringify({
+	version: 1, bookPath: 'Grove Reader/书籍/gone.epub', title: '丢了', chunks: [],
+}))
+fs.writeFileSync(path.join(hRoot, 'portraits', 'orphan.json'), JSON.stringify({
+	version: 1, bookPath: 'Grove Reader/书籍/unknown.epub', title: '孤儿', chunks: [],
+}))
 const hr = await buildHealthReport(new DesktopIO(), hv, hRoot, '')
 assert.equal(hr.jsonCount, 2)
 assert.equal(hr.annotationCount, 1)
 assert.equal(hr.missingBooks.length, 1)
 assert.equal(hr.staleShelf.length, 1)
-assert.equal(healthCleanupCount(hr), 1)
+assert.equal(hr.orphanPortraits.length, 2, '缺书与无批注数据的索引都算孤儿')
+assert.equal(healthCleanupCount(hr), 3)
 
 // 29. 备份导出（PlatformIO 版）：正常导出、标记文件、目标被占用时阻断
 const bv = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-backup-'))
@@ -507,6 +529,8 @@ fs.mkdirSync(path.join(bDataRoot, 'data', 'covers'), { recursive: true })
 fs.mkdirSync(bPluginDir, { recursive: true })
 fs.writeFileSync(path.join(bDataRoot, 'data', 'books', 'b1.json'), '{"version":1}')
 fs.writeFileSync(path.join(bDataRoot, 'data', 'shelf.json'), '{"entries":{}}')
+fs.mkdirSync(path.join(bDataRoot, 'portraits'), { recursive: true })
+fs.writeFileSync(path.join(bDataRoot, 'portraits', 'p1.json'), '{"version":1,"chunks":[]}')
 fs.writeFileSync(path.join(bPluginDir, 'data.json'), '{"scanFolders":[],"aiApiKey":"sk-should-not-leak","aiModel":"glm-4-flash"}')
 const bIo = new DesktopIO()
 const bRoot = path.join(bv, 'Grove Reader 数据备份')
@@ -514,6 +538,7 @@ const bk1 = await exportDataBackup({ io: bIo, root: bRoot, dataRoot: bDataRoot, 
 assert.equal(bk1.status, 'done')
 assert.equal(bk1.bookCount, 1)
 assert.equal(fs.existsSync(path.join(bRoot, 'books', 'b1.json')), true, '批注 JSON 应被复制到备份目录')
+assert.equal(fs.existsSync(path.join(bRoot, 'portraits', 'p1.json')), true, 'AI 要点索引应被复制到备份目录')
 assert.equal(fs.existsSync(path.join(bRoot, 'shelf.json')), true, '书架缓存应被复制')
 assert.equal(fs.existsSync(path.join(bRoot, '.grove-backup')), true, '应写入备份目录标记')
 assert.equal(fs.existsSync(path.join(bRoot, '说明.md')), true, '应生成说明文件')
@@ -538,6 +563,7 @@ assert.equal(check1.ok, true)
 const m1 = await migrateDataFolder(bIo, bDataRoot, mTarget)
 assert.equal(m1.books, 1)
 assert.equal(fs.existsSync(path.join(mTarget, 'data', 'books', 'b1.json')), true, '迁移后目标应存在批注 JSON')
+assert.equal(fs.existsSync(path.join(mTarget, 'portraits', 'p1.json')), true, '迁移后目标应存在 AI 要点索引')
 const check2 = await checkMigrateTarget(bIo, bDataRoot, mTarget)
 assert.equal(check2.ok, false, '目标已有数据时应拒绝迁移')
 const check3 = await checkMigrateTarget(bIo, bDataRoot, bDataRoot)
@@ -820,8 +846,110 @@ assert.equal(await storeDedupe.reloadFromDisk(bookIdFor('Books/x.epub')), true, 
 	const loaded = await loadPortrait(io, root, 'abc')
 	assert.equal(loaded?.chunks.length, 2)
 	assert.equal(loaded?.title, '甲')
-	await removePortrait(io, root, 'abc')
-	assert.equal(await loadPortrait(io, root, 'abc'), null)
+	await movePortrait(io, root, 'abc', 'def', 'Books/b.epub')
+	assert.equal(await loadPortrait(io, root, 'abc'), null, '改名后旧 id 索引应消失')
+	const moved = await loadPortrait(io, root, 'def')
+	assert.equal(moved?.bookPath, 'Books/b.epub', '改名后索引里的 bookPath 应更新')
+	await removePortrait(io, root, 'def')
+	assert.equal(await loadPortrait(io, root, 'def'), null)
+}
+
+// 41. 书架虚拟化窗口：只渲染视口上下各 overscan 行，spacer 与总行数守恒
+{
+	const base = { scrollTop: 0, clientHeight: 600, gridTop: 100, columns: 4, rowHeight: 300, itemCount: 200 }
+	const total = (w: ReturnType<typeof computeShelfWindow>): number =>
+		w.topRows + Math.ceil((w.end - w.start) / 4) + w.bottomRows
+	// 顶部：不渲染上方 spacer，窗口从第一张卡开始
+	const top = computeShelfWindow(base)
+	assert.equal(top.start, 0)
+	assert.equal(top.startRow, 0)
+	assert.equal(top.topRows, 0)
+	assert.equal(top.totalRows, 50)
+	assert.ok(top.end >= 12, '首屏应覆盖可见行 + 下缓冲')
+	assert.equal(total(top), top.totalRows, '顶部窗口的行数应守恒')
+	// 中部：上下各 3 行缓冲，首可见行必须落在窗口内
+	const mid = computeShelfWindow({ ...base, scrollTop: base.gridTop + base.rowHeight * 20 })
+	assert.equal(mid.startRow, 17, '上方留 3 行缓冲')
+	assert.equal(mid.start, 68)
+	assert.equal(mid.endRow, 26, '可见 3 行（含多算的一行）+ 下方 3 行缓冲')
+	assert.equal(mid.end, 104)
+	assert.ok(mid.startRow <= 20 && mid.endRow >= 23, '首屏可见行不能被漏掉')
+	assert.equal(total(mid), mid.totalRows, '中部窗口的行数应守恒')
+	// 滚到底：最后一张卡必须在窗口内，下方 spacer 归零
+	const maxScroll = base.gridTop + base.rowHeight * (mid.totalRows - 4)
+	const bottom = computeShelfWindow({ ...base, scrollTop: maxScroll })
+	assert.equal(bottom.end, base.itemCount, '滚到底不能漏最后一张卡')
+	assert.equal(bottom.endRow, bottom.totalRows)
+	assert.equal(bottom.bottomRows, 0)
+	assert.equal(total(bottom), bottom.totalRows)
+	// 少量书 + 单列（手机窄屏）：一屏装下时不留 spacer
+	const few = computeShelfWindow({ ...base, columns: 1, itemCount: 3 })
+	assert.equal(few.start, 0)
+	assert.equal(few.end, 3)
+	assert.equal(few.topRows, 0)
+	assert.equal(few.bottomRows, 0)
+	assert.equal(few.totalRows, 3)
+	// 窗口大小有上界：一万本书也不能把 DOM 全建出来
+	const huge = computeShelfWindow({ ...base, itemCount: 10000, scrollTop: base.gridTop + base.rowHeight * 1000 })
+	assert.ok((huge.end - huge.start) / 4 <= 10, '一次最多渲染可见行 + 上下各 3 行')
+	// overscan 可调；0 时只留可见区域
+	const noBuffer = computeShelfWindow({ ...base, scrollTop: base.gridTop + base.rowHeight * 20, overscanRows: 0 })
+	assert.equal(noBuffer.startRow, 20)
+	assert.equal(noBuffer.endRow, 23)
+	// 坏输入不抛、不除零
+	const bad = computeShelfWindow({
+		scrollTop: Number.NaN, clientHeight: Number.NaN, gridTop: Number.NaN,
+		columns: 0, rowHeight: 0, itemCount: 2,
+	})
+	assert.equal(bad.start, 0)
+	assert.equal(bad.end, 2)
+	assert.equal(bad.totalRows, 2, '列数非法时应按 1 列算')
+	assert.equal(computeShelfWindow({ ...base, itemCount: 0 }).end, 0)
+	// 行高估算：宽度正常按列均分；宽度未知时退回最小卡宽
+	assert.equal(estimateRowHeight(1000, 4), (1000 - 3 * 16) / 4 * 1.5 + 96)
+	assert.equal(estimateRowHeight(0, 4), 120 * 1.5 + 96)
+	assert.equal(estimateRowHeight(1000, 0), 1000 * 1.5 + 96, '非法列数按 1 列')
+	// spacer：最后一行后面不留 gap
+	assert.equal(spacerHeight(0, 300), 0)
+	assert.equal(spacerHeight(1, 300), 284)
+	assert.equal(spacerHeight(17, 300), 17 * 300 - 16)
+	assert.equal(spacerHeight(Number.NaN, 300), 0)
+}
+
+// 42. AI 索引续建：只复用 partial 且内容对得上的前缀，书改过就从头重建
+{
+	const chunks = [
+		{ chapter: '第一章', text: '第一段正文' },
+		{ chapter: '第二章', text: '第二段正文' },
+		{ chapter: '第三章', text: '第三段正文' },
+	]
+	const made = chunks.map((c, i) => ({
+		index: i,
+		chapter: c.chapter,
+		summary: `摘要${i}`,
+		preview: previewOf(c.text),
+		chars: c.text.length,
+	}))
+	const docWith = (items: typeof made, status: 'ready' | 'partial') => ({
+		version: 1 as const,
+		bookPath: 'Books/a.epub',
+		title: '甲',
+		createdAt: 1,
+		updatedAt: 1,
+		status,
+		chunks: items,
+	})
+	assert.equal(resumableChunks(null, chunks).length, 0)
+	assert.equal(resumableChunks(docWith(made.slice(0, 2), 'partial'), chunks).length, 2, '完成后应可接着生成')
+	assert.equal(resumableChunks(docWith(made.slice(0, 2), 'ready'), chunks).length, 0, 'ready 的索引应走重建')
+	// 第二章正文变了 → 只复用第一章，不能把旧摘要安到新正文上
+	const changed = chunks.map((c, i) => i === 1 ? { ...c, text: '第二段正文（改）' } : c)
+	assert.equal(resumableChunks(docWith(made.slice(0, 2), 'partial'), changed).length, 1)
+	// 下标断档 → 从断点起不再复用
+	const gap = [made[0], { ...made[1], index: 3 }]
+	assert.equal(resumableChunks(docWith(gap, 'partial'), chunks).length, 1)
+	// 旧索引比当前正文还多：只复用能对上的部分
+	assert.equal(resumableChunks(docWith(made, 'partial'), chunks).length, 3)
 }
 
 console.log('SMOKE OK')

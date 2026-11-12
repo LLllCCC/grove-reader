@@ -11,6 +11,7 @@
 		"sample": "node scripts/make-sample-epub.mjs",
 		"smoke": "node esbuild.config.mjs production && node scripts/smoke.mjs",
 		"foliate:check": "node scripts/foliate-check.mjs",
+		"foliate:baseline": "node scripts/foliate-baseline.mjs",
 		"obsidian:eval": "node scripts/obsidian-eval.mjs"
 	},
 	"devDependencies": {
