@@ -10,6 +10,15 @@
 	display: none;
 }
 
+/* 文字类工具按钮：默认参与 flex 布局，图片书（CBZ）整体隐藏 */
+.grove-text-action {
+	display: contents;
+}
+
+.grove-text-action.grove-hidden {
+	display: none;
+}
+
 /*
  * ---------- 视图头 ----------
  * 书名已经在标签页和工具栏上，Obsidian 自带的这一行（← → 与 ⋮）只白占高度。
@@ -2432,97 +2441,6 @@ body.is-mobile .grove-appear-panel {
 
 /* ---- TXT 目录按钮与目录面板 ---- */
 
-/* ---- 批注操作菜单（TXT / EPUB 共用外观） ---- */
-
-.grove-ann-menu {
-	position: fixed;
-	z-index: 2147483001;
-	min-width: 232px;
-	padding: 7px;
-	border-radius: 8px;
-	background: var(--background-primary);
-	border: 1px solid var(--background-modifier-border);
-	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
-	font-size: var(--font-ui-small);
-	color: var(--text-normal);
-	user-select: none;
-}
-
-.grove-ann-menu-colors {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 2px;
-}
-
-.grove-ann-menu-color {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	padding: 5px 7px;
-	border-radius: 5px;
-	cursor: pointer;
-}
-
-.grove-ann-menu-color:hover {
-	background: var(--background-modifier-hover);
-}
-
-.grove-ann-menu-color.is-active {
-	background: var(--background-modifier-active-hover);
-}
-
-.grove-ann-menu-dot {
-	width: 14px;
-	height: 14px;
-	border-radius: 50%;
-	flex: none;
-	box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
-}
-
-.grove-ann-menu-color-name {
-	font-size: var(--font-ui-small);
-	line-height: 1;
-}
-
-.grove-ann-menu-sep {
-	height: 1px;
-	margin: 5px 3px;
-	background: var(--background-modifier-border);
-}
-
-.grove-ann-menu-item {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	padding: 6px 8px;
-	border-radius: 5px;
-	cursor: pointer;
-}
-
-.grove-ann-menu-item:hover {
-	background: var(--background-modifier-hover);
-}
-
-.grove-ann-menu-icon {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	width: 16px;
-	height: 16px;
-	color: var(--text-muted);
-}
-
-.grove-ann-menu-icon .svg-icon {
-	width: 15px;
-	height: 15px;
-}
-
-.grove-ann-menu-label {
-	flex: 1;
-}
-
-/* ---- 批注操作菜单（TXT / EPUB 共用外观） ---- */
-
 /* ---- 跳转后的「返回原位置」浮条 ---- */
 
 .grove-jump-return {
@@ -3192,30 +3110,6 @@ body.is-mobile .grove-appear-panel {
 	padding: 2px 0;
 }
 
-/* 颜色竖排（EPUB 批注菜单） */
-.grove-ann-menu-colors.is-column {
-	flex-direction: column;
-	align-items: stretch;
-	gap: 2px;
-	padding-bottom: 6px;
-}
-
-.grove-ann-menu-colors.is-column .grove-ann-menu-color {
-	justify-content: flex-start;
-}
-
-/* 颜色竖排（EPUB 批注菜单） */
-.grove-ann-menu-colors.is-column {
-	flex-direction: column;
-	align-items: stretch;
-	gap: 2px;
-	padding-bottom: 6px;
-}
-
-.grove-ann-menu-colors.is-column .grove-ann-menu-color {
-	justify-content: flex-start;
-}
-
 /* 原生批注菜单里的颜色圆点 */
 .grove-menu-color-dot {
 	display: inline-block;
@@ -3225,6 +3119,10 @@ body.is-mobile .grove-appear-panel {
 	margin-right: 6px;
 	flex: none;
 	align-self: center;
+}
+
+.grove-menu-color-dot.is-active {
+	box-shadow: 0 0 0 2px var(--text-accent);
 }
 
 /* 移动端：批注侧栏改为覆盖式抽屉。

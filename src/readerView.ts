@@ -1,4 +1,4 @@
-import { Platform, ItemView, Menu, MenuItem, Notice, TFile, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
+import { Platform, ItemView, Notice, TFile, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import {
 	Annotation,
@@ -12,12 +12,13 @@ import {
 import { renderAppearancePanel } from './appearancePanel'
 import { JumpReturnBar } from './navReturn'
 import { createBookmarkSection, findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
-import { createColorControls } from './colorMenu'
+import { createReaderActions } from './readerActions'
 import { createCitationSection, type CitationSectionHandle } from './backlinks'
 import { blockForNote, footnoteFactsFrom, footnoteTextFrom, isInsideNoteBlock, looksLikeFootnoteRef } from './footnotes'
 import type { SourceSection } from './portrait'
 import { BookAskModal } from './bookAskModal'
 import { CommentModal, ConfirmModal } from './modals'
+import { showAnnMenu } from './annMenu'
 import { AiPanel } from './aiPanel'
 import { Overlayer } from '../lib/foliate-js/overlayer.js'
 import { basenameOf, contrastFg, formatAuthor, formatLanguageMap, isDarkColor, randomId, stripNumericTitlePrefix, truncate } from './util'
@@ -223,6 +224,7 @@ export class ReaderView extends ItemView {
 
 	async onOpen(): Promise<void> {
 		this.#buildDom()
+		this.#applyFormatCapabilities()
 		if (this.bookPath) await this.#openBook(this.pendingCfi ?? undefined)
 		else this.#showEmpty('从左侧功能区的书本图标打开书架，或在文件列表中直接点击一本电子书。')
 	}
@@ -250,6 +252,7 @@ export class ReaderView extends ItemView {
 		await super.setState(state, result ?? { history: false })
 		if (!this.readerEl) return // onOpen 尚未执行，onOpen 会带上 pendingCfi
 		if (!this.bookPath) return
+		this.#applyFormatCapabilities()
 		if (!this.foliate || this.loadedPath !== this.bookPath) {
 			this.#teardownBook()
 			await this.#openBook(this.pendingCfi ?? undefined)
@@ -337,37 +340,23 @@ export class ReaderView extends ItemView {
 
 		toolbar.createDiv('grove-sep')
 
-		this.colorMenuClose = createColorControls(toolbar, key => void this.#createHighlightFromPending(key))
-
-		const commentBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '为划选文字添加评论' } })
-		setIcon(commentBtn, 'message-square-plus')
-		commentBtn.addEventListener('click', () => void this.#commentOnPending())
-
-		toolbar.createDiv('grove-flex-spacer')
-
-		const appearBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn grove-appear-button', attr: { 'aria-label': '阅读外观（字体 / 背景 / 行距）' } })
-		setIcon(appearBtn, 'type')
-		appearBtn.addEventListener('click', e => {
-			e.stopPropagation()
-			this.#toggleAppearancePanel()
+		const actions = createReaderActions(toolbar, {
+			onColor: key => void this.#createHighlightFromPending(key),
+			onComment: () => void this.#commentOnPending(),
+			onAppearance: () => this.#toggleAppearancePanel(),
+			onAsk: () => new BookAskModal(this.app, this.plugin, this).open(),
+			onNote: () => void this.plugin.generateNoteFor(this),
+			onBookmark: () => this.#toggleBookmark(),
+			onSidebar: () => this.sidebarEl.classList.toggle('grove-hidden'),
+		}, {
+			text: true,
+			appearance: true,
+			bookmark: true,
+			sidebar: true,
 		})
+		this.colorMenuClose = actions.colorMenuClose
+		this.bookmarkBtnEl = actions.bookmarkBtn
 
-		const askBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': 'AI 全书问答' } })
-		setIcon(askBtn, 'sparkles')
-		askBtn.addEventListener('click', () => new BookAskModal(this.app, this.plugin, this).open())
-
-		const noteBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '生成 / 更新阅读笔记' } })
-		setIcon(noteBtn, 'file-text')
-		noteBtn.addEventListener('click', () => void this.plugin.generateNoteFor(this))
-
-		const bookmarkBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn grove-bookmark-btn', attr: { 'aria-label': '书签：标记 / 取消当前位置' } })
-		setIcon(bookmarkBtn, 'bookmark')
-		bookmarkBtn.addEventListener('click', () => this.#toggleBookmark())
-		this.bookmarkBtnEl = bookmarkBtn
-
-		const sideBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '批注列表' } })
-		setIcon(sideBtn, 'list')
-		sideBtn.addEventListener('click', () => this.sidebarEl.classList.toggle('grove-hidden'))
 
 		// 外观面板（绝对定位于工具栏下方）
 		this.appearPanelEl = root.createDiv('grove-appear-panel grove-hidden')
@@ -779,6 +768,16 @@ export class ReaderView extends ItemView {
 		this.contentEl.toggleClass('is-appear-open', open)
 	}
 
+	#isImageOnly(): boolean { return (this.bookPath.split('.').pop() ?? '').toLowerCase() === 'cbz' }
+
+	/** 路径确定后按格式隐藏文字类按钮；CBZ 只剩书签/侧栏等页面级操作 */
+	#applyFormatCapabilities(): void {
+		const imageOnly = this.#isImageOnly()
+		for (const el of this.contentEl.querySelectorAll('.grove-text-action')) {
+			el.classList.toggle('grove-hidden', imageOnly)
+		}
+	}
+
 	#toggleAppearancePanel(): void {
 		const hidden = this.appearPanelEl.classList.contains('grove-hidden')
 		if (hidden) this.#renderAppearancePanel()
@@ -936,35 +935,17 @@ export class ReaderView extends ItemView {
 		const a = this.data?.annotations.find(x => x.cfi === detail.value)
 		if (!a) return
 		this.#revealInSidebar(a)
-		const menu = new Menu()
-		menu.addItem(item => item.setTitle('编辑评论').setIcon('message-square').onClick(() => this.#editComment(a)))
-		menu.addItem(item => {
-			// setSubmenu 运行时存在但未包含在官方类型定义中
-			const sub = (item.setTitle('更改颜色').setIcon('palette') as unknown as { setSubmenu(): Menu }).setSubmenu()
-			for (const c of HIGHLIGHT_COLORS) {
-				sub.addItem((ci: MenuItem) => {
-					ci.setTitle(c.name).onClick(() => void this.#changeColor(a, c.key))
-					// 原生菜单图标只能是单色，这里直接往菜单项里塞一个彩色圆点
-					const dom = (ci as unknown as { dom?: HTMLElement }).dom
-					if (dom) {
-						const dot = dom.createSpan({ cls: 'grove-menu-color-dot' })
-						dot.style.backgroundColor = c.css
-					}
-				})
-			}
-		})
-		menu.addSeparator()
-		menu.addItem(item =>
-			item.setTitle('生成书摘卡').setIcon('image').onClick(() => void this.plugin.exportQuoteCard(this, a.id)))
-		menu.addItem(item =>
-			item.setTitle('发送到 Canvas').setIcon('layout-dashboard').onClick(() => void this.plugin.exportToCanvas(this, [a.id])))
-		menu.addItem(item =>
-			item.setTitle('复制原文').setIcon('copy').onClick(() => {
+		showAnnMenu(this.#hostCoords(detail.range), a.color, {
+			onEditComment: () => this.#editComment(a),
+			onChangeColor: color => void this.#changeColor(a, color),
+			onCopyText: () => {
 				void navigator.clipboard.writeText(a.text)
 				new Notice('Grove Reader：已复制')
-			}))
-		menu.addItem(item => item.setTitle('删除批注').setIcon('trash-2').onClick(() => this.#confirmDelete(a)))
-		menu.showAtPosition(this.#hostCoords(detail.range))
+			},
+			onDelete: () => this.#confirmDelete(a),
+			onMakeCard: () => void this.plugin.exportQuoteCard(this, a.id),
+			onSendToCanvas: () => void this.plugin.exportToCanvas(this, [a.id]),
+		})
 	}
 
 	// ------------------------------------------------------------------
@@ -1605,7 +1586,7 @@ export class ReaderView extends ItemView {
 		this.annListEl.empty()
 		this.annItemEls.clear()
 		if (!all.length) {
-			this.annListEl.createDiv('grove-ann-empty').setText('暂无批注。在正文中划选文字即可添加高亮与评论。')
+			this.annListEl.createDiv('grove-ann-empty').setText(this.#isImageOnly() ? '图片书不支持文字批注，可用书签记录页码。' : '暂无批注。在正文中划选文字即可添加高亮与评论。')
 			return
 		}
 		if (!filtered.length) {

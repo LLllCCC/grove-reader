@@ -1,5 +1,6 @@
 import './pdfjsPolyfill'
 import { ItemView, Menu, Notice, TFile, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
+import { showAnnMenu } from './annMenu'
 import * as pdfjsLib from 'pdfjs-dist'
 import type { PDFDocumentProxy, PDFWorker } from 'pdfjs-dist'
 import type GroveReaderPlugin from './main'
@@ -1269,6 +1270,17 @@ export class PdfView extends ItemView {
 			for (const r of a.pdf.rects) {
 				if (px >= r.l - pad && px <= r.l + r.w + pad && py >= r.t - pad && py <= r.t + r.h + pad) {
 					this.#revealInSidebar(a)
+					showAnnMenu({ x: e.clientX, y: e.clientY }, a.color, {
+						onEditComment: () => this.#editComment(a),
+						onChangeColor: color => void this.#changeColor(a, color),
+						onCopyText: () => {
+							void navigator.clipboard.writeText(a.text)
+							new Notice('Grove Reader：已复制')
+						},
+						onDelete: () => this.#confirmDelete(a),
+						onMakeCard: () => void this.plugin.exportQuoteCard(this, a.id),
+						onSendToCanvas: () => void this.plugin.exportToCanvas(this, [a.id]),
+					})
 					return
 				}
 			}

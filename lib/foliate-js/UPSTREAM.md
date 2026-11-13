@@ -46,9 +46,9 @@
 插件侧对应：`src/readerView.ts` 在 `foliate.open()` 之后设置 `renderer.selectionPaging = !isMobile`。
 **不要再在插件里自己监听 iframe 的 touchend 做翻页**——会和 foliate 的 snap 叠加成一次滑两页。
 
-### 2026-11-11 追加二：稳定性四补丁（对照 bz-reader 的 vendor 补丁清单）
+### 2026-11-11 追加二：稳定性四补丁（对照公开的 foliate-js 补丁清单）
 
-来源：`yeshimei/bz-reader`（MIT）`patches/foliate-js.md` 里列的 7 条，去掉我们已有的
+来源：一份公开的 foliate-js 补丁清单里列的 7 条，去掉我们已有的
 两条（`customElements` 守卫、拖选禁翻页），取适用的四条。行尾仍为 LF。
 
 | 位置 | 改动 | 为什么 |
@@ -59,7 +59,7 @@
 | `View.columnize()` | 横排 `padding` 由 `0 gap/2` 改为 `var(--_pad-top, 0px) gap/2 var(--_pad-bottom, 0px)` | 分页模式下内联 `!important` 把上下 padding 覆成 0，宿主注入的 body padding 只对章首页生效，章中页文字顶到悬浮头栏；不设变量时与上游一致 |
 
 未采用：`#replaceBackground` 的 rAF 判空（本基准没有该方法，调用处已是 `this.#view?.document?.fonts` 可选链）、
-bz 的 srcdoc 兜底与 `__bzrDbg` 埋点（与本插件 CSP/调试体系不同）。
+另一份参考实现里的 srcdoc 兜底与调试埋点（与本插件 CSP/调试体系不同）。
 
 其余 14 个 `.js` 文件与基准 commit 字节一致。
 

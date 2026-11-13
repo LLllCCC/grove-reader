@@ -12,10 +12,10 @@ import {
 import { renderAppearancePanel } from './appearancePanel'
 import { JumpReturnBar } from './navReturn'
 import { createBookmarkSection, findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
-import { createColorControls } from './colorMenu'
+import { createReaderActions } from './readerActions'
 import { createCitationSection, type CitationSectionHandle } from './backlinks'
 import { CommentModal, ConfirmModal } from './modals'
-import { closeAnnMenu, showAnnMenu } from './annMenu'
+import { showAnnMenu } from './annMenu'
 import { AiPanel } from './aiPanel'
 import { basenameOf, cleanBookTitle, contrastFg, isDarkColor, randomId, truncate } from './util'
 import { decodeTextBuffer, TextViewState, VIEW_TYPE_GROVE_TEXT } from './textCodec'
@@ -223,7 +223,6 @@ export class TextView extends ItemView {
 		this.#hidePopup()
 		this.aiPanel.hide()
 		this.#closeToc()
-		closeAnnMenu()
 		this.resizeObserver?.disconnect()
 		this.resizeObserver = null
 		if (this.relayoutTimer != null) {
@@ -294,52 +293,23 @@ export class TextView extends ItemView {
 
 		toolbar.createDiv('grove-sep')
 
-		this.colorMenuClose = createColorControls(toolbar, key => void this.#createHighlight(key))
-
-		const commentBtn = toolbar.createEl('button', {
-			cls: 'clickable-icon grove-icon-btn',
-			attr: { 'aria-label': '为划选文字添加评论' },
+		const actions = createReaderActions(toolbar, {
+			onColor: key => void this.#createHighlight(key),
+			onComment: () => void this.#commentOnSelection(),
+			onAppearance: () => this.#toggleAppearancePanel(),
+			onAsk: () => new BookAskModal(this.app, this.plugin, this).open(),
+			onNote: () => void this.plugin.generateNoteFor(this),
+			onBookmark: () => this.#toggleBookmark(),
+			onSidebar: () => this.sidebarEl.classList.toggle('grove-hidden'),
+		}, {
+			text: true,
+			appearance: true,
+			bookmark: true,
+			sidebar: true,
 		})
-		setIcon(commentBtn, 'message-square-plus')
-		commentBtn.addEventListener('click', () => void this.#commentOnSelection())
+		this.colorMenuClose = actions.colorMenuClose
+		this.bookmarkBtnEl = actions.bookmarkBtn
 
-		toolbar.createDiv('grove-flex-spacer')
-
-		const appearBtn = toolbar.createEl('button', {
-			cls: 'clickable-icon grove-icon-btn',
-			attr: { 'aria-label': '阅读外观（字体 / 背景 / 行距）' },
-		})
-		setIcon(appearBtn, 'type')
-		appearBtn.addEventListener('click', e => {
-			e.stopPropagation()
-			this.#toggleAppearancePanel()
-		})
-
-		const askBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': 'AI 全书问答' } })
-		setIcon(askBtn, 'sparkles')
-		askBtn.addEventListener('click', () => new BookAskModal(this.app, this.plugin, this).open())
-
-		const noteBtn = toolbar.createEl('button', {
-			cls: 'clickable-icon grove-icon-btn',
-			attr: { 'aria-label': '生成 / 更新阅读笔记' },
-		})
-		setIcon(noteBtn, 'file-text')
-		noteBtn.addEventListener('click', () => void this.plugin.generateNoteFor(this))
-
-		const bookmarkBtn = toolbar.createEl('button', {
-			cls: 'clickable-icon grove-icon-btn grove-bookmark-btn',
-			attr: { 'aria-label': '书签：标记 / 取消当前位置' },
-		})
-		setIcon(bookmarkBtn, 'bookmark')
-		bookmarkBtn.addEventListener('click', () => this.#toggleBookmark())
-		this.bookmarkBtnEl = bookmarkBtn
-
-		const sideBtn = toolbar.createEl('button', {
-			cls: 'clickable-icon grove-icon-btn',
-			attr: { 'aria-label': '批注列表' },
-		})
-		setIcon(sideBtn, 'list')
-		sideBtn.addEventListener('click', () => this.sidebarEl.classList.toggle('grove-hidden'))
 
 		const encodingWrap = toolbar.createDiv('grove-text-encoding')
 		this.encodingSelect = encodingWrap.createEl('select', { cls: 'dropdown' })
@@ -1809,8 +1779,8 @@ export class TextView extends ItemView {
 	}
 
 	#showAnnotationMenu(a: Annotation, e: MouseEvent): void {
-		// 用共享的批注菜单：颜色以色圆 + 名称并排显示，和后续统一到 EPUB 的菜单一致
-		showAnnMenu(e, a.color, {
+		// 与 EPUB 共用同一套原生菜单：颜色放进「更改颜色」子菜单
+		showAnnMenu({ x: e.clientX, y: e.clientY }, a.color, {
 			onEditComment: () => this.#editComment(a),
 			onChangeColor: color => this.#changeColor(a, color),
 			onCopyText: () => {
