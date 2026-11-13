@@ -103,6 +103,8 @@ export function collectExcerptBacklinks(app: App, bookPath: string): ExcerptBack
 export interface CitationSectionHandle {
 	el: HTMLElement
 	update(groups: ExcerptBacklinkGroup[], handlers: CitationHandlers): void
+	/** 展开内容区（PDF 引用角标被点击时用） */
+	expand(): void
 }
 
 export interface CitationHandlers {
@@ -130,12 +132,13 @@ export function createCitationSection(
 	const body = el.createDiv('grove-bm-body')
 	let collapsed = startCollapsed
 	if (collapsed) body.addClass('grove-hidden')
-
-	head.addEventListener('click', () => {
-		collapsed = !collapsed
+	const setCollapsed = (value: boolean): void => {
+		collapsed = value
 		body.toggleClass('grove-hidden', collapsed)
 		setIcon(chev, collapsed ? 'chevron-right' : 'chevron-down')
-	})
+	}
+
+	head.addEventListener('click', () => setCollapsed(!collapsed))
 
 	const update = (groups: ExcerptBacklinkGroup[], handlers: CitationHandlers): void => {
 		const noteCount = new Set(groups.flatMap(g => g.rows.map(r => r.sourcePath))).size
@@ -167,5 +170,5 @@ export function createCitationSection(
 		}
 	}
 
-	return { el, update }
+	return { el, update, expand: () => setCollapsed(false) }
 }

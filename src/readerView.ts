@@ -683,6 +683,8 @@ export class ReaderView extends ItemView implements ReaderEngine {
 			new Notice('Grove Reader：书籍还在加载，请稍后再试')
 			return
 		}
+		this.sidebarEl.removeClass('grove-hidden')
+		this.chrome.activateTab('search')
 		this.fullTextSearchEl.open = true
 		this.fullTextSearchInput.value = q
 		void this.#runFullTextSearch()
@@ -1985,6 +1987,7 @@ export class ReaderView extends ItemView implements ReaderEngine {
 	/** 正文点击批注后：展开侧栏、清掉挡住该批注的筛选/折叠，滚动定位并闪烁提示 */
 	#revealInSidebar(a: Annotation): void {
 		this.sidebarEl.classList.remove('grove-hidden')
+		this.chrome.activateTab('annotations')
 		const chapter = this.#chapterOf(a)
 		const q = this.sidebarQuery.toLowerCase()
 		const filteredOut =

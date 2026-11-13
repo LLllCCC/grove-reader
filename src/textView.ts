@@ -1452,6 +1452,7 @@ export class TextView extends ItemView implements ReaderEngine {
 			return
 		}
 		this.sidebarEl.removeClass('grove-hidden')
+		this.chrome.activateTab('search')
 		if (this.fullTextSearchEl) this.fullTextSearchEl.open = true
 		this.fullTextSearchInput.value = q
 		this.#runFullTextSearch()

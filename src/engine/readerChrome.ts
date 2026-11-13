@@ -60,18 +60,26 @@ export interface ReaderSidebar {
 	selectBarEl: HTMLElement
 	selectCountEl: HTMLElement
 	listEl: HTMLElement
+	/** 切到某个页签；同一时间只显示这一组内容 */
+	activateTab(tab: SidebarTab): void
 	/** 同步计数/清除按钮/筛选点的高亮 */
 	syncFilters(query: string, color: string | null, total: number, filtered: number): void
 	/** 同步排序按钮文案 */
 	syncSort(mode: 'position' | 'recent'): void
 }
 
+/** 侧栏页签：书签 / 引用 / 全文搜索 / 批注 */
+export type SidebarTab = 'bookmarks' | 'citations' | 'search' | 'annotations'
+
 export function createReaderSidebar(parent: HTMLElement, options: ReaderSidebarOptions): ReaderSidebar {
 	const { hooks } = options
 	const el = parent.createDiv(options.startHidden ? 'grove-sidebar grove-hidden' : 'grove-sidebar')
+	// 默认显示批注页签，保持「打开侧栏就看到批注」的原有行为
+	el.dataset.tab = 'annotations'
 	const sideHead = el.createDiv('grove-sidebar-head')
 	const annCountEl = sideHead.createSpan('grove-ann-count')
-	annCountEl.setText('0 个批注')
+	let annCountText = '0 个批注'
+	annCountEl.setText(annCountText)
 	const closeSidebar = sideHead.createEl('button', {
 		cls: 'clickable-icon grove-sidebar-close',
 		attr: { 'aria-label': '关闭批注栏', title: '关闭批注栏' },
@@ -166,7 +174,8 @@ export function createReaderSidebar(parent: HTMLElement, options: ReaderSidebarO
 
 	const syncFilters = (query: string, color: string | null, total: number, filtered: number): void => {
 		const filtering = !!query || !!color
-		annCountEl.setText(filtering ? `${filtered} / ${total} 个批注` : `${total} 个批注`)
+		annCountText = filtering ? `${filtered} / ${total} 个批注` : `${total} 个批注`
+		if (currentTab === 'annotations') annCountEl.setText(annCountText)
 		clearFilterBtn?.toggleClass('grove-hidden', !filtering)
 		for (const [key, dot] of filterDots) dot.toggleClass('is-active', color === key)
 	}
@@ -174,6 +183,39 @@ export function createReaderSidebar(parent: HTMLElement, options: ReaderSidebarO
 	const syncSort = (mode: 'position' | 'recent'): void => {
 		sortBtn.setText(mode === 'position' ? options.sortLabels.position : options.sortLabels.recent)
 	}
+
+	// ---- 页签：书签 / 引用 / 全文搜索 / 批注 ----
+	// 四组内容仍按原顺序直接挂在侧栏下，用 data-tab + CSS 控制显隐，
+	// 这样列表的 flex 滚动、手机抽屉和已有的折叠逻辑都不用改。
+	let currentTab: SidebarTab = 'annotations'
+	const activateTab = (tab: SidebarTab): void => {
+		currentTab = tab
+		el.dataset.tab = tab
+		for (const [key, btn] of tabButtons) btn.toggleClass('is-active', key === tab)
+		// 顶部标题跟着页签走：批注页签保留「N 个批注」，其他页签显示页签名
+		annCountEl.setText(tab === 'annotations' ? annCountText : { bookmarks: '书签', citations: '引用', search: '全文搜索' }[tab])
+		// 从命令面板直接搜全书时，用户期望看到搜索框而不是折叠的 summary
+		if (tab === 'search') fullTextSearchEl.open = true
+	}
+	const tabsEl = el.createDiv('grove-sidebar-tabs')
+	const tabButtons = new Map<SidebarTab, HTMLButtonElement>()
+	const tabDefs: Array<[SidebarTab, string]> = [
+		['bookmarks', '书签'],
+		['citations', '引用'],
+		['search', '全文搜索'],
+		['annotations', '批注'],
+	]
+	for (const [key, label] of tabDefs) {
+		const btn = tabsEl.createEl('button', {
+			cls: 'grove-sidebar-tab',
+			text: label,
+			attr: { 'aria-label': `显示${label}` },
+		})
+		btn.addEventListener('click', () => activateTab(key))
+		tabButtons.set(key, btn)
+	}
+	el.insertBefore(tabsEl, bookmark.el)
+	activateTab(currentTab)
 
 	return {
 		el,
@@ -193,6 +235,7 @@ export function createReaderSidebar(parent: HTMLElement, options: ReaderSidebarO
 		selectBarEl,
 		selectCountEl,
 		listEl,
+		activateTab,
 		syncFilters,
 		syncSort,
 	}

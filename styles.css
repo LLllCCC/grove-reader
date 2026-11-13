@@ -216,6 +216,99 @@
 	display: none;
 }
 
+/* ---------- 侧栏页签：书签 / 引用 / 全文搜索 / 批注 ---------- */
+
+.grove-sidebar-tabs {
+	display: flex;
+	flex: none;
+	gap: 2px;
+	padding: 6px 8px 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.grove-sidebar-tab {
+	flex: 1 1 0;
+	min-width: 0;
+	padding: 6px 2px;
+	border: none;
+	border-radius: 5px 5px 0 0;
+	background: none;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.grove-sidebar-tab:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.grove-sidebar-tab.is-active {
+	background: var(--background-modifier-hover);
+	box-shadow: inset 0 -2px 0 var(--interactive-accent);
+	color: var(--text-normal);
+	font-weight: 600;
+}
+
+/* 只显示当前页签的内容 */
+.grove-sidebar[data-tab='bookmarks'] > .grove-bm-section:not(.grove-cite-section) {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	min-height: 0;
+	border-bottom: none;
+}
+
+.grove-sidebar[data-tab='bookmarks'] > .grove-bm-section:not(.grove-cite-section) > .grove-bm-body {
+	flex: 1 1 auto;
+	max-height: none;
+	min-height: 0;
+}
+
+.grove-sidebar:not([data-tab='bookmarks']) > .grove-bm-section:not(.grove-cite-section) {
+	display: none;
+}
+
+.grove-sidebar[data-tab='citations'] > .grove-cite-section {
+	display: flex;
+	flex-direction: column;
+}
+
+.grove-sidebar:not([data-tab='citations']) > .grove-cite-section {
+	display: none;
+}
+
+.grove-sidebar[data-tab='search'] > .grove-fulltext-search {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	min-height: 0;
+	margin: 8px;
+	overflow: hidden;
+}
+
+.grove-sidebar[data-tab='search'] > .grove-fulltext-search > .grove-fulltext-search-results,
+.grove-sidebar[data-tab='search'] > .grove-fulltext-search .grove-ann-list {
+	flex: 1 1 auto;
+	max-height: none;
+	min-height: 0;
+}
+
+.grove-sidebar:not([data-tab='search']) > .grove-fulltext-search {
+	display: none;
+}
+
+.grove-sidebar:not([data-tab='annotations']) > .grove-sidebar-controls,
+.grove-sidebar:not([data-tab='annotations']) > .grove-select-bar,
+.grove-sidebar:not([data-tab='annotations']) > .grove-ann-list {
+	display: none;
+}
+
+body.is-mobile .grove-sidebar-tab {
+	padding: 7px 2px;
+}
+
 .grove-sidebar-head {
 	padding: 8px 10px;
 	border-bottom: 1px solid var(--background-modifier-border);

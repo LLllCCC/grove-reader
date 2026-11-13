@@ -1632,6 +1632,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 	/** 正文点击批注后：展开侧栏、清掉挡住该批注的筛选，滚动定位并闪烁提示 */
 	#revealInSidebar(a: Annotation): void {
 		this.sidebarEl.classList.remove('grove-hidden')
+		this.chrome.activateTab('annotations')
 		const q = this.sidebarQuery.toLowerCase()
 		if (q && !`${a.text}\n${a.note ?? ''}\n${a.chapter ?? ''}`.toLowerCase().includes(q)) {
 			this.sidebarQuery = ''
@@ -1813,6 +1814,8 @@ export class PdfView extends ItemView implements ReaderEngine {
 			badge.addEventListener('click', ev => {
 				ev.stopPropagation()
 				this.sidebarEl.removeClass('grove-hidden')
+				this.chrome.activateTab('citations')
+				this.pageCitationSection?.expand()
 			})
 		}
 	}
