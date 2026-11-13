@@ -1533,7 +1533,10 @@ export class PdfView extends ItemView implements ReaderEngine {
 		const top = rect
 			? p.wrap.offsetTop + rect.t * p.wrap.offsetHeight - Math.max(24, this.pagesEl.clientHeight * 0.18)
 			: p.wrap.offsetTop - 8
-		this.pagesEl.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+		// 分页/双页模式下 smooth 滚动在部分环境不生效（scrollTop 不动），
+		// 明确跳页用即时滚动，并手动补一次进度计算，避免依赖 scroll 事件
+		this.pagesEl.scrollTo({ top: Math.max(0, top), behavior: 'auto' })
+		window.setTimeout(() => this.#onScroll(), 0)
 		if (rects?.length) this.#flashJumpRects(p, rects)
 	}
 
