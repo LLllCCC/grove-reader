@@ -104,6 +104,24 @@ export async function transformSelection(cfg: AiConfig, text: string, task: Sele
 	], { temperature: 0.2, maxTokens: 800 })
 }
 
+/** 查词：返回「释义 / 词性 / 例句」三行，尽量短 */
+export async function lookupWord(cfg: AiConfig, word: string, context = ''): Promise<string> {
+	return chatCompletion(cfg, [
+		{
+			role: 'system',
+			content: '你是一位词典助手。用简体中文解释用户给的单词或短语，结合原文语境判断它在句中的含义。'
+				+ '严格按三行输出，不要寒暄、不要 Markdown 标题：\n'
+				+ '释义：一句话说清\n词性：名词/动词/形容词等\n例句：一个简短例句（英文词给英文例句并附中文翻译）',
+		},
+		{
+			role: 'user',
+			content: context.trim()
+				? `单词：${word.trim()}\n原文：${context.trim().slice(0, 400)}`
+				: `单词：${word.trim()}`,
+		},
+	], { temperature: 0.2, maxTokens: 320 })
+}
+
 /** 为全书索引概括一段正文 */
 export async function summarizePortraitChunk(
 	cfg: AiConfig,

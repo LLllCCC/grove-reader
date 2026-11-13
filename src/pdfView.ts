@@ -6,7 +6,7 @@ import type { PDFDocumentProxy, PDFWorker } from 'pdfjs-dist'
 import type GroveReaderPlugin from './main'
 import type { ReaderCaps, ReaderEngine, ReaderKind } from './engine/types'
 import { createReaderSidebar, type ReaderSidebar } from './engine/readerChrome'
-import { Annotation, BookData, HIGHLIGHT_COLORS, VIEW_TYPE_GROVE_PDF, colorCss } from './types'
+import { Annotation, BookData, HIGHLIGHT_COLORS, IMPORT_SOURCE_LABELS, VIEW_TYPE_GROVE_PDF, colorCss } from './types'
 import type { PdfViewPrefs } from './types'
 import { CommentModal, ConfirmModal } from './modals'
 import { JumpReturnBar } from './navReturn'
@@ -26,6 +26,9 @@ import { GuideModal } from './guideModal'
 import { markupColorCss, markupOpacity, markupRects, markupSubtype, type PdfMarkupAnnotation } from './pdfAnnots'
 import { PdfThumbnailsModal, type PdfThumbDoc } from './pdfThumbs'
 import { pdfItemsToText, type PdfTextItem } from './pdfText'
+import { ProgressTicks, chapterFractions, readSeconds, remainingSuffix } from './progressMeta'
+import { TtsController, scrollRangeIntoView, sentenceRanges, type TtsSentence, type TtsState } from './tts'
+import { WordLookupModal } from './wordLookupModal'
 
 /** 常量定义在 types.ts（main.ts 不 import 本模块也要能判断 PDF 视图），这里保持原导出名 */
 export { VIEW_TYPE_GROVE_PDF }
@@ -231,6 +234,11 @@ export class PdfView extends ItemView implements ReaderEngine {
 	private tocSelect!: HTMLSelectElement
 	private zoomLabel!: HTMLElement
 	private progressLabel!: HTMLElement
+	/** PDF 没有滑杆，用一条可点击的进度轨代替；刻度来自目录页号 */
+	private railFill: HTMLElement | null = null
+	private ticks: ProgressTicks | null = null
+	private tts: TtsController | null = null
+	private ttsBtnEl: HTMLButtonElement | null = null
 	private annItemEls = new Map<string, HTMLElement>()
 	private revealTimer: number | null = null
 	private pointerDownAt: { x: number; y: number } | null = null
@@ -347,9 +355,21 @@ export class PdfView extends ItemView implements ReaderEngine {
 		setIcon(nextBtn, 'chevron-down')
 		nextBtn.addEventListener('click', () => this.nextPage())
 
-		this.progressLabel = toolbar.createSpan('grove-progress-label')
+		const progress = toolbar.createDiv('grove-progress')
+		const rail = progress.createDiv('grove-progress-rail')
+		this.railFill = rail.createDiv('grove-progress-fill')
+		this.ticks = new ProgressTicks(rail)
+		// 点进度轨直接跳页：比先点目录再选页快，长文档尤其有用
+		rail.addEventListener('click', (ev) => {
+			if (this.numPages < 1) return
+			const rect = rail.getBoundingClientRect()
+			if (rect.width <= 0) return
+			const f = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width))
+			const page = Math.max(1, Math.min(this.numPages, Math.round(f * (this.numPages - 1)) + 1))
+			if (page !== this.currentPage) this.#jumpToPageWithReturn(page)
+		})
+		this.progressLabel = progress.createSpan('grove-progress-label')
 		this.progressLabel.setText('0 / 0')
-
 		toolbar.createDiv('grove-sep')
 
 		const zoomOut = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '缩小' } })
@@ -389,6 +409,11 @@ export class PdfView extends ItemView implements ReaderEngine {
 		setIcon(guideBtn, 'list-tree')
 		guideBtn.addEventListener('click', () => new GuideModal(this.app, this.plugin, this).open())
 
+		this.ttsBtnEl = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '朗读当前页（系统语音）' } })
+		this.ttsBtnEl.dataset.groveAction = '朗读'
+		setIcon(this.ttsBtnEl, 'volume-2')
+		this.ttsBtnEl.addEventListener('click', () => this.#toggleTts())
+
 		const noteBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '生成 / 更新阅读笔记' } })
 		setIcon(noteBtn, 'file-text')
 		noteBtn.addEventListener('click', () => void this.plugin.generateNoteFor(this))
@@ -405,7 +430,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 		// grove-pdf-side-btn 供手机端样式把入口提到工具栏最左（内容多，否则要横滑才找得到）
 		const sideBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn grove-pdf-side-btn', attr: { 'aria-label': '批注列表' } })
 		setIcon(sideBtn, 'list')
-		sideBtn.addEventListener('click', () => this.sidebarEl.classList.toggle('grove-hidden'))
+		sideBtn.addEventListener('click', () => this.toggleSidebar())
 
 		const body = root.createDiv('grove-body')
 		this.pagesEl = body.createDiv('grove-pdf-pages')
@@ -460,6 +485,11 @@ export class PdfView extends ItemView implements ReaderEngine {
 			// 焦点在输入框/滑杆时方向键属于编辑操作，不能翻页
 			const t = e.target
 			if (t instanceof HTMLElement && t.closest('input, textarea, select, [contenteditable="true"]')) return
+			if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === '[' || e.key === ']')) {
+				e.preventDefault()
+				this.toggleSidebar()
+				return
+			}
 			if (e.key === 'ArrowRight' || e.key === 'PageDown') { this.nextPage(); e.preventDefault() }
 			else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { this.prevPage(); e.preventDefault() }
 		})
@@ -661,7 +691,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 
 			this.#relayout()
 			await this.#buildToc(doc)
-			this.progressLabel.setText(`1 / ${this.numPages}`)
+			this.#updateProgressLabel()
 
 			if (data.lastLocation?.page && data.lastLocation.page > 1) {
 				this.#scrollToPage(data.lastLocation.page)
@@ -694,6 +724,8 @@ export class PdfView extends ItemView implements ReaderEngine {
 		this.searchTaskId++ // 取消进行中的全文搜索
 		this.searchTextCache.clear()
 		this.searchTextCacheChars = 0
+		this.tts?.stop()
+		this.ticks?.clear()
 		this.#hidePopup()
 		if (this.saveTimer != null) {
 			window.clearTimeout(this.saveTimer)
@@ -1340,7 +1372,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 		}
 		if (current !== this.currentPage && current >= 1 && current <= this.numPages) {
 			this.currentPage = current
-			this.progressLabel.setText(`${current} / ${this.numPages}`)
+			this.#updateProgressLabel()
 			this.plugin.statsPageTurn(this.bookPath)
 			if (this.data) {
 				this.data.lastLocation = {
@@ -1394,6 +1426,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 	async #buildToc(doc: PdfDocProxy): Promise<void> {
 		this.tocSelect.empty()
 		this.tocSelect.createEl('option', { value: '', text: '目录' })
+		const starts: number[] = []
 		try {
 			const outline = await doc.getOutline()
 			const addItems = async (items: Array<{ title?: string; dest?: unknown; items?: unknown[] }> | null, depth: number): Promise<void> => {
@@ -1405,6 +1438,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 						pageIndex = (await doc.getPageIndex(dest[0]).catch(() => -1)) + 1
 					}
 					if (!pageIndex) continue
+					starts.push(pageIndex)
 					const label = `${'\u00a0\u00a0'.repeat(depth)}${item.title ?? '（无标题）'}`
 					this.tocSelect.createEl('option', { value: String(pageIndex), text: truncate(label, 60) })
 					if (item.items?.length) await addItems(item.items as typeof items, depth + 1)
@@ -1415,6 +1449,80 @@ export class PdfView extends ItemView implements ReaderEngine {
 			console.error('[Grove Reader] 读取 PDF 目录失败', e)
 		}
 		this.tocSelect.disabled = this.tocSelect.options.length <= 1
+		// 目录页号就是章节起点：换算成比例后画在进度轨上
+		this.ticks?.set(chapterFractions(starts, this.numPages))
+	}
+
+	/** 当前页文字、剩余阅读时间、进度轨与刻度高亮，一起刷新 */
+	#updateProgressLabel(): void {
+		const total = this.numPages
+		const fraction = total > 0 ? this.currentPage / total : 0
+		const remain = remainingSuffix(readSeconds(this.plugin.stats.peek(this.bookPath)), fraction)
+		this.progressLabel.setText(`${this.currentPage} / ${total}${remain}`)
+		if (this.railFill) this.railFill.style.width = `${(fraction * 100).toFixed(2)}%`
+		this.ticks?.highlight(fraction)
+	}
+
+	// ------------------------------------------------------------------
+	// 朗读（TTS）
+	// ------------------------------------------------------------------
+
+	#toggleTts(): void {
+		this.#ttsController().toggle()
+	}
+
+	stopTts(): void {
+		this.tts?.stop()
+	}
+
+	/** 收起 / 展开批注栏（工具栏按钮、`[` `]` 快捷键与命令共用） */
+	toggleSidebar(): void {
+		this.sidebarEl?.classList.toggle('grove-hidden')
+	}
+
+	#openWordLookup(word: string, cfi?: string, chapter?: string): void {
+		new WordLookupModal(this.app, this.plugin, word, {
+			bookTitle: this.bookTitle,
+			bookPath: this.bookPath,
+			chapter,
+			cfi,
+			context: word,
+		}).open()
+	}
+
+	#ttsController(): TtsController {
+		if (!this.tts) {
+			this.tts = new TtsController({
+				collect: () => this.#ttsSentences(),
+				next: () => this.#ttsNext(),
+				highlight: sentence => {
+					if (sentence?.range) scrollRangeIntoView(sentence.range, this.pagesEl)
+				},
+				onState: state => this.#syncTtsButton(state),
+			}, () => this.plugin.settings.ttsRate)
+		}
+		return this.tts
+	}
+
+	#ttsSentences(): TtsSentence[] {
+		const page = this.pages.get(this.currentPage)
+		if (!page?.textDiv) return []
+		return sentenceRanges(document, page.textDiv)
+	}
+
+	async #ttsNext(): Promise<boolean> {
+		const before = this.currentPage
+		this.nextPage()
+		await new Promise(resolve => window.setTimeout(resolve, 650))
+		return this.currentPage !== before
+	}
+
+	#syncTtsButton(state: TtsState): void {
+		const btn = this.ttsBtnEl
+		if (!btn) return
+		setIcon(btn, state === 'playing' ? 'pause' : 'volume-2')
+		btn.setAttr('aria-label', state === 'playing' ? '暂停朗读' : state === 'paused' ? '继续朗读' : '朗读当前页（系统语音）')
+		btn.toggleClass('is-active', state !== 'idle')
 	}
 
 	#scrollToPage(n: number, rects?: PdfRect[]): void {
@@ -1548,7 +1656,10 @@ export class PdfView extends ItemView implements ReaderEngine {
 		if ((!page || page < 1 || page > this.numPages) && fb && typeof fb.pct === 'number') {
 			page = pageFromFraction(fb.pct, this.numPages)
 		}
-		if (!page || page < 1 || page > this.numPages) return
+		if (!page || page < 1 || page > this.numPages) {
+			if (fb?.text) new Notice('Grove Reader：这条批注没有 PDF 页码（可能是外部导入的），无法在页面上定位')
+			return
+		}
 		const rects = fb?.pdfRects
 		if (fb?.pdfRectsPt?.length) {
 			void this.#jumpWithPointRects(page, fb.pdfRectsPt, remember)
@@ -1917,6 +2028,13 @@ export class PdfView extends ItemView implements ReaderEngine {
 			menu.addItem(item => item.setTitle('存为摘录').setIcon('quote').onClick(() => save('quote')))
 			menu.addItem(item => item.setTitle('存为名词').setIcon('list').onClick(() => save('term')))
 			menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 })
+		})
+		const lookupBtn = popup.createEl('button', { text: '查词', cls: 'grove-pdf-popup-btn' })
+		lookupBtn.title = '查词并加入生词本'
+		lookupBtn.addEventListener('click', () => {
+			const pending = this.pending
+			if (!pending) return
+			this.#openWordLookup(pending.text, `page:${pending.page}`, this.#pageLabel(pending.page))
 		})
 		this.popup = popup
 
@@ -2337,15 +2455,16 @@ export class PdfView extends ItemView implements ReaderEngine {
 				void this.#changeColor(a, next.key)
 			})
 			head.createSpan('grove-ann-chapter').setText(a.chapter || '')
+			if (a.source) head.createSpan('grove-ann-source').setText(IMPORT_SOURCE_LABELS[a.source] ?? a.source)
 			const text = item.createDiv('grove-ann-text')
 			setHighlightedText(text, truncate(a.text.trim(), 160), this.sidebarQuery)
-			text.addEventListener('click', () => this.#jumpToCfi(a.cfi))
+			text.addEventListener('click', () => this.#jumpToCfi(a.cfi, true, { text: a.text, chapter: a.chapter }))
 			if (a.note) item.createDiv('grove-ann-note').setText(truncate(a.note.trim(), 120))
 			const actions = item.createDiv('grove-ann-actions')
 
 			const jump = actions.createEl('button', { cls: 'clickable-icon grove-mini-btn', attr: { 'aria-label': '跳转到该页' } })
 			setIcon(jump, 'arrow-up-left')
-			jump.addEventListener('click', () => this.#jumpToCfi(a.cfi))
+			jump.addEventListener('click', () => this.#jumpToCfi(a.cfi, true, { text: a.text, chapter: a.chapter }))
 
 			const edit = actions.createEl('button', { cls: 'clickable-icon grove-mini-btn', attr: { 'aria-label': '编辑评论' } })
 			setIcon(edit, 'message-square')

@@ -32,6 +32,33 @@ export function todayKey(d = new Date()): string {
 	return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
+/** 一本书最近 n 天（含今天）的阅读秒数 */
+export function recentSecondsFor(book: StatsBook | undefined, n: number, now = new Date()): number {
+	if (!book || n <= 0) return 0
+	let total = 0
+	for (let i = 0; i < n; i++) {
+		const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i)
+		total += book.days?.[todayKey(d)]?.seconds ?? 0
+	}
+	return total
+}
+
+/**
+ * 读完日预测：剩余时长 = 累计时长 ÷ 已读比例 × (1 - 比例)，
+ * 再除以这本书最近 7 天的日均阅读时长。数据不足时返回 null。
+ */
+export function forecastFinishDays(book: StatsBook | undefined, fraction: number, now = new Date()): number | null {
+	if (!book || !Number.isFinite(fraction) || fraction <= 0.02 || fraction >= 0.99) return null
+	if (book.seconds < 60) return null
+	const remainSeconds = (book.seconds / fraction) * (1 - fraction)
+	if (!Number.isFinite(remainSeconds) || remainSeconds <= 0) return null
+	const daily = recentSecondsFor(book, 7, now) / 7
+	if (daily < 60) return null
+	const days = remainSeconds / daily
+	if (!Number.isFinite(days) || days <= 0) return null
+	return Math.max(1, Math.min(3650, Math.ceil(days)))
+}
+
 /** 采样节拍：15 秒一跳 */
 export const STATS_TICK_MS = 15_000
 /** 超过这么久没有任何交互，就不算在读书（接电话、吃饭、睡着） */

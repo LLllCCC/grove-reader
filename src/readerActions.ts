@@ -22,6 +22,8 @@ export interface ReaderActionHandlers {
 	onNote: () => void
 	onBookmark: () => void
 	onSidebar: () => void
+	/** 朗读当前页（系统语音） */
+	onTts?: () => void
 }
 
 export interface ReaderActionOptions {
@@ -46,6 +48,7 @@ export interface ReaderActionOptions {
 export interface ReaderActionRefs {
 	colorMenuClose: (() => void) | null
 	bookmarkBtn: HTMLButtonElement | null
+	ttsBtn: HTMLButtonElement | null
 }
 
 export function createReaderActions(
@@ -53,7 +56,7 @@ export function createReaderActions(
 	handlers: ReaderActionHandlers,
 	options: ReaderActionOptions,
 ): ReaderActionRefs {
-	const refs: ReaderActionRefs = { colorMenuClose: null, bookmarkBtn: null }
+	const refs: ReaderActionRefs = { colorMenuClose: null, bookmarkBtn: null, ttsBtn: null }
 	const textMode = options.style === 'text'
 	const hidden = new Set(options.hidden ?? [])
 	const actionBtn = (
@@ -62,11 +65,13 @@ export function createReaderActions(
 		short: string,
 		onClick: (e: MouseEvent) => void,
 		cls = 'clickable-icon grove-icon-btn',
+		action?: string,
 	): HTMLButtonElement => {
 		const btn = toolbar.createEl('button', {
 			cls: textMode ? `${cls} grove-text-btn` : cls,
 			attr: { 'aria-label': label, title: label },
 		})
+		if (action) btn.dataset.groveAction = action
 		if (textMode) btn.setText(short)
 		else setIcon(btn, icon)
 		btn.addEventListener('click', onClick)
@@ -75,15 +80,16 @@ export function createReaderActions(
 
 	if (options.text) {
 		const colorWrap = toolbar.createSpan('grove-text-action')
+		colorWrap.dataset.groveAction = '颜色'
 		refs.colorMenuClose = createColorControls(colorWrap, handlers.onColor, options.defaultColor)
 		if (!hidden.has('评论')) {
-			actionBtn('为划选文字添加评论', 'message-square-plus', '评论', () => handlers.onComment(), 'clickable-icon grove-icon-btn grove-text-action')
+			actionBtn('为划选文字添加评论', 'message-square-plus', '评论', () => handlers.onComment(), 'clickable-icon grove-icon-btn grove-text-action', '评论')
 		}
 		if (options.selectionAi && handlers.onSelectionAi) {
 			actionBtn('AI 解释 / 翻译 / 摘要（先划选一段文字）', 'languages', 'AI', e => {
 				e.stopPropagation()
 				handlers.onSelectionAi?.(e.currentTarget as HTMLElement)
-			}, 'clickable-icon grove-icon-btn grove-text-action')
+			}, 'clickable-icon grove-icon-btn grove-text-action', 'AI 划词')
 		}
 	}
 
@@ -96,21 +102,27 @@ export function createReaderActions(
 				const btn = actionBtn('阅读外观（字体 / 背景 / 行距）', 'type', '外观', e => {
 					e.stopPropagation()
 					handlers.onAppearance()
-				}, 'clickable-icon grove-icon-btn grove-text-action')
+				}, 'clickable-icon grove-icon-btn grove-text-action', '外观')
 				btn.addClass('grove-appear-button')
 			},
 		},
 		'AI 问答': {
 			enabled: options.text,
-			render: () => actionBtn('AI 全书问答', 'sparkles', 'AI 问答', () => handlers.onAsk(), 'clickable-icon grove-icon-btn grove-text-action'),
+			render: () => actionBtn('AI 全书问答', 'sparkles', 'AI 问答', () => handlers.onAsk(), 'clickable-icon grove-icon-btn grove-text-action', 'AI 问答'),
 		},
 		导读: {
 			enabled: options.text,
-			render: () => actionBtn('AI 按章导读', 'list-tree', '导读', () => handlers.onGuide(), 'clickable-icon grove-icon-btn grove-text-action'),
+			render: () => actionBtn('AI 按章导读', 'list-tree', '导读', () => handlers.onGuide(), 'clickable-icon grove-icon-btn grove-text-action', '导读'),
+		},
+		朗读: {
+			enabled: options.text && !!handlers.onTts,
+			render: () => {
+				refs.ttsBtn = actionBtn('朗读当前页（系统语音）', 'volume-2', '朗读', () => handlers.onTts?.(), 'clickable-icon grove-icon-btn grove-text-action', '朗读')
+			},
 		},
 		笔记: {
 			enabled: options.text,
-			render: () => actionBtn('生成 / 更新阅读笔记', 'file-text', '笔记', () => handlers.onNote(), 'clickable-icon grove-icon-btn grove-text-action'),
+			render: () => actionBtn('生成 / 更新阅读笔记', 'file-text', '笔记', () => handlers.onNote(), 'clickable-icon grove-icon-btn grove-text-action', '笔记'),
 		},
 		书签: {
 			enabled: options.bookmark,
@@ -121,12 +133,13 @@ export function createReaderActions(
 					'书签',
 					() => handlers.onBookmark(),
 					'clickable-icon grove-icon-btn grove-bookmark-btn',
+					'书签',
 				)
 			},
 		},
 		批注: {
 			enabled: options.sidebar,
-			render: () => actionBtn('批注列表', 'list', '批注', () => handlers.onSidebar()),
+			render: () => actionBtn('批注列表', 'list', '批注', () => handlers.onSidebar(), 'clickable-icon grove-icon-btn', '批注'),
 		},
 	}
 

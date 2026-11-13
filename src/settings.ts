@@ -7,6 +7,7 @@ import { basenameOf, isAbsolutePath } from './util'
 import { LOGO_OPTIONS } from './logos'
 import { embeddingProviderLabel, type EmbeddingProvider } from './embedding'
 import { VectorIndexModal } from './vectorIndexModal'
+import { ImportHighlightsModal } from './importHighlightsModal'
 
 type SettingsTab = 'appearance' | 'shelf' | 'reading' | 'data'
 
@@ -332,6 +333,41 @@ export class GroveSettingTab extends PluginSettingTab {
 					}
 				}))
 
+		new Setting(containerEl)
+			.setName('年度阅读目标')
+			.setDesc('本/年；0 = 不设目标。阅读统计页用方格显示今年读完进度')
+			.addText(text =>
+				text.setValue(String(this.plugin.settings.yearlyGoalBooks ?? 24)).onChange(async value => {
+					const n = Number.parseInt(value, 10)
+					if (Number.isFinite(n) && n >= 0) {
+						this.plugin.settings.yearlyGoalBooks = Math.min(500, n)
+						await this.plugin.saveSettings()
+					}
+				}))
+
+		new Setting(containerEl)
+			.setName('朗读语速')
+			.setDesc('系统语音的朗读速度；1.0 为正常')
+			.addSlider(slider =>
+				slider
+					.setLimits(0.6, 1.6, 0.1)
+					.setValue(this.plugin.settings.ttsRate ?? 1)
+					.setDynamicTooltip()
+					.onChange(async value => {
+						this.plugin.settings.ttsRate = Math.round(value * 10) / 10
+						await this.plugin.saveSettings()
+					}))
+
+		new Setting(containerEl)
+			.setName('e-ink / 极简模式')
+			.setDesc('关闭动画、阴影与悬停位移；手机工具栏只留颜色、评论、外观、笔记、批注 5 个按钮，并启用点正文上下区域翻页')
+			.addToggle(toggle =>
+				toggle.setValue(this.plugin.settings.einkMode ?? false).onChange(async value => {
+					this.plugin.settings.einkMode = value
+					await this.plugin.saveSettings()
+					this.plugin.applyEinkMode()
+				}))
+
 		// —— TXT 分页 ——
 		containerEl.createEl('h3', { text: 'TXT 阅读' })
 		new Setting(containerEl)
@@ -516,7 +552,7 @@ export class GroveSettingTab extends PluginSettingTab {
 				}))
 		new Setting(containerEl)
 			.setName('摘录回跳链接样式')
-			.setDesc('双链：笔记里的「⤴ 回原文」写成指向书文件的 [[双链]]，能在图谱和反向链接里看到「哪些笔记引了这本书」，插件关掉时也能打开书；协议链接：旧的 obsidian://grove 写法。改完只影响你手动「生成/更新笔记」的笔记，自动刷新不会悄悄改写旧笔记；想一次性换掉，用命令「刷新全部阅读笔记」')
+			.setDesc('双链：笔记里的「↩ 回原文」写成指向书文件的 [[双链]]，能在图谱和反向链接里看到「哪些笔记引了这本书」，插件关掉时也能打开书；协议链接：旧的 obsidian://grove 写法。改完只影响你手动「生成/更新笔记」的笔记，自动刷新不会悄悄改写旧笔记；想一次性换掉，用命令「刷新全部阅读笔记」')
 			.addDropdown(dropdown =>
 				dropdown
 					.addOption('wikilink', '双链（推荐）')
@@ -711,7 +747,7 @@ export class GroveSettingTab extends PluginSettingTab {
 		containerEl.createEl('h3', { text: '检索与导出' })
 		new Setting(containerEl)
 			.setName('全局批注检索')
-			.setDesc('跨书搜索划线与评论；结果可跳回原文，导出 Markdown / CSV 到笔记文件夹')
+			.setDesc('跨书搜索划线与评论；结果可跳回原文；「导出…」可先按范围/书/章节/颜色/今天筛选、分组并实时预览，再写 Markdown / CSV 到笔记文件夹')
 			.addButton(button =>
 				button.setButtonText('搜索').setCta().onClick(() => this.plugin.showSearch()))
 		new Setting(containerEl)
@@ -719,6 +755,11 @@ export class GroveSettingTab extends PluginSettingTab {
 			.setDesc('查看每本书的向量索引状态（可用 / 未建立 / 原书已改 / 模型已换），可单独重建、删除或清理失效索引')
 			.addButton(button =>
 				button.setButtonText('管理').onClick(() => new VectorIndexModal(this.app, this.plugin).open()))
+		new Setting(containerEl)
+			.setName('导入外部标注')
+			.setDesc('把 Kindle My Clippings.txt、Readwise CSV、微信读书 Markdown 转成 Grove 批注；按书名/作者匹配书籍，重复摘录自动跳过，导入的条目会带来源标记')
+			.addButton(button =>
+				button.setButtonText('导入…').setCta().onClick(() => new ImportHighlightsModal(this.app, this.plugin).open()))
 
 		// —— 回收站（走 PlatformIO，手机端同样可用）——
 		const trash = this.plugin.trash

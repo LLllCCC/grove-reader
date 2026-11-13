@@ -8,6 +8,7 @@ import {
 	BACKGROUND_PRESETS,
 	DEFAULT_APPEARANCE,
 	HIGHLIGHT_COLORS,
+	IMPORT_SOURCE_LABELS,
 	ReaderAppearance,
 	colorCss,
 } from './types'
@@ -30,6 +31,9 @@ import type { GroveLinkTarget } from './wikilink'
 import { snippetOf, wikilinkFor } from './wikilink'
 import { appendExcerpt } from './excerptNote'
 import type { ExcerptMode } from './excerptStore'
+import { ProgressTicks, chapterFractions, readSeconds, remainingSuffix } from './progressMeta'
+import { TtsController, sentenceRanges, type TtsSentence, type TtsState } from './tts'
+import { WordLookupModal } from './wordLookupModal'
 import '../lib/foliate-js/view.js'
 
 /** 按 cfi 里的数字路径比较先后：纯字符串比较会把 /4,/104 排到 /4/56 之前 */
@@ -162,6 +166,8 @@ export class ReaderView extends ItemView implements ReaderEngine {
 	private colorMenuClose: (() => void) | null = null
 	private citationSection: CitationSectionHandle | null = null
 	private bookmarkBtnEl: HTMLElement | null = null
+	private tts: TtsController | null = null
+	private ttsBtnEl: HTMLButtonElement | null = null
 	private aiPanel = new AiPanel()
 	/** spine 索引 → 该节里最具体的目录项（同文件下「第X章」优先于「第X部分」） */
 	private tocBySection = new Map<number, { label: string; depth: number }>()
@@ -175,6 +181,8 @@ export class ReaderView extends ItemView implements ReaderEngine {
 	private tocSelect!: HTMLSelectElement
 	private slider!: HTMLInputElement
 	private progressLabel!: HTMLElement
+	/** 进度条上的章节刻度与「当前章」高亮 */
+	private ticks: ProgressTicks | null = null
 	private appearPanelEl!: HTMLElement
 	private pageBtnsEl!: HTMLElement
 	private mobileToolbarHandle: HTMLElement | null = null
@@ -346,7 +354,10 @@ export class ReaderView extends ItemView implements ReaderEngine {
 		})
 
 		const progress = toolbar.createDiv('grove-progress')
-		this.slider = progress.createEl('input', { attr: { type: 'range', min: '0', max: '1', step: '0.001' } })
+		// 滑杆和章节刻度叠在同一层：刻度只做视觉定位，不拦截拖动
+		const track = progress.createDiv('grove-progress-track')
+		this.slider = track.createEl('input', { attr: { type: 'range', min: '0', max: '1', step: '0.001' } })
+		this.ticks = new ProgressTicks(track)
 		this.slider.addEventListener('pointerdown', () => {
 			this.sliderActive = true
 			// 拖动前的位置留一份：松手时 relocation 已经把它覆盖了
@@ -376,7 +387,8 @@ export class ReaderView extends ItemView implements ReaderEngine {
 			onGuide: () => new GuideModal(this.app, this.plugin, this).open(),
 			onNote: () => void this.plugin.generateNoteFor(this),
 			onBookmark: () => this.#toggleBookmark(),
-			onSidebar: () => this.sidebarEl.classList.toggle('grove-hidden'),
+			onSidebar: () => this.toggleSidebar(),
+			onTts: () => this.#toggleTts(),
 		}, {
 			text: true,
 			selectionAi: this.plugin.isMobile,
@@ -390,6 +402,7 @@ export class ReaderView extends ItemView implements ReaderEngine {
 		})
 		this.colorMenuClose = actions.colorMenuClose
 		this.bookmarkBtnEl = actions.bookmarkBtn
+		this.ttsBtnEl = actions.ttsBtn
 
 
 		// 外观面板（绝对定位于工具栏下方）
@@ -466,10 +479,16 @@ export class ReaderView extends ItemView implements ReaderEngine {
 		this.annListEl = chrome.listEl
 
 		this.registerDomEvent(this.contentEl, 'keydown', (e: KeyboardEvent) => {
-			if (!PAGE_KEYS.has(e.key) || !this.foliate) return
 			// 焦点在输入框/滑杆时方向键属于编辑操作，不能翻页
 			const t = e.target
-			if (t instanceof HTMLElement && t.closest('input, textarea, select, [contenteditable="true"]')) return
+			const editing = t instanceof HTMLElement && !!t.closest('input, textarea, select, [contenteditable="true"]')
+			if (!editing && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === '[' || e.key === ']')) {
+				e.preventDefault()
+				this.toggleSidebar()
+				return
+			}
+			if (!PAGE_KEYS.has(e.key) || !this.foliate) return
+			if (editing) return
 			if (e.key === 'ArrowLeft') this.foliate.goLeft()
 			else this.foliate.goRight()
 		})
@@ -481,10 +500,77 @@ export class ReaderView extends ItemView implements ReaderEngine {
 	}
 
 	// ------------------------------------------------------------------
+	// 朗读（TTS）
+	// ------------------------------------------------------------------
+
+	#toggleTts(): void {
+		this.#ttsController().toggle()
+	}
+
+	stopTts(): void {
+		this.tts?.stop()
+	}
+
+	/** 收起 / 展开批注栏（工具栏按钮、`[` `]` 快捷键与命令共用） */
+	toggleSidebar(): void {
+		this.sidebarEl?.classList.toggle('grove-hidden')
+	}
+
+	#ttsController(): TtsController {
+		if (!this.tts) {
+			this.tts = new TtsController({
+				collect: () => this.#ttsSentences(),
+				next: () => this.#ttsNext(),
+				onState: state => this.#syncTtsButton(state),
+			}, () => this.plugin.settings.ttsRate)
+		}
+		return this.tts
+	}
+
+	#ttsSentences(): TtsSentence[] {
+		const renderer = (this.foliate as unknown as { renderer?: { getContents?: () => Array<{ doc?: Document }> } } | null)?.renderer
+		const doc = renderer?.getContents?.()[0]?.doc
+		if (!doc?.body) return []
+		const width = doc.documentElement?.clientWidth || 0
+		const height = doc.documentElement?.clientHeight || 0
+		const visible = (node: Text): boolean => {
+			if (!width || !height) return true
+			const range = doc.createRange()
+			range.selectNodeContents(node)
+			const rect = range.getBoundingClientRect()
+			return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < height && rect.right > 0 && rect.left < width
+		}
+		const page = sentenceRanges(doc, doc.body, visible)
+		// 分页模式下可见节点可能判空；退回整节，至少能听
+		return page.length ? page : sentenceRanges(doc, doc.body)
+	}
+
+	async #ttsNext(): Promise<boolean> {
+		const before = this.data?.lastLocation?.cfi ?? ''
+		try {
+			await this.foliate?.goRight()
+		} catch {
+			return false
+		}
+		await new Promise(resolve => window.setTimeout(resolve, 450))
+		const after = this.data?.lastLocation?.cfi ?? ''
+		return !!after && after !== before
+	}
+
+	#syncTtsButton(state: TtsState): void {
+		const btn = this.ttsBtnEl
+		if (!btn) return
+		setIcon(btn, state === 'playing' ? 'pause' : 'volume-2')
+		btn.setAttr('aria-label', state === 'playing' ? '暂停朗读' : state === 'paused' ? '继续朗读' : '朗读当前页（系统语音）')
+		btn.toggleClass('is-active', state !== 'idle')
+	}
+
+	// ------------------------------------------------------------------
 	// 打开 / 关闭书籍
 	// ------------------------------------------------------------------
 
 	async #openBook(cfi?: string): Promise<void> {
+		this.tts?.stop()
 		this.#clearFullTextSearch()
 		this.fullTextSearchEl.open = false
 		const target = this.bookPath
@@ -548,12 +634,14 @@ export class ReaderView extends ItemView implements ReaderEngine {
 	}
 
 	#teardownBook(): void {
+		this.tts?.stop()
 		this.#clearFullTextSearch()
 		this.#hidePopup()
 		this.#closeFootnote()
 		this.#hideJumpReturn()
 		this.aiPanel.hide()
 		this.#clearPending()
+		this.ticks?.clear()
 		if (this.selectionTimer != null) {
 			window.clearTimeout(this.selectionTimer)
 			this.selectionTimer = null
@@ -845,7 +933,7 @@ export class ReaderView extends ItemView implements ReaderEngine {
 			if (sel && !sel.isCollapsed) return
 			// 点正文且没有选区 = 用户主动取消待处理选区（手机的空 pointerup 不再清）
 			this.#clearPending()
-			if (this.plugin.settings.mobileTapZones) {
+			if (this.plugin.settings.mobileTapZones || this.plugin.settings.einkMode) {
 				const rect = this.readerEl.getBoundingClientRect()
 				if (rect.height > 0) {
 					const y = (ev.clientY - rect.top) / rect.height
@@ -898,6 +986,12 @@ export class ReaderView extends ItemView implements ReaderEngine {
 		}
 		doc.addEventListener('keydown', (ke: KeyboardEvent) => {
 			if (ke.key === 'Escape') this.#closeFootnote()
+			// EPUB 正文在 iframe 里，快捷键要在 iframe 自己身上再拦一次
+			if (!ke.ctrlKey && !ke.metaKey && !ke.altKey && (ke.key === '[' || ke.key === ']')) {
+				ke.preventDefault()
+				this.toggleSidebar()
+				return
+			}
 			if (!PAGE_KEYS.has(ke.key)) return
 			const sel = doc.defaultView?.getSelection()
 			if (sel && !sel.isCollapsed) return // 正在用键盘选字时不翻页
@@ -922,14 +1016,18 @@ export class ReaderView extends ItemView implements ReaderEngine {
 			const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
 			if (bar?.dataset.barOpen === '1') this.#setMobileBarOpen(false)
 		}
-		const percent = Math.round((d.fraction ?? 0) * 100)
-		// 手机窄屏一行放不下「0% · Loc 0」，只留百分比，把颜色和评论按钮留在首屏
+		const fraction = d.fraction ?? 0
+		const percent = Math.round(fraction * 100)
+		// 剩余时间用「累计阅读时长 ÷ 已读比例」外推；数据不够时不显示，别给离谱数字
+		const remain = remainingSuffix(readSeconds(this.plugin.stats.peek(this.bookPath)), fraction)
+		// 手机窄屏一行放不下「0% · Loc 0」，只留百分比与剩余时间，把颜色和评论按钮留在首屏
 		this.progressLabel.setText(
 			this.plugin.isMobile
-				? `${percent}%`
-				: `${percent}%${d.pageItem ? ` · 第 ${d.pageItem.label} 页` : d.location ? ` · Loc ${d.location.current}` : ''}`,
+				? `${percent}%${remain}`
+				: `${percent}%${d.pageItem ? ` · 第 ${d.pageItem.label} 页` : d.location ? ` · Loc ${d.location.current}` : ''}${remain}`,
 		)
-		if (!this.sliderActive) this.slider.value = String(d.fraction ?? 0)
+		this.ticks?.highlight(fraction)
+		if (!this.sliderActive) this.slider.value = String(fraction)
 		if (d.tocItem?.href) {
 			const match = Array.from(this.tocSelect.options).find(o => o.value === d.tocItem!.href)
 			if (match) this.tocSelect.value = d.tocItem.href
@@ -1177,6 +1275,20 @@ export class ReaderView extends ItemView implements ReaderEngine {
 		})
 		popup.appendChild(saveBtn)
 
+		// 查词：把选中文字带进弹窗，可改成单个词再查
+		const lookupBtn = document.createElement('button')
+		lookupBtn.textContent = '查词'
+		lookupBtn.title = '查词并加入生词本'
+		lookupBtn.style.cssText = commentBtn.style.cssText
+		lookupBtn.addEventListener('click', e => {
+			e.preventDefault()
+			const pending = this.pending
+			if (!pending) return
+			const chapter = this.tocBySection.get(pending.index)?.label?.replace(/\u00a0/g, ' ').trim()
+			this.#openWordLookup(pending.text, pending.cfi, chapter)
+		})
+		popup.appendChild(lookupBtn)
+
 		const aiBtn = document.createElement('button')
 		aiBtn.textContent = 'AI'
 		aiBtn.title = 'AI 解释 / 翻译 / 摘要'
@@ -1270,7 +1382,22 @@ export class ReaderView extends ItemView implements ReaderEngine {
 		menu.addItem(item => item.setTitle('解释').setIcon('message-circle-question').onClick(() => void this.#runAiTask('explain')))
 		menu.addItem(item => item.setTitle('翻译').setIcon('languages').onClick(() => void this.#runAiTask('translate')))
 		menu.addItem(item => item.setTitle('摘要').setIcon('align-left').onClick(() => void this.#runAiTask('summarize')))
+		menu.addItem(item => item.setTitle('查词').setIcon('book-open').onClick(() => {
+			const pending = this.pending
+			if (!pending) return
+			this.#openWordLookup(pending.text, pending.cfi, this.tocBySection.get(pending.index)?.label?.replace(/\u00a0/g, ' ').trim())
+		}))
 		menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 })
+	}
+
+	#openWordLookup(word: string, cfi?: string, chapter?: string): void {
+		new WordLookupModal(this.app, this.plugin, word, {
+			bookTitle: this.bookTitle,
+			bookPath: this.bookPath,
+			chapter,
+			cfi,
+			context: word,
+		}).open()
 	}
 
 	/** 划词 AI：解释 / 翻译 / 摘要，结果放进浮层（与 TXT 共用 aiPanel.ts） */
@@ -1713,6 +1840,10 @@ export class ReaderView extends ItemView implements ReaderEngine {
 		}
 		add(toc, 0)
 		this.tocSelect.disabled = this.tocSelect.options.length <= 1
+		// 章节刻度按 spine 索引估算位置：目录项指向哪一节，刻度就落在全书的相应比例上
+		const sectionCount = this.foliate?.book?.sections?.length ?? 0
+		const starts = Array.from(this.tocBySection.keys()).sort((a, b) => a - b)
+		this.ticks?.set(chapterFractions(starts, sectionCount))
 	}
 
 	/** 批注所属章节：优先用目录里最具体的那一项，历史数据也一并纠正 */
@@ -1826,15 +1957,16 @@ export class ReaderView extends ItemView implements ReaderEngine {
 		}
 		head.createSpan('grove-ann-dot').style.backgroundColor = colorCss(a.color)
 		head.createSpan('grove-ann-chapter').setText(this.#chapterOf(a))
+		if (a.source) head.createSpan('grove-ann-source').setText(IMPORT_SOURCE_LABELS[a.source] ?? a.source)
 		const text = item.createDiv('grove-ann-text')
 		setHighlightedText(text, truncate(a.text.trim(), 160), this.sidebarQuery)
-		text.addEventListener('click', () => void this.#jumpToCfi(a.cfi))
+		text.addEventListener('click', () => void this.#jumpToCfi(a.cfi, true, { text: a.text, chapter: a.chapter }))
 		if (a.note) item.createDiv('grove-ann-note').setText(truncate(a.note.trim(), 120))
 		const actions = item.createDiv('grove-ann-actions')
 
 		const jump = actions.createEl('button', { cls: 'clickable-icon grove-mini-btn', attr: { 'aria-label': '跳转到原文' } })
 		setIcon(jump, 'arrow-up-left')
-		jump.addEventListener('click', () => void this.#jumpToCfi(a.cfi))
+		jump.addEventListener('click', () => void this.#jumpToCfi(a.cfi, true, { text: a.text, chapter: a.chapter }))
 
 		const edit = actions.createEl('button', { cls: 'clickable-icon grove-mini-btn', attr: { 'aria-label': '编辑评论' } })
 		setIcon(edit, 'message-square')

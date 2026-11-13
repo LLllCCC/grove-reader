@@ -9,7 +9,7 @@ export const DEFAULT_TEMPLATE_PATH = 'Grove Reader/阅读笔记/Grove 笔记模�
 
 /** 从笔记回跳原文的协议链接，由 main.ts 中注册的 obsidian://grove 处理（旧格式，保留兼容） */
 export function jumpLink(bookId: string, cfi: string): string {
-	return `[⤴ 回原文](obsidian://grove?book=${encodeParam(bookId)}&cfi=${encodeParam(cfi)})`
+	return `[↩ 回原文](obsidian://grove?book=${encodeParam(bookId)}&cfi=${encodeParam(cfi)})`
 }
 
 /** 摘录回跳链接的样式：双链（可进图谱/反向链接）或旧版协议链接 */
@@ -159,7 +159,7 @@ export function buildTemplateContext(data: BookData, bookId: string, opts: NoteL
 					// PDF 带上框选矩形，回跳能精确到句；电子书没有 pdf 字段
 					pdfRects: a.pdf?.rects,
 				},
-				'⤴ 回原文',
+				'↩ 回原文',
 			)
 			: ''
 		group.annotations.push({
@@ -188,7 +188,7 @@ export function buildTemplateContext(data: BookData, bookId: string, opts: NoteL
 				? wikilinkFor(
 					data.bookPath,
 					{ cfi: b.cfi, text: snippetOf(b.text ?? ''), chapter: b.label },
-					'⤴ 回原文',
+					'↩ 回原文',
 				)
 				: ''
 			return {
@@ -364,7 +364,12 @@ export interface NoteExtraFields {
 	seconds?: number
 	/** 毫秒时间戳，写成 YYYY-MM-DD */
 	lastRead?: number
+	/** 首次/读完日期（YYYY-MM-DD）；取阅读统计里最早与最晚的阅读日 */
+	started?: string
+	finished?: string
 	publisher?: string
+	/** 封面图的双链写法；供 Bases 卡片视图取图 */
+	cover?: string
 }
 
 /** 插件维护的 frontmatter 字段表：重建与增量刷新都按这张表走，避免两处规则漂移 */
@@ -382,11 +387,14 @@ function metaEntries(data: BookData, bookId: string, extra?: NoteExtraFields): A
 		entries.push(['grove_progress', String(p)])
 	}
 	if (extra.status) entries.push(['grove_status', yamlSafe(extra.status)])
+	if (extra.started) entries.push(['grove_started', extra.started])
+	if (extra.finished) entries.push(['grove_finished', extra.finished])
 	if (typeof extra.seconds === 'number') entries.push(['grove_seconds', String(Math.max(0, Math.round(extra.seconds)))])
 	if (typeof extra.lastRead === 'number' && extra.lastRead > 0) {
 		entries.push(['grove_last_read', new Date(extra.lastRead).toISOString().slice(0, 10)])
 	}
 	if (extra.publisher) entries.push(['grove_publisher', yamlSafe(extra.publisher)])
+	if (extra.cover) entries.push(['grove_cover', yamlSafe(extra.cover)])
 	return entries
 }
 
@@ -399,6 +407,20 @@ const LEGACY_META_KEYS = [
 	'grove-seconds',
 	'grove-last-read',
 	'grove-publisher',
+]
+
+/** 插件维护的统计键；刷新时若新表里已没有该键（如取消「读完」后的 finished），要把旧行删掉 */
+const MANAGED_META_KEYS = [
+	'grove_annotations',
+	'grove_format',
+	'grove_progress',
+	'grove_status',
+	'grove_started',
+	'grove_finished',
+	'grove_seconds',
+	'grove_last_read',
+	'grove_publisher',
+	'grove_cover',
 ]
 
 function frontmatter(data: BookData, bookId: string, extra?: NoteExtraFields): string {
@@ -417,8 +439,15 @@ function refreshFrontmatter(existing: string, data: BookData, bookId: string, ex
 	let lines = (m[1] ?? '').split(/\r?\n/)
 	// 去掉旧命名的统计键（连字符在 Dataview 里会被解析成减法）
 	lines = lines.filter(l => !LEGACY_META_KEYS.some(k => l.startsWith(`${k}:`)))
+	const entries = metaEntries(data, bookId, extra)
+	// 只有拿到完整统计时才清理：没传 extra 的调用方并不知道这些键是否已失效
+	if (extra) {
+		const present = new Set(entries.map(([key]) => key))
+		// 状态从「读完」改回去时，删除已不再成立的日期键，别把旧完成日期留在笔记里
+		lines = lines.filter(l => !MANAGED_META_KEYS.some(k => !present.has(k) && l.startsWith(`${k}:`)))
+	}
 	// 已有键原地替换，缺的键追加在末尾；顺序稳定，不会每次刷新都改动文本
-	for (const [key, value] of metaEntries(data, bookId, extra)) {
+	for (const [key, value] of entries) {
 		if (lines.some(l => l.startsWith(`${key}:`))) lines = set(lines, key, value)
 		else lines.push(`${key}: ${value}`)
 	}
@@ -469,4 +498,116 @@ export function buildNote(
 		return `${before}\n\n${inner}\n`
 	}
 	return `${existing.replace(/\n+$/, '')}\n\n${inner}\n`
+}
+
+// ------------------------------------------------------------------
+// 增量追加：只把新批注插进对应章节，不重写整个生成区
+// ------------------------------------------------------------------
+
+export interface AppendAnnotationsResult {
+	markdown: string
+	appended: number
+}
+
+/** 生成区里一行的块 id：`… ^grove-xxx` */
+const BLOCK_LINE_RE = /\^grove-([0-9A-Za-z_-]+)\s*$/
+
+function blockIdsInRegion(region: string): Set<string> {
+	const ids = new Set<string>()
+	for (const line of region.split(/\r?\n/)) {
+		const m = BLOCK_LINE_RE.exec(line)
+		if (m) ids.add(m[1])
+	}
+	return ids
+}
+
+interface RenderedBlock {
+	chapter: string
+	block: string
+}
+
+/** 从「只含新批注」的渲染结果里按块 id 取出章节标题与整块文本 */
+function extractBlocks(markdown: string): Map<string, RenderedBlock> {
+	const out = new Map<string, RenderedBlock>()
+	const begin = markdown.indexOf(NOTE_BEGIN)
+	const end = markdown.lastIndexOf(NOTE_END)
+	if (begin < 0 || end <= begin) return out
+	const lines = markdown.slice(begin + NOTE_BEGIN.length, end).split(/\r?\n/)
+	let chapter = ''
+	for (let i = 0; i < lines.length; i++) {
+		if (/^##\s+/.test(lines[i])) chapter = lines[i].trim()
+		const m = BLOCK_LINE_RE.exec(lines[i])
+		if (!m) continue
+		let start = i
+		while (start > 0) {
+			const prev = lines[start - 1]
+			if (BLOCK_LINE_RE.test(prev) || /^##\s+/.test(prev)) break
+			start--
+		}
+		while (start < i && lines[start].trim() === '') start++
+		out.set(m[1], { chapter, block: lines.slice(start, i + 1).join('\n').trimEnd() })
+	}
+	return out
+}
+
+/** 把一块内容插到生成区里对应章节的末尾；找不到章节就新建一节 */
+function insertBlock(markdown: string, chapter: string, block: string): string | null {
+	if (!chapter) return null
+	const begin = markdown.indexOf(NOTE_BEGIN)
+	const end = markdown.lastIndexOf(NOTE_END)
+	if (begin < 0 || end <= begin) return null
+	const region = markdown.slice(begin + NOTE_BEGIN.length, end)
+	// 章节标题后可能被编辑器补过空格，匹配时容忍行尾空白
+	const headingRe = new RegExp(`\\n${chapter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[ \\t]*\\n`)
+	const hit = headingRe.exec(region)
+	if (!hit) {
+		const body = region.replace(/\s+$/, '')
+		return `${markdown.slice(0, begin + NOTE_BEGIN.length)}${body}\n\n${chapter}\n\n${block}\n\n${markdown.slice(end)}`
+	}
+	const after = hit.index + hit[0].length
+	const next = region.indexOf('\n## ', after)
+	const cut = next < 0 ? region.replace(/\s+$/, '').length : next
+	const before = region.slice(0, cut).replace(/\s+$/, '')
+	const tail = region.slice(cut).replace(/^\s+/, '')
+	return `${markdown.slice(0, begin + NOTE_BEGIN.length)}${before}\n\n${block}\n\n${tail ? `${tail}\n\n` : ''}${markdown.slice(end)}`
+}
+
+/**
+ * 新增批注的增量写法：已有笔记里缺哪些批注，就只用同一模板渲染这些批注，
+ * 再插到各自章节末尾。这样不会重写整个生成区，用户在生成区里的手写内容也能留下。
+ * 模板结构对不上（生成区里没有任何块 id、没有章节标题等）时返回 null，调用方退回整段重写。
+ */
+export function appendAnnotationBlocks(
+	existing: string,
+	data: BookData,
+	bookId: string,
+	template?: string | null,
+	link: NoteLinkOptions = {},
+	extra?: NoteExtraFields,
+): AppendAnnotationsResult | null {
+	const begin = existing.indexOf(NOTE_BEGIN)
+	const end = existing.lastIndexOf(NOTE_END)
+	if (begin < 0 || end <= begin) return null
+	const ids = blockIdsInRegion(existing.slice(begin + NOTE_BEGIN.length, end))
+	// 生成区里一个块都没有：可能是旧笔记或换了不含块 id 的模板，别冒险追加重复内容
+	if (!ids.size) return null
+	const missing = data.annotations.filter(a => a?.id && !ids.has(a.id))
+	if (!missing.length) return null
+
+	const partial: BookData = { ...data, annotations: missing, bookmarks: [] }
+	const rendered = buildNote(partial, bookId, null, template, undefined, link)
+	const blocks = extractBlocks(rendered)
+	if (blocks.size !== missing.length) return null
+
+	let out = refreshFrontmatter(existing, data, bookId, extra)
+	let appended = 0
+	for (const a of missing) {
+		const spec = blocks.get(a.id)
+		if (!spec) return null
+		const next = insertBlock(out, spec.chapter, spec.block)
+		if (!next) return null
+		out = next
+		appended++
+	}
+	return { markdown: out, appended }
 }

@@ -8,6 +8,7 @@ import {
 	BookData,
 	DEFAULT_APPEARANCE,
 	HIGHLIGHT_COLORS,
+	IMPORT_SOURCE_LABELS,
 	ReaderAppearance,
 	colorCss,
 } from './types'
@@ -28,6 +29,9 @@ import type { ExcerptMode } from './excerptStore'
 import type { SourceSection } from './portrait'
 import { BookAskModal } from './bookAskModal'
 import { GuideModal } from './guideModal'
+import { ProgressTicks, chapterFractions, readSeconds, remainingSuffix } from './progressMeta'
+import { TtsController, scrollRangeIntoView, sentenceRanges, type TtsSentence, type TtsState } from './tts'
+import { WordLookupModal } from './wordLookupModal'
 
 export { VIEW_TYPE_GROVE_TEXT } from './textCodec'
 
@@ -114,12 +118,17 @@ export class TextView extends ItemView implements ReaderEngine {
 	private metaEl!: HTMLElement
 	private slider!: HTMLInputElement
 	private progressLabel!: HTMLElement
+	/** 进度条上的章节刻度（TXT 的章节是扫描「第X章」得到的） */
+	private ticks: ProgressTicks | null = null
+	private tickKey = ''
 	private prevBtn!: HTMLButtonElement
 	private pageBtnsEl!: HTMLElement
 	private nextBtn!: HTMLButtonElement
 	private encodingSelect!: HTMLSelectElement
 	private appearPanelEl!: HTMLElement
 	private mobileToolbarHandle: HTMLElement | null = null
+	private tts: TtsController | null = null
+	private ttsBtnEl: HTMLButtonElement | null = null
 	private sidebarEl!: HTMLElement
 	private chrome!: ReaderSidebar
 	private annListEl!: HTMLElement
@@ -232,6 +241,7 @@ export class TextView extends ItemView implements ReaderEngine {
 	}
 
 	async onClose(): Promise<void> {
+		this.tts?.stop()
 		this.colorMenuClose?.()
 		this.colorMenuClose = null
 		this.#flushSave()
@@ -269,7 +279,7 @@ export class TextView extends ItemView implements ReaderEngine {
 				event.stopPropagation()
 				return
 			}
-			if (this.plugin.settings.mobileTapZones) {
+			if (this.plugin.settings.mobileTapZones || this.plugin.settings.einkMode) {
 				const rect = this.scrollEl.getBoundingClientRect()
 				if (rect.height > 0) {
 					const y = (event.clientY - rect.top) / rect.height
@@ -307,17 +317,17 @@ export class TextView extends ItemView implements ReaderEngine {
 		this.tocBtn.addEventListener('click', () => this.#openToc())
 
 		const progress = toolbar.createDiv('grove-progress')
-		this.slider = progress.createEl('input', {
+		const track = progress.createDiv('grove-progress-track')
+		this.slider = track.createEl('input', {
 			attr: { type: 'range', min: '1', max: '1', step: '1', value: '1' },
 		})
 		this.slider.disabled = true
+		this.ticks = new ProgressTicks(track)
 		this.progressLabel = progress.createSpan('grove-progress-label')
 		this.progressLabel.setText('—')
 		this.slider.addEventListener('input', () => {
 			const offset = Number(this.slider.value)
-			if (!Number.isFinite(offset)) return
-			const total = this.#totalChars()
-			this.progressLabel.setText(total > 0 ? `${Math.round((offset / total) * 100)}%` : '0%')
+			if (Number.isFinite(offset)) this.#updateProgress(offset)
 		})
 		this.slider.addEventListener('change', () => {
 			const offset = Number(this.slider.value)
@@ -335,7 +345,8 @@ export class TextView extends ItemView implements ReaderEngine {
 			onGuide: () => new GuideModal(this.app, this.plugin, this).open(),
 			onNote: () => void this.plugin.generateNoteFor(this),
 			onBookmark: () => this.#toggleBookmark(),
-			onSidebar: () => this.sidebarEl.classList.toggle('grove-hidden'),
+			onSidebar: () => this.toggleSidebar(),
+			onTts: () => this.#toggleTts(),
 		}, {
 			text: true,
 			selectionAi: this.plugin.isMobile,
@@ -349,6 +360,7 @@ export class TextView extends ItemView implements ReaderEngine {
 		})
 		this.colorMenuClose = actions.colorMenuClose
 		this.bookmarkBtnEl = actions.bookmarkBtn
+		this.ttsBtnEl = actions.ttsBtn
 
 
 		const encodingWrap = toolbar.createDiv('grove-text-encoding')
@@ -493,6 +505,11 @@ export class TextView extends ItemView implements ReaderEngine {
 		this.registerDomEvent(this.contentEl, 'keydown', (e: KeyboardEvent) => {
 			const t = e.target
 			if (t instanceof HTMLElement && t.closest('input, textarea, select, [contenteditable="true"]')) return
+			if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === '[' || e.key === ']')) {
+				e.preventDefault()
+				this.toggleSidebar()
+				return
+			}
 			if (window.getSelection()?.toString()) return
 			const axis = this.plugin.settings.txtTurnAxis ?? 'horizontal'
 			const prevKey = axis === 'vertical' ? 'ArrowUp' : 'ArrowLeft'
@@ -558,6 +575,8 @@ export class TextView extends ItemView implements ReaderEngine {
 		this.textEl.setText(message)
 		this.metaEl.setText('')
 		this.progressLabel.setText('—')
+		this.ticks?.clear()
+		this.tickKey = ''
 		this.slider.disabled = true
 		this.prevBtn.disabled = true
 		this.nextBtn.disabled = true
@@ -568,6 +587,7 @@ export class TextView extends ItemView implements ReaderEngine {
 	// ------------------------------------------------------------------
 
 	async #load(): Promise<void> {
+		this.tts?.stop()
 		const path = this.bookPath
 		if (!path || this.loadingPath === path) return
 		this.loadingPath = path
@@ -1134,6 +1154,76 @@ export class TextView extends ItemView implements ReaderEngine {
 		return (this.pageStarts[last] ?? 0) + (this.pages[last]?.length ?? 0)
 	}
 
+	/** 章节刻度只在总字数或章数变化时重建；其余时候只挪「当前章」高亮 */
+	#syncTicks(total: number, fraction: number): void {
+		const key = `${total}:${this.chapters.length}`
+		if (key !== this.tickKey) {
+			this.tickKey = key
+			this.ticks?.set(chapterFractions(this.chapters.map(c => c.offset), total))
+		}
+		this.ticks?.highlight(fraction)
+	}
+
+	// ------------------------------------------------------------------
+	// 朗读（TTS）
+	// ------------------------------------------------------------------
+
+	#toggleTts(): void {
+		this.#ttsController().toggle()
+	}
+
+	stopTts(): void {
+		this.tts?.stop()
+	}
+
+	/** 收起 / 展开批注栏（工具栏按钮、`[` `]` 快捷键与命令共用） */
+	toggleSidebar(): void {
+		this.sidebarEl?.classList.toggle('grove-hidden')
+	}
+
+	#ttsController(): TtsController {
+		if (!this.tts) {
+			this.tts = new TtsController({
+				collect: () => this.#ttsSentences(),
+				next: () => this.#ttsNext(),
+				highlight: sentence => {
+					if (sentence?.range) scrollRangeIntoView(sentence.range, this.scrollEl)
+				},
+				onState: state => this.#syncTtsButton(state),
+			}, () => this.plugin.settings.ttsRate)
+		}
+		return this.tts
+	}
+
+	#ttsSentences(): TtsSentence[] {
+		if (!this.textEl) return []
+		const box = this.scrollEl?.getBoundingClientRect()
+		const visible = (node: Text): boolean => {
+			if (!box) return true
+			const range = document.createRange()
+			range.selectNodeContents(node)
+			const rect = range.getBoundingClientRect()
+			return rect.width > 0 && rect.height > 0 && rect.bottom > box.top && rect.top < box.bottom && rect.right > box.left && rect.left < box.right
+		}
+		const screen = sentenceRanges(document, this.textEl, visible)
+		return screen.length ? screen : sentenceRanges(document, this.textEl)
+	}
+
+	async #ttsNext(): Promise<boolean> {
+		const before = `${this.page}:${this.screen}`
+		this.nextPage()
+		await new Promise(resolve => window.setTimeout(resolve, 350))
+		return `${this.page}:${this.screen}` !== before
+	}
+
+	#syncTtsButton(state: TtsState): void {
+		const btn = this.ttsBtnEl
+		if (!btn) return
+		setIcon(btn, state === 'playing' ? 'pause' : 'volume-2')
+		btn.setAttr('aria-label', state === 'playing' ? '暂停朗读' : state === 'paused' ? '继续朗读' : '朗读当前页（系统语音）')
+		btn.toggleClass('is-active', state !== 'idle')
+	}
+
 	/** 排版横坐标处第一个字符的全文偏移（二分测量，不依赖 scrollLeft） */
 	#offsetAtX(targetX: number): number {
 		const pageStart = this.pageStarts[this.page] ?? 0
@@ -1223,8 +1313,11 @@ export class TextView extends ItemView implements ReaderEngine {
 	#updateProgress(offsetArg?: number): void {
 		const total = this.#totalChars()
 		const offset = offsetArg ?? this.#currentOffset()
-		const pct = total > 0 ? (offset / total) * 100 : 0
-		this.progressLabel.setText(`${Math.round(pct)}%`)
+		const fraction = total > 0 ? offset / total : 0
+		const pct = fraction * 100
+		const remain = remainingSuffix(readSeconds(this.plugin.stats.peek(this.bookPath)), fraction)
+		this.progressLabel.setText(`${Math.round(pct)}%${remain}`)
+		this.#syncTicks(total, fraction)
 		this.slider.min = '0'
 		this.slider.max = String(Math.max(1, total))
 		this.slider.value = String(offset)
@@ -1788,6 +1881,16 @@ export class TextView extends ItemView implements ReaderEngine {
 			menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 })
 		})
 
+		const lookupBtn = popup.createEl('button', { text: '查词' })
+		lookupBtn.title = '查词并加入生词本'
+		lookupBtn.style.cssText = buttonCss
+		lookupBtn.addEventListener('click', e => {
+			e.preventDefault()
+			const pending = this.pending
+			if (!pending) return
+			this.#openWordLookup(pending.text, `txt:${pending.start}-${pending.end}`, this.#chapterAt(pending.start))
+		})
+
 		const aiBtn = popup.createEl('button', { text: 'AI' })
 		aiBtn.title = 'AI 解释 / 翻译 / 摘要'
 		aiBtn.style.cssText = buttonCss
@@ -1827,7 +1930,22 @@ export class TextView extends ItemView implements ReaderEngine {
 		menu.addItem(item => item.setTitle('解释').setIcon('message-circle-question').onClick(() => void this.#runAiTask('explain')))
 		menu.addItem(item => item.setTitle('翻译').setIcon('languages').onClick(() => void this.#runAiTask('translate')))
 		menu.addItem(item => item.setTitle('摘要').setIcon('align-left').onClick(() => void this.#runAiTask('summarize')))
+		menu.addItem(item => item.setTitle('查词').setIcon('book-open').onClick(() => {
+			const pending = this.pending
+			if (!pending) return
+			this.#openWordLookup(pending.text, `txt:${pending.start}-${pending.end}`, this.#chapterAt(pending.start))
+		}))
 		menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 })
+	}
+
+	#openWordLookup(word: string, cfi?: string, chapter?: string): void {
+		new WordLookupModal(this.app, this.plugin, word, {
+			bookTitle: this.bookTitle,
+			bookPath: this.bookPath,
+			chapter,
+			cfi,
+			context: word,
+		}).open()
 	}
 
 	/** 划词 AI：解释 / 翻译 / 摘要，与 EPUB 共用 aiPanel */
@@ -2145,9 +2263,10 @@ export class TextView extends ItemView implements ReaderEngine {
 		}
 		head.createSpan('grove-ann-dot').style.backgroundColor = colorCss(a.color)
 		head.createSpan('grove-ann-chapter').setText(a.chapter || '')
+		if (a.source) head.createSpan('grove-ann-source').setText(IMPORT_SOURCE_LABELS[a.source] ?? a.source)
 		const text = item.createDiv('grove-ann-text')
 		setHighlightedText(text, truncate(a.text.trim(), 160), this.sidebarQuery)
-		text.addEventListener('click', () => this.jumpTo(a.cfi))
+		text.addEventListener('click', () => this.jumpTo(a.cfi, { text: a.text, chapter: a.chapter }))
 		if (a.note) item.createDiv('grove-ann-note').setText(truncate(a.note.trim(), 120))
 		const actions = item.createDiv('grove-ann-actions')
 
@@ -2156,7 +2275,7 @@ export class TextView extends ItemView implements ReaderEngine {
 			attr: { 'aria-label': '跳转到原文' },
 		})
 		setIcon(jump, 'arrow-up-left')
-		jump.addEventListener('click', () => this.jumpTo(a.cfi))
+		jump.addEventListener('click', () => this.jumpTo(a.cfi, { text: a.text, chapter: a.chapter }))
 
 		const edit = actions.createEl('button', {
 			cls: 'clickable-icon grove-mini-btn',

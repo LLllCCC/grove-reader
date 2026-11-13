@@ -1,6 +1,6 @@
 // 引用页签：侧栏里列出「哪些笔记引了这本书」。
 // 数据来自 Obsidian 的 metadataCache——笔记里每条摘录都是指向书文件的
-// `[[书路径#grove-cfi=…|⤴ 回原文]]` 双链，解析回来就是「某笔记在某章引了这本书」。
+// `[[书路径#grove-cfi=…|↩ 回原文]]` 双链，解析回来就是「某笔记在某章引了这本书」。
 // 不读笔记正文、不扫目录：resolvedLinks 一次扫描 + 命中源再查缓存，几千条笔记也是毫秒级。
 import { App, LinkCache, setIcon } from 'obsidian'
 import { basenameOf, compareCfi } from './util'

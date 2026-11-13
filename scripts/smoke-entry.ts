@@ -5,13 +5,14 @@ import os from 'node:os'
 import assert from 'node:assert'
 import { BookStore } from '../src/store'
 import { DesktopIO } from '../src/desktopIO'
-import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, NOTE_BEGIN, NOTE_END, renderNoteTemplate, resolveExcerptLinkStyle } from '../src/notes'
-import { STATS_IDLE_MS, STATS_TICK_MS, StatsStore, accrueTick, todayKey } from '../src/stats'
+import { appendAnnotationBlocks, buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, NOTE_BEGIN, NOTE_END, renderNoteTemplate, resolveExcerptLinkStyle } from '../src/notes'
+import { STATS_IDLE_MS, STATS_TICK_MS, StatsStore, accrueTick, forecastFinishDays, recentSecondsFor, todayKey } from '../src/stats'
 import { BookData, type Annotation, type Bookmark } from '../src/types'
 import { READING_STATUS_LABELS, READING_STATUS_ORDER, normalizeToolbarOrder } from '../src/types'
 import { bookIdFor, compareCfi, formatDuration, pageFromFraction, relativeTime } from '../src/util'
 import { applySync, normalizeExcerpt, parseNoteEntries, planSync } from '../src/noteSync'
-import { buildSearchIndex, searchDocs } from '../src/search'
+import { buildSearchIndex, exportCsv, exportMarkdown, filterExportDocs, groupExportDocs, searchDocs } from '../src/search'
+import type { SearchDoc } from '../src/search'
 import { TrashStore } from '../src/trash'
 import { buildHealthReport, healthCleanupCount } from '../src/health'
 import { checkMigrateTarget, exportDataBackup, migrateDataFolder } from '../src/backup'
@@ -41,6 +42,18 @@ import { excerptFileName, excerptMarkdown } from '../src/excerptStore'
 import { buildMultiBookPrompt } from '../src/multiBookPrompt'
 import { parseMetaSuggestion } from '../src/bookMeta'
 import { highlightBands } from '../src/epubHighlight'
+import { buildShelfBase } from '../src/baseTemplate'
+import { splitSentenceSpans } from '../src/ttsText'
+import { appendVocabEntry, parseVocabWords, vocabAnkiCsv, vocabFilePath } from '../src/vocab'
+import {
+	buildImportedAnnotations,
+	detectHighlightFormat,
+	matchImportedHighlights,
+	parseCsv,
+	parseKindleClippings,
+	parseReadwiseCsv,
+	parseWereadMarkdown,
+} from '../src/importHighlights'
 import { LOCAL_EMBED_DIMS, localVector } from '../src/localEmbed'
 import {
 	chunkHash,
@@ -1222,10 +1235,10 @@ assert.equal(await storeDedupe.reloadFromDisk(bookIdFor('Books/x.epub')), true, 
 
 // 50. 工具栏顺序：未知项与重复项被忽略，未列出的动作按默认顺序补齐
 {
-	assert.deepEqual(normalizeToolbarOrder(), ['外观', 'AI 问答', '导读', '笔记', '书签', '批注'])
+	assert.deepEqual(normalizeToolbarOrder(), ['外观', 'AI 问答', '导读', '朗读', '笔记', '书签', '批注'])
 	assert.deepEqual(
 		normalizeToolbarOrder(['批注', '未知', '外观', '批注']),
-		['批注', '外观', 'AI 问答', '导读', '笔记', '书签'],
+		['批注', '外观', 'AI 问答', '导读', '朗读', '笔记', '书签'],
 	)
 	assert.deepEqual(normalizeToolbarOrder(['书签'])[0], '书签')
 }
@@ -1395,6 +1408,258 @@ assert.equal(await storeDedupe.reloadFromDisk(bookIdFor('Books/x.epub')), true, 
 	assert.equal(block.length, 1)
 	assert.equal(block[0].height, 16)
 	assert.equal(block[0].opacity, 0.3)
+}
+
+// 56. 导出筛选与分组：书/章节/颜色/今天/评论筛选，按章按色分组与内容开关
+{
+	const now = Date.now()
+	const doc = (id: string, bookPath: string, bookTitle: string, chapter: string, color: string, note: string, when: number): SearchDoc => ({
+		bookPath,
+		bookTitle,
+		author: '作者',
+		bookId: bookIdFor(bookPath),
+		bookExists: true,
+		annotation: {
+			id,
+			cfi: `txt:${id.length}`,
+			text: `摘录 ${id}`,
+			color,
+			note,
+			chapter,
+			createdAt: when,
+			updatedAt: when,
+		},
+	})
+	const docs = [
+		doc('a', 'Books/A.epub', '甲书', '第一章', 'yellow', '评论一', now),
+		doc('b', 'Books/A.epub', '甲书', '第二章', 'green', '', now),
+		doc('c', 'Books/B.epub', '乙书', '第一章', 'yellow', '评论三', now - 3 * 86_400_000),
+	]
+	assert.equal(filterExportDocs(docs, { bookPath: 'Books/A.epub' }).length, 2, '按书筛')
+	assert.equal(filterExportDocs(docs, { chapter: '第一章' }).length, 2, '按章节筛（跨书同名章都要）')
+	assert.deepEqual(filterExportDocs(docs, { colors: ['yellow'] }).map(d => d.annotation.id), ['a', 'c'], '按颜色筛')
+	assert.equal(filterExportDocs(docs, { todayOnly: true }).length, 2, '仅今天')
+	assert.equal(filterExportDocs(docs, { onlyNotes: true }).length, 2, '只看有评论')
+
+	const byChapter = groupExportDocs(docs, 'chapter')
+	assert.equal(byChapter.length, 3, '两本书各自的「第一章」不能合并')
+	assert.ok(byChapter[0].title.includes('甲书') && byChapter[0].title.includes('第一章'))
+	const byColor = groupExportDocs(docs, 'color')
+	assert.equal(byColor.length, 2)
+	assert.equal(byColor[0].title, '黄')
+
+	const md = exportMarkdown(docs, '', {
+		groupBy: 'color',
+		includeComment: false,
+		includeLink: false,
+		includeMeta: false,
+	})
+	assert.ok(md.includes('## 黄（2 条）'), '按颜色分组标题带条数')
+	assert.ok(md.includes('《甲书》'), '按颜色分组时条目要带书名')
+	assert.ok(!md.includes('评论一'), '关闭评论后不写评论')
+	assert.ok(!md.includes('回原文'), '关闭回跳后不写链接')
+	assert.ok(exportMarkdown(docs, '测试', { groupBy: 'chapter' }).includes('## 《甲书》 · 第一章'))
+
+	const csv = exportCsv(docs)
+	assert.equal(csv.split('\r\n').length, 4, 'CSV 表头 + 3 行数据')
+}
+
+// 57. 笔记增量追加 + 书架 Base：只补新批注、保留手写行、模板结构不匹配时退回
+{
+	const book: BookData = {
+		...data,
+		annotations: [
+			{ ...data.annotations[0], id: 'a1', chapter: '第一章', cfi: 'epubcfi(/6/2!/4/2)' },
+			{ ...data.annotations[0], id: 'a2', chapter: '第二章', cfi: 'epubcfi(/6/4!/4/2)' },
+		],
+	}
+	const firstOnly: BookData = { ...book, annotations: [book.annotations[0]] }
+	const note = buildNote(firstOnly, 'idb', null).replace(NOTE_END, '生成区里的手写行\n\n' + NOTE_END)
+	const appended = appendAnnotationBlocks(note, book, 'idb')
+	assert.ok(appended, '结构匹配时应走增量追加')
+	assert.equal(appended.appended, 1)
+	assert.ok(appended.markdown.includes('## 第二章'), '新章节要补上标题')
+	assert.ok(appended.markdown.includes('生成区里的手写行'), '生成区里的手写行不能被覆盖')
+	assert.equal((appended.markdown.match(/\^grove-/g) ?? []).length, 2, '两条批注块都在')
+	assert.equal(appendAnnotationBlocks(appended.markdown, book, 'idb'), null, '已追加过就不该重复')
+
+	const sameChapter = buildNote({ ...book, annotations: [book.annotations[0]] }, 'idb', null)
+	const second = appendAnnotationBlocks(sameChapter, { ...book, annotations: [book.annotations[0], { ...book.annotations[1], chapter: '第一章' }] }, 'idb')
+	assert.ok(second && second.appended === 1)
+	assert.equal((second.markdown.match(/\^grove-/g) ?? []).length, 2)
+	assert.ok(second.markdown.indexOf('a1') >= 0 && second.markdown.includes('第一章'))
+
+	assert.equal(appendAnnotationBlocks('纯文本，没有生成区', book, 'idb'), null, '没有标记区不追加')
+	assert.equal(appendAnnotationBlocks(note, firstOnly, 'idb'), null, '没有新批注不追加')
+
+	const noHeadingsTpl = '{{#each chapters}}{{#each annotations}}{{textQuote}}\n\n{{jumpLink}} ^{{blockId}}{{/each}}{{/each}}'
+	const noHeadings = buildNote(firstOnly, 'idb', null, noHeadingsTpl)
+	assert.equal(appendAnnotationBlocks(noHeadings, book, 'idb', noHeadingsTpl), null, '模板没有章节标题时不冒险追加')
+
+	const baseText = buildShelfBase({ notesFolder: 'Grove Reader/阅读笔记', year: 2026 })
+	assert.ok(baseText.includes('file.inFolder("Grove Reader/阅读笔记")'))
+	assert.ok(baseText.includes('type: cards'))
+	assert.ok(baseText.includes('image: note.grove_cover'))
+	assert.ok(baseText.includes('grove_status == "在读"'))
+	assert.ok(baseText.includes('grove_finished >= "2026-01-01"'))
+	assert.ok(!baseText.includes('{{'), 'Base 里不能残留模板变量')
+}
+
+// 58. 朗读断句 + 读完预测：中英文断句、长句切分、日均速度外推
+{
+	const spans = splitSentenceSpans('第一句。第二句！\n第三句？')
+	assert.deepEqual(spans.map(s => s.text), ['第一句。', '第二句！', '第三句？'])
+	assert.equal(splitSentenceSpans('Hello world. This is fine. Next').length, 3, '英文句点也要断')
+	const long = splitSentenceSpans('很长的一段话，'.repeat(30), 40)
+	assert.ok(long.length > 1, '超长句要切开')
+	assert.ok(long.every(s => s.text.length <= 40), '切开后不能超过上限')
+
+	const now = new Date()
+	const key = todayKey(now)
+	const book = { seconds: 1000, pages: 10, days: { [key]: { seconds: 700, pages: 7 } }, lastRead: now.getTime() }
+	assert.equal(recentSecondsFor(book, 7, now), 700)
+	assert.equal(forecastFinishDays(book, 0.25, now), 30, '剩 3000 秒 / 日均 100 秒 = 30 天')
+	assert.equal(forecastFinishDays(book, 0, now), null)
+	assert.equal(forecastFinishDays(book, 1, now), null)
+	assert.equal(forecastFinishDays({ ...book, seconds: 30 }, 0.25, now), null, '样本太短不预测')
+}
+
+// 59. 生词本：追加去重、多行释义压平、Anki CSV、文件名清洗
+{
+	const entry = {
+		word: 'ephemeral',
+		meaning: '释义：短暂的\n词性：形容词\n例句：An ephemeral moment.',
+		context: 'An ephemeral moment.',
+		bookTitle: '测试书',
+		bookPath: 'Books/测试.epub',
+		chapter: '第一章',
+		cfi: 'txt:10',
+		createdAt: Date.UTC(2026, 0, 2),
+	}
+	const first = appendVocabEntry(null, entry)
+	assert.ok(first.added)
+	assert.ok(first.markdown.startsWith('# 《测试书》生词本'))
+	assert.ok(first.markdown.includes('## ephemeral'))
+	assert.ok(first.markdown.includes('- **释义**：短暂的'), 'AI 的释义行拆成独立条目')
+	assert.ok(first.markdown.includes('- **词性**：形容词'))
+	assert.ok(first.markdown.includes('- **例句**：An ephemeral moment.'))
+	assert.ok(first.markdown.includes('](obsidian://grove?'), '回原文链接不能套娃')
+	assert.ok(!first.markdown.includes('[↩ 回原文](['), '链接只包一层')
+	assert.equal(appendVocabEntry(first.markdown, entry).added, false, '同名词不重复写')
+	const second = appendVocabEntry(first.markdown, { ...entry, word: 'lucid', meaning: '清晰的', cfi: undefined })
+	assert.ok(second.added)
+	assert.deepEqual(parseVocabWords(second.markdown), ['ephemeral', 'lucid'])
+	const csv = vocabAnkiCsv(entry)
+	assert.ok(csv.startsWith('"ephemeral","'))
+	assert.ok(csv.includes('原文：An ephemeral moment.'))
+	assert.equal(vocabFilePath('阅读笔记', 'A/B:C'), '阅读笔记/生词本/A B C 生词本.md', '书名里的路径字符要清洗')
+	assert.equal(appendVocabEntry(null, { ...entry, word: '   ' }).added, false, '空词不写')
+}
+
+// 60. 外部标注导入：Kindle / Readwise / 微信读书解析、格式识别、书名匹配与去重
+{
+	const kindle = [
+		'三体 (刘慈欣)',
+		'- 您在第 1 页（位置 #123-125）的标注 | 添加于 2024年1月1日',
+		'',
+		'弱小和无知不是生存的障碍，傲慢才是。',
+		'==========',
+		'三体 (刘慈欣)',
+		'- 您在第 1 页（位置 #123-125）的笔记 | 添加于 2024年1月1日',
+		'',
+		'这句话值得记住。',
+		'==========',
+		'银河帝国 (阿西莫夫)',
+		'- Your Highlight on page 5 | Location 88-90 | Added on Monday, January 1, 2024 12:00:00 AM',
+		'',
+		'The fall of the Empire.',
+		'==========',
+	].join('\n')
+	const kindleItems = parseKindleClippings(kindle)
+	assert.equal(kindleItems.length, 2, 'Kindle 笔记合并进上一条高亮，不单独计数')
+	assert.equal(kindleItems[0].bookTitle, '三体')
+	assert.equal(kindleItems[0].author, '刘慈欣')
+	assert.equal(kindleItems[0].location, '位置 123-125')
+	assert.equal(kindleItems[0].note, '这句话值得记住。')
+	assert.equal(kindleItems[1].location, '位置 88-90')
+
+	const readwise = [
+		'Highlight,Book Title,Book Author,Location,Date,Note,Color,Tags',
+		'"第一行，带逗号","三体","刘慈欣","123","2024-01-01","想法","yellow",""',
+		'"跨行\n摘录","三体","刘慈欣","124","2024-01-02","","blue",""',
+	].join('\n')
+	assert.equal(parseCsv(readwise).length, 3, 'CSV 引号里的换行不拆行')
+	const rwItems = parseReadwiseCsv(readwise)
+	assert.equal(rwItems.length, 2)
+	assert.equal(rwItems[0].text, '第一行，带逗号')
+	assert.equal(rwItems[0].note, '想法')
+	assert.equal(rwItems[1].text, '跨行\n摘录')
+	assert.equal(rwItems[1].color, 'blue')
+
+	const weread = [
+		'# 《三体》',
+		'作者：刘慈欣',
+		'',
+		'## 第一章',
+		'',
+		'> 弱小和无知不是生存的障碍，傲慢才是。',
+		'> 第二行引用',
+		'',
+		'想法：这句好',
+		'',
+		'## 第二章',
+		'',
+		'> 给岁月以文明。',
+	].join('\n')
+	const wrItems = parseWereadMarkdown(weread)
+	assert.equal(wrItems.length, 2)
+	assert.equal(wrItems[0].bookTitle, '三体')
+	assert.equal(wrItems[0].author, '刘慈欣')
+	assert.equal(wrItems[0].chapter, '第一章')
+	assert.equal(wrItems[0].text, '弱小和无知不是生存的障碍，傲慢才是。\n第二行引用')
+	assert.equal(wrItems[0].note, '这句好')
+	assert.equal(wrItems[1].chapter, '第二章')
+
+	assert.equal(detectHighlightFormat(kindle), 'kindle')
+	assert.equal(detectHighlightFormat(readwise), 'readwise')
+	assert.equal(detectHighlightFormat(weread), 'weread')
+	assert.equal(detectHighlightFormat('随便一段文字'), null)
+
+	const books = [
+		{ path: 'Books/三体.epub', title: '三体', author: '刘慈欣' },
+		{ path: 'Books/沙丘.epub', title: '沙丘', author: '弗兰克·赫伯特' },
+	]
+	const matched = matchImportedHighlights([...kindleItems, ...rwItems], books)
+	assert.equal(matched.matched.length, 1)
+	assert.equal(matched.matched[0].bookPath, 'Books/三体.epub')
+	assert.equal(matched.matched[0].highlights.length, 3, '两组「三体」的高亮要合并到同一本')
+	assert.equal(matched.unmatched.length, 1)
+	assert.equal(matched.unmatched[0].bookTitle, '银河帝国')
+
+	const existing: Annotation[] = [{
+		id: 'old',
+		cfi: 'txt:1',
+		text: '弱小和无知 不是生存的障碍 傲慢才是',
+		color: 'yellow',
+		createdAt: 1,
+		updatedAt: 1,
+	}]
+	const built = buildImportedAnnotations(matched.matched[0].highlights, existing, 'kindle', 1000)
+	assert.equal(built.duplicates, 1, '空白/标点不同的同一条摘录也要算重复')
+	assert.equal(built.annotations.length, 2)
+	assert.ok(built.annotations.every(a => a.source === 'kindle' && a.cfi === ''))
+	assert.ok(built.annotations.some(a => a.text.startsWith('跨行') && a.color === 'blue'))
+
+	// 书名号/空格差异也要能匹配上
+	const normalized = matchImportedHighlights([{ bookTitle: '《 三体 》', text: 'x' }], books)
+	assert.equal(normalized.matched.length, 1)
+	// 一条带作者、一条没带作者：匹配到同一本书时要合并，不能出两行
+	const mixed = matchImportedHighlights([
+		{ bookTitle: '三体', author: '刘慈欣', text: 'a' },
+		{ bookTitle: '三体', text: 'b' },
+	], books)
+	assert.equal(mixed.matched.length, 1)
+	assert.equal(mixed.matched[0].highlights.length, 2)
 }
 
 /** PDF++ 链接：页码必须有，归一化 rect 与点坐标 selection 分流 */

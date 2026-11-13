@@ -37,6 +37,10 @@ export interface ReaderEngine {
 	jumpTo(cfi: string, fallback?: GroveLinkTarget): void
 	nextPage(): void
 	prevPage(): void
+	/** 停止朗读（没有在朗读时是空操作） */
+	stopTts?(): void
+	/** 收起 / 展开批注栏 */
+	toggleSidebar?(): void
 	refreshAnnotations(): void
 	extractAiSections(onProgress?: (done: number, total: number) => void): Promise<SourceSection[]>
 	getState(): Record<string, unknown>

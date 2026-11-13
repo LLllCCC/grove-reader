@@ -2,9 +2,9 @@
  * 摘录双链（wikilink）的生成与解析。
  *
  * 笔记里一条摘录从
- *   `[⤴ 回原文](obsidian://grove?book=…&cfi=…)`
+ *   `[↩ 回原文](obsidian://grove?book=…&cfi=…)`
  * 升级成
- *   `[[Grove Reader/书籍/围城.epub#grove-cfi=epubcfi(… )&t=…&c=…|⤴ 回原文]]`
+ *   `[[Grove Reader/书籍/围城.epub#grove-cfi=epubcfi(… )&t=…&c=…|↩ 回原文]]`
  *
  * 为什么指向书文件而不是阅读笔记：笔记是插件每次重新生成的，指向自己是自引用，
  * 反向链接面板没有信息量；指向书之后「哪些笔记引了这本书」才成立，插件被关掉时

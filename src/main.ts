@@ -30,13 +30,15 @@ import { collectGlobalBookmarks } from './globalBookmarks'
 import type { GlobalBookmarkRow } from './globalBookmarks'
 import { appendCards, buildCardText, canvasColor, emptyCanvas, parseCanvas, serializeCanvas } from './canvas'
 import { quoteCardFileName, renderQuoteCard } from './cardImage'
+import { buildShelfBase, SHELF_BASE_NAME } from './baseTemplate'
 import { GroveSettingTab } from './settings'
-import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate, resolveExcerptLinkStyle } from './notes'
-import type { NoteExtraFields } from './notes'
+import { appendAnnotationBlocks, buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate, resolveExcerptLinkStyle } from './notes'
+import type { NoteExtraFields, NoteLinkOptions } from './notes'
 import { collectExcerptBacklinks, type ExcerptBacklinkRow } from './backlinks'
 import { BookAskModal } from './bookAskModal'
 import { MultiBookAskModal } from './multiBookAskModal'
 import { GuideModal } from './guideModal'
+import { ImportHighlightsModal } from './importHighlightsModal'
 import { LibrarySearchModal } from './librarySearch'
 import { movePortrait } from './portrait'
 import { moveGuide } from './guide'
@@ -55,7 +57,7 @@ import { createPlatformIO } from './platformFactory'
 import { PlatformIO, joinPath } from './platformIO'
 import { DebugLog } from './debugLog'
 import { buildSearchIndex, exportCsv, exportMarkdown } from './search'
-import type { SearchDoc } from './search'
+import type { ExportOptions, SearchDoc } from './search'
 // 以下模块只在桌面端动态加载（它们 import Node fs / Node path / electron），
 // 这里只取类型，不会在运行期被 require。
 import type { PdfView } from './pdfView'
@@ -101,6 +103,7 @@ export default class GroveReaderPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		await this.loadSettings()
+		this.applyEinkMode()
 		for (const option of LOGO_OPTIONS) {
 			if (option.icon) addIcon(`grove-logo-${option.id}`, option.icon)
 		}
@@ -206,7 +209,7 @@ export default class GroveReaderPlugin extends Plugin {
 			}
 			void this.openByBookId(params['book'] ?? '', params['cfi'] ?? '')
 		})
-		// 摘录双链：`[[书.epub#grove-cfi=…|⤴ 回原文]]` 的点击接管。
+		// 摘录双链：`[[书.epub#grove-cfi=…|↩ 回原文]]` 的点击接管。
 		// 捕获阶段先手，阅读视图与 Live Preview 都能拦；只认自家子路径，别的链接一律放行。
 		this.registerDomEvent(document, 'click', ev => this.#onGroveLinkClick(ev), { capture: true })
 		// 手机 Live Preview 的 CM6 链接不一定派发 click（tap 被编辑器自己消费），补 pointerup 兜底
@@ -546,7 +549,29 @@ export default class GroveReaderPlugin extends Plugin {
 		new SearchModal(this.app, this).open()
 	}
 
-	async exportSearchResults(docs: SearchDoc[], query: string, format: 'md' | 'csv'): Promise<void> {
+	/** e-ink / 极简模式：body 上加一个类，动画、阴影与手机工具栏精简都由 CSS 接管 */
+	applyEinkMode(): void {
+		document.body.toggleClass('grove-eink', this.settings.einkMode === true)
+	}
+
+	/** 生成 / 覆盖书架 Base：封面画廊 + 在读 / 想读 / 今年读完 / 全部 */
+	async generateShelfBase(): Promise<void> {
+		const folder = normalizePath(this.settings.notesFolder?.trim() || '阅读笔记')
+		const path = normalizePath(`${folder}/${SHELF_BASE_NAME}`)
+		try {
+			if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder)
+			const content = buildShelfBase({ notesFolder: folder })
+			const existing = this.app.vault.getAbstractFileByPath(path)
+			if (existing instanceof TFile) await this.app.vault.modify(existing, content)
+			else await this.app.vault.create(path, content)
+			this.oplog.add('生成书架 Base', path)
+			new Notice(`${APP_NAME}：已生成 ${path}（重新生成会覆盖）`)
+		} catch (e) {
+			new Notice(`${APP_NAME}：生成书架 Base 失败（${e instanceof Error ? e.message : String(e)}）`)
+		}
+	}
+
+	async exportSearchResults(docs: SearchDoc[], query: string, format: 'md' | 'csv', options?: ExportOptions): Promise<void> {
 		if (!docs.length) {
 			new Notice(`${APP_NAME}：没有可导出的结果`)
 			return
@@ -569,7 +594,7 @@ export default class GroveReaderPlugin extends Plugin {
 			target = normalizePath(`${folder}/${base}-${i}.${ext}`)
 			i++
 		}
-		const content = format === 'md' ? exportMarkdown(docs, query) : exportCsv(docs)
+		const content = format === 'md' ? exportMarkdown(docs, query, options) : exportCsv(docs)
 		try {
 			await this.app.vault.create(target, content)
 		} catch {
@@ -1096,7 +1121,7 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	/**
-	 * 双链点击接管：`[[书.epub#grove-cfi=…|⤴ 回原文]]`。
+	 * 双链点击接管：`[[书.epub#grove-cfi=…|↩ 回原文]]`。
 	 * 捕获阶段先手（阅读视图与 Live Preview 都能拦），只认自家子路径，别的链接一律放行。
 	 */
 	/** metadataCache 解析完后延迟刷新「引用」页签 */
@@ -1438,6 +1463,16 @@ export default class GroveReaderPlugin extends Plugin {
 			checkCallback: checking => this.withAnyReader(checking, v => v.comment()),
 		})
 		this.addCommand({
+			id: 'stop-tts',
+			name: '停止朗读',
+			checkCallback: checking => this.withAnyReader(checking, v => v.stopTts?.()),
+		})
+		this.addCommand({
+			id: 'toggle-sidebar',
+			name: '收起 / 展开批注栏',
+			checkCallback: checking => this.withAnyReader(checking, v => v.toggleSidebar?.()),
+		})
+		this.addCommand({
 			id: 'clear-book-annotations',
 			name: '清空当前书籍的全部批注',
 			checkCallback: checking => this.withAnyReader(checking, v => this.clearAnnotationsFor(v.bookPath)),
@@ -1496,6 +1531,16 @@ export default class GroveReaderPlugin extends Plugin {
 			id: 'search-annotations',
 			name: '全局搜索批注',
 			callback: () => this.showSearch(),
+		})
+		this.addCommand({
+			id: 'import-highlights',
+			name: '导入外部标注…',
+			callback: () => new ImportHighlightsModal(this.app, this).open(),
+		})
+		this.addCommand({
+			id: 'generate-shelf-base',
+			name: '生成书架 Base（.base 卡片墙）',
+			callback: () => void this.generateShelfBase(),
 		})
 		this.addCommand({
 			id: 'choose-note-template',
@@ -1803,6 +1848,18 @@ export default class GroveReaderPlugin extends Plugin {
 		}
 	}
 
+	/** 程序直接写入批注后：刷新已打开的阅读视图，并触发这些书的笔记自动更新 */
+	refreshOpenReaders(bookPaths?: string[]): void {
+		const touched = bookPaths ? new Set(bookPaths) : null
+		for (const type of [VIEW_TYPE_GROVE_READER, VIEW_TYPE_GROVE_TEXT, VIEW_TYPE_GROVE_PDF]) {
+			for (const leaf of this.app.workspace.getLeavesOfType(type)) {
+				const v = leaf.view as unknown as ReaderEngine & { refreshAnnotations?: () => void }
+				v.refreshAnnotations?.()
+				if (touched && v.bookPath && touched.has(v.bookPath)) this.scheduleNoteRefresh(v)
+			}
+		}
+	}
+
 	/** 从阅读笔记回写批注：先算差异、弹窗勾选，再写数据（不改笔记本身） */
 	async openNoteSync(view: ReaderEngine): Promise<void> {
 		const data = view.snapshot()
@@ -1967,20 +2024,43 @@ export default class GroveReaderPlugin extends Plugin {
 		const fraction = data.lastLocation?.fraction
 		const progress = typeof fraction === 'number' ? Math.max(0, Math.min(1, fraction)) * 100 : 0
 		const stat = this.stats.book(data.bookPath)
+		const status = data.readingStatus
+			? READING_STATUS_LABELS[data.readingStatus]
+			: progress >= 99 ? '读完' : progress > 0 ? '在读' : '想读'
+		// 阅读统计按本地日期分桶：最早一天是开始读，最后一天在「读完」时当作完成日
+		const days = Object.keys(stat.days ?? {}).sort()
+		// 封面写进 frontmatter，Bases 卡片视图才能取到图；数据目录在库外时双链无效，留空
+		const coverFile = this.shelfCache.get(data.bookPath)?.cover ?? ''
+		const dataFolder = (this.settings.dataFolder?.trim() || 'Grove Reader').replace(/\\/g, '/').replace(/\/+$/, '')
+		const cover = coverFile && !isAbsolutePath(dataFolder)
+			? `[[${normalizePath(`${dataFolder}/data/covers/${coverFile}`)}]]`
+			: ''
 		return {
 			annotations: data.annotations.length,
 			format: FORMAT_LABELS[ext] ?? ext.toUpperCase(),
 			progress,
-			status: data.readingStatus
-				? READING_STATUS_LABELS[data.readingStatus]
-				: progress >= 99 ? '读完' : progress > 0 ? '在读' : '想读',
+			status,
+			started: days[0] ?? '',
+			finished: status === '读完' ? (days[days.length - 1] ?? '') : '',
 			seconds: stat.seconds,
 			lastRead: stat.lastRead || data.lastLocation?.updatedAt || 0,
 			publisher: this.shelfCache.get(data.bookPath)?.publisher ?? '',
+			cover,
 		}
 	}
 
 	async #composeNoteMarkdown(data: BookData, existing: string | null, announce: boolean, force = announce): Promise<string> {
+		const { template, link } = await this.#noteTemplate(data, existing, force, announce)
+		return buildNote(data, bookIdFor(data.bookPath), existing, template, this.#noteExtra(data), link)
+	}
+
+	/** 笔记模板与回跳链接样式：生成与增量追加共用，避免两处规则漂移 */
+	async #noteTemplate(
+		data: BookData,
+		existing: string | null,
+		force: boolean,
+		announce: boolean,
+	): Promise<{ template: string | null; link: NoteLinkOptions }> {
 		const tplPath = this.templatePathFor(data)
 		const style = resolveExcerptLinkStyle(
 			this.settings.excerptLinkStyle === 'protocol' ? 'protocol' : 'wikilink',
@@ -1988,7 +2068,7 @@ export default class GroveReaderPlugin extends Plugin {
 			// 自动刷新不改旧笔记的链接样式；手动生成/刷新才跟随设置
 			force,
 		)
-		const link = { style }
+		const link: NoteLinkOptions = { style }
 		let template: string | null = null
 		const tplFile = this.app.vault.getAbstractFileByPath(tplPath)
 		if (tplFile instanceof TFile) template = await this.app.vault.read(tplFile)
@@ -2001,7 +2081,7 @@ export default class GroveReaderPlugin extends Plugin {
 				template = null
 			}
 		}
-		return buildNote(data, bookIdFor(data.bookPath), existing, template, this.#noteExtra(data), link)
+		return { template, link }
 	}
 
 	private noteRefreshTimer: number | null = null
@@ -2040,6 +2120,17 @@ export default class GroveReaderPlugin extends Plugin {
 				return
 			}
 			this.pendingNoteEdits.delete(synced.path)
+			// 纯新增（没有删除条目、没有手写块 id）时只追加新批注，不重写整个生成区，
+			// 这样用户在生成区里手写的行也能保留下来
+			if (!pending.changes.length && !pending.unknown.length && pending.missing.length) {
+				const { template, link } = await this.#noteTemplate(data, existing, false, false)
+				const appended = appendAnnotationBlocks(existing, data, bookIdFor(data.bookPath), template, link, this.#noteExtra(data))
+				if (appended) {
+					if (appended.markdown !== existing) await this.app.vault.modify(synced, appended.markdown)
+					this.debug('note', 'append', { path: synced.path, appended: appended.appended })
+					return
+				}
+			}
 			const markdown = await this.#composeNoteMarkdown(data, existing, false)
 			if (markdown !== existing) await this.app.vault.modify(synced, markdown)
 		} catch (e) {

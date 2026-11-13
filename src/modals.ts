@@ -1,9 +1,10 @@
 import { App, AbstractInputSuggest, FuzzySuggestModal, Modal, Notice, TFile, TFolder, normalizePath, setIcon } from 'obsidian'
-import { Annotation, colorName, isShelfExt } from './types'
+import { Annotation, colorName, isShelfExt, READING_STATUS_LABELS } from './types'
+import type { BookData, ReadingStatus } from './types'
 import { colorDot, normalizeTerms, searchDocs } from './search'
 import type { SearchDoc } from './search'
 import type { BookList } from './lists'
-import { todayKey } from './stats'
+import { forecastFinishDays, todayKey } from './stats'
 import type GroveReaderPlugin from './main'
 import { basenameOf, cleanBookTitle, truncate } from './util'
 import type { OpEntry } from './oplog'
@@ -12,6 +13,7 @@ import type { SyncChange, SyncPlan } from './noteSync'
 import { filterGlobalBookmarks } from './globalBookmarks'
 import type { GlobalBookmarkRow } from './globalBookmarks'
 import { posterFileName, renderReadingPoster } from './poster'
+import { AnnotationExportModal } from './exportModal'
 
 export class BookPickerModal extends FuzzySuggestModal<TFile> {
 	constructor(app: App, private onPick: (file: TFile) => void) {
@@ -546,6 +548,71 @@ export class ReadingStatsModal extends Modal {
 		card('活跃天数', `${streak.activeDays} 天`, '有阅读记录的天数')
 		card('累计阅读', formatDuration(totalSec), `${books.length} 本书`)
 
+		// 年度目标方格 + 读完预测：状态直接读每本书的数据，预测按近 7 天速度
+		const goalBooks = Math.max(0, this.plugin.settings.yearlyGoalBooks || 0)
+		const year = new Date().getFullYear()
+		const weekSeconds = stats.recentDays(7).reduce((sum, d) => sum + d.seconds, 0)
+		const statusOf = (d: BookData): ReadingStatus => {
+			if (d.readingStatus) return d.readingStatus
+			const fraction = d.lastLocation?.fraction ?? 0
+			return fraction >= 0.99 ? 'done' : fraction > 0 ? 'reading' : 'want'
+		}
+		const booksData = this.plugin.store.listBookPaths().map(path => this.plugin.store.load(path))
+		const finishedThisYear = booksData.filter(d => {
+			if (statusOf(d) !== 'done') return false
+			const stat = stats.peek(d.bookPath)
+			const days = Object.keys(stat?.days ?? {}).sort()
+			const day = days.length
+				? days[days.length - 1]
+				: d.lastLocation?.updatedAt ? todayKey(new Date(d.lastLocation.updatedAt)) : ''
+			return day.startsWith(`${year}-`)
+		}).length
+		const forecasts = booksData
+			.filter(d => statusOf(d) === 'reading')
+			.map(d => {
+				const fraction = d.lastLocation?.fraction ?? 0
+				return {
+					title: d.title || basenameOf(d.bookPath).replace(/\.[^.]+$/, ''),
+					fraction,
+					days: forecastFinishDays(stats.peek(d.bookPath), fraction),
+				}
+			})
+			.filter(x => x.days != null)
+			.sort((a, b) => (a.days ?? 0) - (b.days ?? 0))
+			.slice(0, 3)
+		if (goalBooks > 0 || forecasts.length) {
+			const box = this.contentEl.createDiv('grove-goal')
+			if (goalBooks > 0) {
+				const head = box.createDiv('grove-goal-head')
+				head.createSpan('grove-goal-title').setText('年度目标')
+				head.createSpan('grove-goal-value').setText(`${finishedThisYear} / ${goalBooks} 本`)
+				const grid = box.createDiv('grove-goal-grid')
+				const cells = Math.min(goalBooks, 120)
+				for (let i = 0; i < cells; i++) {
+					const cell = grid.createDiv('grove-goal-cell')
+					if (i < finishedThisYear) {
+						cell.addClass('is-done')
+						setIcon(cell, 'book')
+					}
+				}
+				box.createDiv('grove-goal-sub').setText(
+					finishedThisYear > cells
+						? `今年读完 ${finishedThisYear} 本（方格最多显示 ${cells} 个）`
+						: `今年读完 ${finishedThisYear} 本 · 近 7 天日均 ${Math.round(weekSeconds / 7 / 60)} 分钟`,
+				)
+			}
+			if (forecasts.length) {
+				const list = box.createDiv('grove-forecast')
+				list.createDiv('grove-forecast-title').setText('读完预测（按近 7 天速度）')
+				for (const item of forecasts) {
+					const row = list.createDiv('grove-forecast-row')
+					row.createSpan('grove-forecast-book').setText(`《${item.title}》`)
+					row.createSpan('grove-forecast-days').setText(`约 ${item.days} 天后`)
+					row.createSpan('grove-forecast-progress').setText(`${Math.round(item.fraction * 100)}%`)
+				}
+			}
+		}
+
 		// 手动打卡：和「今日阅读」互补，读完一小段也能标记今天来过
 		const checkRow = this.contentEl.createDiv('grove-stats-checkin')
 		const checked = stats.checkedIn(today)
@@ -972,9 +1039,7 @@ export class SearchModal extends Modal {
 	private inputEl!: HTMLInputElement
 	private resultsEl!: HTMLElement
 	private countEl!: HTMLElement
-	private exportMdBtn!: HTMLButtonElement
-	private exportCsvBtn!: HTMLButtonElement
-	private exporting = false
+	private exportBtn!: HTMLButtonElement
 
 	constructor(app: App, private plugin: GroveReaderPlugin) {
 		super(app)
@@ -1031,29 +1096,22 @@ export class SearchModal extends Modal {
 
 		this.resultsEl = contentEl.createDiv('grove-search-results')
 		const footer = contentEl.createDiv('modal-button-container')
-		this.exportMdBtn = footer.createEl('button', { text: '导出 Markdown' })
-		this.exportMdBtn.addEventListener('click', () => void this.doExport('md'))
-		this.exportCsvBtn = footer.createEl('button', { text: '导出 CSV' })
-		this.exportCsvBtn.addEventListener('click', () => void this.doExport('csv'))
-		const close = footer.createEl('button', { text: '关闭', cls: 'mod-cta' })
+		this.exportBtn = footer.createEl('button', { text: '导出…', cls: 'mod-cta' })
+		this.exportBtn.addEventListener('click', () => this.openExport())
+		const close = footer.createEl('button', { text: '关闭' })
 		close.addEventListener('click', () => this.close())
 	}
 
-	private async doExport(format: 'md' | 'csv'): Promise<void> {
-		if (this.exporting) return
-		this.exporting = true
-		this.exportMdBtn.disabled = true
-		this.exportCsvBtn.disabled = true
-		try {
-			await this.plugin.exportSearchResults(this.results, this.query, format)
-		} catch (e) {
-			new Notice(`导出失败：${e instanceof Error ? e.message : String(e)}`)
-		} finally {
-			this.exporting = false
-			const disabled = this.results.length === 0
-			this.exportMdBtn.disabled = disabled
-			this.exportCsvBtn.disabled = disabled
-		}
+	/** 打开导出弹窗：先筛选、看预览，再决定写 Markdown 还是 CSV */
+	private openExport(): void {
+		if (!this.docs.length) return
+		new AnnotationExportModal(this.app, this.plugin, {
+			all: this.docs,
+			results: this.results,
+			query: this.query,
+			scope: this.query.trim() && this.results.length ? 'results' : 'all',
+			onlyNotes: this.onlyNotes,
+		}).open()
 	}
 
 	private runSearch(): void {
@@ -1064,9 +1122,8 @@ export class SearchModal extends Modal {
 		} else {
 			this.countEl.setText(`${this.results.length} 条结果 / 共 ${this.docs.length} 条`)
 		}
-		const disabled = this.results.length === 0
-		this.exportMdBtn.disabled = disabled
-		this.exportCsvBtn.disabled = disabled
+		// 没有检索词时也能导出全部批注，所以只看索引是否为空
+		this.exportBtn.disabled = this.docs.length === 0
 		this.renderResults()
 	}
 

@@ -80,6 +80,72 @@
 	white-space: nowrap;
 }
 
+/* 滑杆与章节刻度叠放：刻度层只做视觉定位，不拦拖动 */
+.grove-progress-track {
+	position: relative;
+	display: flex;
+	align-items: center;
+	flex: 1 1 auto;
+	min-width: 90px;
+}
+
+.grove-progress-track input[type='range'] {
+	flex: 1;
+	width: 100%;
+	margin: 0;
+}
+
+.grove-progress-ticks {
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 0;
+	bottom: 0;
+	pointer-events: none;
+}
+
+.grove-progress-tick {
+	position: absolute;
+	top: 50%;
+	width: 1px;
+	height: 8px;
+	margin-top: -4px;
+	transform: translateX(-50%);
+	background: var(--text-faint);
+	opacity: 0.6;
+}
+
+/* 当前所在章节的刻度：略高一点、用强调色，扫一眼就知道读到哪一章 */
+.grove-progress-tick.is-current {
+	width: 2px;
+	height: 12px;
+	margin-top: -6px;
+	background: var(--interactive-accent);
+	opacity: 1;
+}
+
+/* PDF 没有滑杆，整条轨道可点击跳页 */
+.grove-progress-rail {
+	position: relative;
+	flex: 1 1 auto;
+	min-width: 90px;
+	height: 10px;
+	border-radius: 5px;
+	background: var(--background-modifier-border);
+	cursor: pointer;
+}
+
+.grove-progress-fill {
+	position: absolute;
+	left: 0;
+	top: 0;
+	bottom: 0;
+	width: 0;
+	border-radius: inherit;
+	background: var(--interactive-accent);
+	opacity: 0.7;
+}
+
 .grove-sep {
 	width: 1px;
 	align-self: stretch;
@@ -628,6 +694,18 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+/* 外部导入来源标记（Kindle / Readwise / 微信读书） */
+.grove-ann-source {
+	flex: none;
+	margin-left: auto;
+	padding: 0 6px;
+	border-radius: 8px;
+	background: var(--background-modifier-hover);
+	color: var(--text-faint);
+	font-size: 10px;
+	line-height: 16px;
 }
 
 .grove-ann-text {
@@ -2329,6 +2407,181 @@ body.is-mobile .grove-stats-heatmap {
 	background: var(--background-primary);
 }
 
+/* ---------- 导出批注：先筛选，再预览 ---------- */
+
+.grove-export-modal {
+	width: min(880px, 96vw);
+}
+
+.grove-export-modal .modal-content {
+	display: flex;
+	flex-direction: column;
+	max-height: min(86vh, 900px);
+	overflow: hidden;
+}
+
+.grove-export-intro {
+	margin: 0 0 10px;
+}
+
+.grove-export-scope {
+	display: flex;
+	gap: 8px;
+	margin-bottom: 10px;
+}
+
+.grove-export-scope-btn,
+.grove-export-format-btn {
+	padding: 4px 12px;
+	border-radius: 999px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	cursor: pointer;
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-export-scope-btn.is-active,
+.grove-export-format-btn.is-active {
+	background: var(--interactive-accent);
+	border-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.grove-export-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+	gap: 10px 14px;
+	align-items: start;
+}
+
+.grove-export-options {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px 18px;
+	align-items: flex-end;
+	margin-top: 10px;
+}
+
+.grove-export-field {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 0;
+}
+
+.grove-export-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.grove-export-field select {
+	width: 100%;
+	max-width: 240px;
+}
+
+.grove-export-color-row,
+.grove-export-toggle-row,
+.grove-export-format {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+.grove-export-color {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 3px 10px 3px 7px;
+	border-radius: 999px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	cursor: pointer;
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-export-color.is-on {
+	border-color: var(--interactive-accent);
+	color: var(--text-normal);
+	background: var(--background-primary);
+}
+
+.grove-export-color-dot {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+}
+
+.grove-export-check {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.grove-export-preview-head {
+	display: flex;
+	align-items: baseline;
+	gap: 12px;
+	margin: 12px 0 6px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.grove-export-count {
+	color: var(--text-normal);
+	font-weight: 600;
+}
+
+.grove-export-path {
+	margin-left: auto;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.grove-export-preview {
+	flex: 1 1 auto;
+	min-height: 160px;
+	max-height: 46vh;
+	overflow: auto;
+	margin: 0;
+	padding: 10px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background: var(--background-secondary);
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.5;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.grove-export-modal .modal-button-container {
+	flex: none;
+	margin-top: 10px;
+}
+
+body.is-mobile .grove-export-modal {
+	width: 94vw;
+}
+
+body.is-mobile .grove-export-modal .modal-content {
+	max-height: 88vh;
+}
+
+body.is-mobile .grove-export-grid {
+	grid-template-columns: 1fr 1fr;
+}
+
+body.is-mobile .grove-export-preview {
+	max-height: 34vh;
+}
+
 .grove-search-hit {
 	padding: 10px 8px;
 	border-bottom: 1px solid var(--background-modifier-border);
@@ -3644,7 +3897,9 @@ body.is-mobile .grove-toolbar .grove-progress {
 
 /* 手机上翻页靠左右滑，进度条滑杆只会占地方，把「颜色 + 评论」挤到屏幕外；
    保留百分比文字，定位跳转交给目录面板 */
-body.is-mobile .grove-toolbar .grove-progress input[type='range'] {
+body.is-mobile .grove-toolbar .grove-progress input[type='range'],
+body.is-mobile .grove-toolbar .grove-progress-track,
+body.is-mobile .grove-toolbar .grove-progress-rail {
 	display: none !important;
 }
 
@@ -4347,4 +4602,249 @@ body.grove-immersive .grove-toolbar[data-bar-open='1'] {
 	margin-top: 8px;
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
+}
+
+/* ---------- 朗读（TTS）当前句 ---------- */
+
+::highlight(grove-tts) {
+	background-color: rgba(255, 196, 0, 0.45);
+	color: inherit;
+}
+
+.grove-icon-btn.is-active {
+	color: var(--interactive-accent);
+}
+
+/* ---------- 阅读目标 / 读完预测 ---------- */
+
+.grove-goal {
+	margin: 2px 0 12px;
+	padding: 12px 14px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-secondary);
+}
+
+.grove-goal-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.grove-goal-title {
+	font-weight: 600;
+}
+
+.grove-goal-value {
+	color: var(--interactive-accent);
+	font-weight: 600;
+}
+
+.grove-goal-grid {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin: 10px 0 8px;
+}
+
+.grove-goal-cell {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 18px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 3px;
+	background: var(--background-primary);
+	color: var(--text-faint);
+}
+
+.grove-goal-cell.is-done {
+	border-color: var(--interactive-accent);
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.grove-goal-cell svg {
+	width: 11px;
+	height: 11px;
+}
+
+.grove-goal-sub {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.grove-forecast {
+	margin-top: 10px;
+	padding-top: 8px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.grove-forecast-title {
+	margin-bottom: 4px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.grove-forecast-row {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	padding: 2px 0;
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-forecast-book {
+	flex: 1 1 auto;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.grove-forecast-days {
+	color: var(--interactive-accent);
+	white-space: nowrap;
+}
+
+.grove-forecast-progress {
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+body.is-mobile .grove-goal-grid {
+	gap: 3px;
+}
+
+body.is-mobile .grove-goal-cell {
+	width: 14px;
+	height: 16px;
+}
+
+/* ---------- 查词 / 生词本 ---------- */
+
+.grove-vocab-modal .grove-vocab-word-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin: 8px 0;
+}
+
+.grove-vocab-label {
+	flex: none;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-vocab-input {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.grove-vocab-status {
+	min-height: 1.4em;
+	margin-bottom: 8px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-vocab-result {
+	width: 100%;
+	min-height: 120px;
+	resize: vertical;
+	line-height: 1.5;
+}
+
+/* ---------- 导入外部标注 ---------- */
+
+.grove-import-pick-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.grove-import-pick-label {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-import-input {
+	width: 100%;
+	min-height: 160px;
+	resize: vertical;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-import-status {
+	min-height: 1.4em;
+	margin: 8px 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-import-preview {
+	max-height: 30vh;
+	overflow-y: auto;
+}
+
+.grove-import-book {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	padding: 3px 0;
+	font-size: var(--font-ui-small);
+}
+
+.grove-import-book-title {
+	flex: 1 1 auto;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.grove-import-book-count {
+	flex: none;
+	color: var(--interactive-accent);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-import-unmatched {
+	margin-top: 6px;
+	padding-top: 6px;
+	border-top: 1px solid var(--background-modifier-border);
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+/* ---------- e-ink / 极简模式 ---------- */
+
+body.grove-eink *,
+body.grove-eink *::before,
+body.grove-eink *::after {
+	animation-duration: 0s !important;
+	animation-delay: 0s !important;
+	transition-duration: 0s !important;
+	box-shadow: none !important;
+	text-shadow: none !important;
+}
+
+body.grove-eink .grove-shelf-card:hover,
+body.grove-eink .grove-search-hit:hover {
+	transform: none !important;
+}
+
+body.grove-eink .grove-cover-img {
+	filter: grayscale(1) contrast(1.05);
+}
+
+/* 手机 e-ink：只留颜色、评论、外观、笔记、批注 5 个动作 */
+body.is-mobile.grove-eink .grove-toolbar [data-grove-action='AI 问答'],
+body.is-mobile.grove-eink .grove-toolbar [data-grove-action='导读'],
+body.is-mobile.grove-eink .grove-toolbar [data-grove-action='书签'],
+body.is-mobile.grove-eink .grove-toolbar [data-grove-action='朗读'],
+body.is-mobile.grove-eink .grove-toolbar [data-grove-action='AI 划词'] {
+	display: none !important;
 }

@@ -1,4 +1,5 @@
 import { Annotation, BookData, HIGHLIGHT_COLORS, colorName } from './types'
+import { todayKey } from './stats'
 import { basenameOf, bookIdFor, cleanBookTitle, stripTitleAuthor } from './util'
 
 export interface SearchDoc {
@@ -77,51 +78,162 @@ export function normalizeTerms(query: string): string[] {
 		.filter(Boolean)
 }
 
-export function exportMarkdown(docs: SearchDoc[], query: string): string {
+// ------------------------------------------------------------------
+// 导出：先筛再导（范围 / 书 / 章节 / 颜色 / 今天），Markdown 支持分组
+// ------------------------------------------------------------------
+
+export type ExportGroupBy = 'book' | 'chapter' | 'color'
+
+export const EXPORT_GROUP_LABELS: Record<ExportGroupBy, string> = {
+	book: '按书',
+	chapter: '按章',
+	color: '按颜色',
+}
+
+export interface ExportOptions {
+	/** results = 只导当前检索命中；all = 全部批注。调用方决定传入哪份数据 */
+	source?: 'results' | 'all'
+	/** 只看今天新建或改过的批注 */
+	todayOnly?: boolean
+	/** 只导这本书（bookPath）；空 = 全部 */
+	bookPath?: string
+	/** 只导这个章节；空 = 全部 */
+	chapter?: string
+	/** 颜色 key；空 = 全部颜色 */
+	colors?: string[]
+	onlyNotes?: boolean
+	groupBy?: ExportGroupBy
+	/** Markdown 内容开关；CSV 始终输出完整列 */
+	includeComment?: boolean
+	includeLink?: boolean
+	includeMeta?: boolean
+}
+
+export type ResolvedExportOptions = Required<ExportOptions>
+
+export function resolveExportOptions(options: Partial<ExportOptions> = {}): ResolvedExportOptions {
+	return {
+		source: options.source === 'all' ? 'all' : 'results',
+		todayOnly: options.todayOnly === true,
+		bookPath: options.bookPath ?? '',
+		chapter: options.chapter ?? '',
+		colors: Array.isArray(options.colors) ? options.colors.filter(Boolean) : [],
+		onlyNotes: options.onlyNotes === true,
+		groupBy: options.groupBy === 'chapter' || options.groupBy === 'color' ? options.groupBy : 'book',
+		includeComment: options.includeComment !== false,
+		includeLink: options.includeLink !== false,
+		includeMeta: options.includeMeta !== false,
+	}
+}
+
+export function isToday(ms: number, now = Date.now()): boolean {
+	if (!ms) return false
+	return todayKey(new Date(ms)) === todayKey(new Date(now))
+}
+
+/** 按导出选项筛批注；source 由调用方先决定数据来源，这里不再处理 */
+export function filterExportDocs(docs: SearchDoc[], options: Partial<ExportOptions> = {}): SearchDoc[] {
+	const opts = resolveExportOptions(options)
+	return docs.filter(doc => {
+		const a = doc.annotation
+		if (opts.onlyNotes && !(a.note ?? '').trim()) return false
+		if (opts.bookPath && doc.bookPath !== opts.bookPath) return false
+		if (opts.chapter && (a.chapter ?? '') !== opts.chapter) return false
+		if (opts.colors.length && !opts.colors.includes(a.color)) return false
+		if (opts.todayOnly) {
+			const at = Math.max(a.updatedAt || 0, a.createdAt || 0)
+			if (!isToday(at)) return false
+		}
+		return true
+	})
+}
+
+export interface ExportGroup {
+	key: string
+	title: string
+	/** 书名分组时放作者行；其他分组留空 */
+	subtitle: string
+	docs: SearchDoc[]
+}
+
+/** 按书 / 章节 / 颜色分组；组顺序跟着批注第一次出现的顺序 */
+export function groupExportDocs(docs: SearchDoc[], groupBy: ExportGroupBy = 'book'): ExportGroup[] {
+	const groups = new Map<string, ExportGroup>()
+	for (const doc of docs) {
+		const a = doc.annotation
+		let key: string
+		let title: string
+		let subtitle = ''
+		if (groupBy === 'chapter') {
+			const chapter = (a.chapter ?? '').trim() || '未分章'
+			key = `${doc.bookPath}\u0000${chapter}`
+			title = `《${doc.bookTitle}》${doc.bookExists ? '' : '（原文件缺失）'} · ${chapter}`
+		} else if (groupBy === 'color') {
+			key = a.color || 'yellow'
+			title = colorName(key)
+		} else {
+			key = doc.bookPath || doc.bookTitle
+			title = `《${doc.bookTitle}》${doc.bookExists ? '' : '（原文件缺失）'}`
+			subtitle = doc.author ? `*${doc.author}*` : ''
+		}
+		let group = groups.get(key)
+		if (!group) {
+			group = { key, title, subtitle, docs: [] }
+			groups.set(key, group)
+		}
+		group.docs.push(doc)
+	}
+	return [...groups.values()]
+}
+
+export function exportMarkdown(docs: SearchDoc[], query: string, options: Partial<ExportOptions> = {}): string {
+	const opts = resolveExportOptions(options)
 	const now = new Date()
 	const stamp = formatDate(now)
+	const heading = query.trim() ? `批注检索：${query.trim()}` : '批注导出'
 	const lines: string[] = [
 		'---',
-		`title: ${JSON.stringify(`批注检索：${query}`)}`,
+		`title: ${JSON.stringify(heading)}`,
 		'tags:',
 		'  - Grove-Reader',
 		'  - 批注检索',
+		'  - 批注导出',
 		`created: ${JSON.stringify(stamp)}`,
-		`query: ${JSON.stringify(query)}`,
+		`query: ${JSON.stringify(query.trim())}`,
 		`count: ${docs.length}`,
+		`group: ${JSON.stringify(EXPORT_GROUP_LABELS[opts.groupBy])}`,
 		'---',
 		'',
-		`# 批注检索：${query}`,
+		`# ${heading}`,
 		'',
 		`> 结果 ${docs.length} 条 · 导出 ${stamp}`,
 		'',
 	]
-	const groups = new Map<string, SearchDoc[]>()
-	for (const doc of docs) {
-		const key = doc.bookPath || doc.bookTitle
-		const list = groups.get(key) ?? []
-		list.push(doc)
-		groups.set(key, list)
-	}
-	for (const [, group] of groups) {
-		const first = group[0]
-		lines.push(`## 《${first.bookTitle}》${first.bookExists ? '' : '（原文件缺失）'}`)
-		if (first.author) lines.push(`*${first.author}*`)
+	for (const group of groupExportDocs(docs, opts.groupBy)) {
+		if (opts.groupBy === 'color') lines.push(`## ${group.title}（${group.docs.length} 条）`)
+		else lines.push(`## ${group.title}`)
+		if (group.subtitle) lines.push(group.subtitle)
 		lines.push('')
-		for (const doc of group) {
+		for (const doc of group.docs) {
 			const a = doc.annotation
-			const where = [a.chapter, a.cfi.startsWith('page:') ? `第 ${a.cfi.slice(5)} 页` : '', colorName(a.color)]
-				.filter(Boolean)
-				.join(' · ')
-			if (where) lines.push(`- **${where}**`)
+			const meta: string[] = []
+			const chapter = (a.chapter ?? '').trim()
+			// 按颜色分组时标题只有颜色，条目里必须带上书名才能分辨
+			if (opts.groupBy === 'color') meta.push(`《${doc.bookTitle}》`)
+			if (opts.includeMeta) {
+				if (opts.groupBy !== 'chapter' && chapter) meta.push(chapter)
+				if (a.cfi.startsWith('page:')) meta.push(`第 ${a.cfi.slice(5)} 页`)
+				if (opts.groupBy !== 'color') meta.push(colorName(a.color))
+			}
+			if (meta.length) lines.push(`- **${meta.join(' · ')}**`)
 			else lines.push('-')
 			const quote = a.text.split('\n').map(line => `  > ${line}`).join('\n')
 			lines.push(quote)
-			if (a.note?.trim()) {
+			if (opts.includeComment && a.note?.trim()) {
 				lines.push(`  **评论：** ${a.note.trim().split('\n').join('\n  ')}`)
 			}
-			if (doc.bookExists && doc.bookId) {
-				lines.push(`  [⤴ 回原文](${jumpUrl(doc.bookId, a.cfi)})`)
+			if (opts.includeLink && doc.bookExists && doc.bookId) {
+				lines.push(`  [↩ 回原文](${jumpUrl(doc.bookId, a.cfi)})`)
 			}
 			lines.push('')
 		}

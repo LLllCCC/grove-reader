@@ -80,8 +80,19 @@ export interface Annotation {
 	sectionIndex?: number
 	/** PDF 专属：页码与归一化高亮矩形（相对页面宽高 0–1） */
 	pdf?: { page: number; rects: Array<{ l: number; t: number; w: number; h: number }> }
+	/** 外部导入来源；本地划线的批注没有该字段 */
+	source?: 'kindle' | 'readwise' | 'weread'
+	/** 外部来源里的位置串（如 Kindle 的「位置 1234-1236」） */
+	location?: string
 	createdAt: number
 	updatedAt: number
+}
+
+/** 外部标注来源的显示名 */
+export const IMPORT_SOURCE_LABELS: Record<string, string> = {
+	kindle: 'Kindle',
+	readwise: 'Readwise',
+	weread: '微信读书',
 }
 
 /** 书签：只记位置，不含原文（与划线批注分开存） */
@@ -304,6 +315,12 @@ export interface GroveSettings {
 	lastAutoBackupAt: number
 	/** 每日阅读目标（分钟），0 = 不设目标 */
 	dailyGoalMinutes: number
+	/** 年度阅读目标（本），0 = 不设目标 */
+	yearlyGoalBooks: number
+	/** 朗读语速：0.6–1.6 */
+	ttsRate: number
+	/** e-ink / 极简模式：去动画与阴影、手机工具栏精简、点按翻页 */
+	einkMode: boolean
 	/** 多套笔记模板；为空时退回 noteTemplatePath */
 	noteTemplates: NoteTemplate[]
 	/** 默认笔记模板 id；为空时用列表第一套 */
@@ -380,7 +397,7 @@ export interface GroveSettings {
  * 可排序的工具栏动作。颜色与「评论」固定在左侧，不参与排序。
  * 新增动作时同时改这里和 readerActions 的渲染表。
  */
-export const TOOLBAR_ACTIONS = ['外观', 'AI 问答', '导读', '笔记', '书签', '批注'] as const
+export const TOOLBAR_ACTIONS = ['外观', 'AI 问答', '导读', '朗读', '笔记', '书签', '批注'] as const
 
 /** 合并用户顺序与默认顺序：忽略未知项和重复项，未列出的动作按默认顺序补在后面 */
 export function normalizeToolbarOrder(order?: string[]): string[] {
@@ -405,6 +422,9 @@ export const DEFAULT_SETTINGS: GroveSettings = {
 	autoBackup: 'off',
 	lastAutoBackupAt: 0,
 	dailyGoalMinutes: 30,
+	yearlyGoalBooks: 24,
+	ttsRate: 1,
+	einkMode: false,
 	noteTemplates: [],
 	defaultNoteTemplateId: '',
 	dataFolder: '',
