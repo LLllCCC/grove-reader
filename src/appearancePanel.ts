@@ -151,6 +151,38 @@ export function renderAppearancePanel(panel: HTMLElement, host: AppearancePanelH
 		})
 	}
 
+	// —— EPUB 版式（只有电子书有分栏/滚动） ——
+	if (host.surface === 'ebook') {
+		const columnsRow = panel.createDiv('grove-appear-row')
+		columnsRow.createSpan('grove-appear-label').setText('分栏')
+		const columnsSelect = columnsRow.createEl('select', { cls: 'dropdown' })
+		columnsSelect.createEl('option', { value: '0', text: '跟随窗口' })
+		columnsSelect.createEl('option', { value: '1', text: '单栏' })
+		columnsSelect.createEl('option', { value: '2', text: '双栏（窄屏自动单栏）' })
+		columnsSelect.value = String(a.epubColumns ?? 0)
+		columnsSelect.addEventListener('change', () => {
+			host.patch({ epubColumns: Number(columnsSelect.value) as 0 | 1 | 2 })
+		})
+
+		const flowRow = panel.createDiv('grove-appear-row')
+		flowRow.createSpan('grove-appear-label').setText('翻页方式')
+		const flowSelect = flowRow.createEl('select', { cls: 'dropdown' })
+		flowSelect.createEl('option', { value: 'paginated', text: '左右翻页' })
+		flowSelect.createEl('option', { value: 'scrolled', text: '上下滚动' })
+		flowSelect.value = a.epubFlow === 'scrolled' ? 'scrolled' : 'paginated'
+		flowSelect.addEventListener('change', () => {
+			host.patch({ epubFlow: flowSelect.value === 'scrolled' ? 'scrolled' : 'paginated' })
+		})
+
+		const verticalRow = panel.createDiv('grove-appear-row')
+		verticalRow.createSpan('grove-appear-label').setText('排版')
+		const verticalLabel = verticalRow.createEl('label', { cls: 'grove-appear-toggle' })
+		const verticalBox = verticalLabel.createEl('input', { attr: { type: 'checkbox' } })
+		verticalBox.checked = !!a.epubVertical
+		verticalLabel.createSpan({ text: '竖排（从右往左）' })
+		verticalBox.addEventListener('change', () => host.patch({ epubVertical: verticalBox.checked }))
+	}
+
 	// —— 翻页 ——
 	const pageRow = panel.createDiv('grove-appear-row')
 	pageRow.createSpan('grove-appear-label').setText('翻页')

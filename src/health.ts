@@ -23,6 +23,14 @@ export interface OrphanPortrait {
 	title: string
 }
 
+export interface VectorIssue {
+	file: string
+	bookPath: string
+	title: string
+	/** broken＝文件损坏/缺字段；orphan＝原书已不存在 */
+	reason: 'broken' | 'orphan'
+}
+
 export interface HealthReport {
 	jsonCount: number
 	annotationCount: number
@@ -35,6 +43,8 @@ export interface HealthReport {
 	brokenNoteIds: Array<{ note: string; id: string }>
 	/** AI 要点索引对应的书已不存在（或没有批注数据） */
 	orphanPortraits: OrphanPortrait[]
+	/** 语义索引损坏，或对应的书已不存在 */
+	vectorIssues: VectorIssue[]
 }
 
 /** 只读体检：检查批注 JSON、笔记、书架缓存、书单、统计之间的引用是否还对得上。
@@ -57,6 +67,7 @@ export async function buildHealthReport(
 		staleStats: [],
 		brokenNoteIds: [],
 		orphanPortraits: [],
+		vectorIssues: [],
 	}
 
 	const resolve = (p: string): string => (vaultPath && !isAbsolutePath(p) ? joinPath(vaultPath, p) : p)
@@ -127,6 +138,32 @@ export async function buildHealthReport(
 		// 没有索引目录
 	}
 
+	// 语义索引：坏文件或原书已不存在；损坏的会让检索一直跳过它
+	const vectorsDir = joinPath(dataRoot, 'vectors')
+	try {
+		const vectorFiles = (await io.list(vectorsDir)).files.filter(f => f.endsWith('.json'))
+		for (const full of vectorFiles) {
+			const file = full.replace(/\\/g, '/').split('/').pop() ?? full
+			const doc = await readJsonFile<{ bookPath?: unknown; title?: unknown; chunks?: unknown; dims?: unknown }>(io, full)
+			if (!doc || !Array.isArray(doc.chunks) || !doc.chunks.length || typeof doc.dims !== 'number' || doc.dims <= 0) {
+				report.vectorIssues.push({ file, bookPath: '', title: '', reason: 'broken' })
+				continue
+			}
+			const bookPath = typeof doc.bookPath === 'string' ? doc.bookPath : ''
+			const bookOk = bookPath ? await exists(bookPath) : false
+			if (!bookOk) {
+				report.vectorIssues.push({
+					file,
+					bookPath,
+					title: typeof doc.title === 'string' ? doc.title : '',
+					reason: 'orphan',
+				})
+			}
+		}
+	} catch {
+		// 还没有向量索引
+	}
+
 	const shelf = await readJsonFile<{ entries?: Record<string, unknown> }>(io, joinPath(dataRoot, 'data', 'shelf.json'))
 	for (const key of Object.keys(shelf?.entries ?? {})) {
 		if (!(await exists(key))) report.staleShelf.push(key)
@@ -166,7 +203,7 @@ export async function buildHealthReport(
 export function healthCleanupCount(report: HealthReport): number {
 	const notes = report.missingNotes.filter(n => n.bookExists).length
 	return report.staleShelf.length + report.staleLists.length + report.staleStats.length + notes
-		+ report.orphanPortraits.length
+		+ report.orphanPortraits.length + report.vectorIssues.length
 }
 
 async function walkMarkdown(io: PlatformIO, dir: string, out: string[] = []): Promise<string[]> {

@@ -117,6 +117,26 @@ export function truncate(text: string, max: number): string {
 	return text.length > max ? text.slice(0, max) + '…' : text
 }
 
+/** 把 text 里命中 query 的片段包成 <mark>，用于批注/搜索结果里的关键词高亮 */
+export function setHighlightedText(el: HTMLElement, text: string, query: string): void {
+	el.empty()
+	const needle = query.trim().toLowerCase()
+	const lower = text.toLowerCase()
+	let from = 0
+	let hit = needle ? lower.indexOf(needle, from) : -1
+	if (hit < 0) {
+		el.setText(text)
+		return
+	}
+	while (hit >= 0) {
+		if (hit > from) el.createSpan().setText(text.slice(from, hit))
+		el.createEl('mark', { cls: 'grove-ann-hit' }).setText(text.slice(hit, hit + needle.length))
+		from = hit + needle.length
+		hit = lower.indexOf(needle, from)
+	}
+	if (from < text.length) el.createSpan().setText(text.slice(from))
+}
+
 /** 文件大小友好显示：1234 → 1.2 KB */
 export function formatBytes(n: number): string {
 	if (!Number.isFinite(n) || n < 0) return ''

@@ -5,6 +5,8 @@ export interface StatsDay {
 	seconds: number
 	/** 当日翻页/换节次数 */
 	pages: number
+	/** 24 个小时段的阅读秒数；旧数据没有该字段 */
+	hours?: number[]
 }
 
 export interface StatsBook {
@@ -21,6 +23,8 @@ export interface StatsBook {
 interface StatsFile {
 	version: 1
 	books: Record<string, StatsBook>
+	/** 手动打卡的日期（YYYY-MM-DD）；旧数据没有该字段 */
+	checkins?: string[]
 }
 
 export function todayKey(d = new Date()): string {
@@ -81,6 +85,27 @@ export class StatsStore {
 		if (parsed && typeof parsed === 'object' && parsed.books && typeof parsed.books === 'object') {
 			this.data = parsed
 		}
+		if (!Array.isArray(this.data.checkins)) this.data.checkins = []
+	}
+
+	/** 今日是否已打卡 */
+	checkedIn(day = todayKey()): boolean {
+		return (this.data.checkins ?? []).includes(day)
+	}
+
+	/** 打卡；返回 false 表示今天已经打过 */
+	checkin(day = todayKey()): boolean {
+		if (!Array.isArray(this.data.checkins)) this.data.checkins = []
+		if (this.data.checkins.includes(day)) return false
+		this.data.checkins.push(day)
+		this.data.checkins.sort()
+		this.saveSoon()
+		return true
+	}
+
+	/** 累计打卡天数 */
+	checkinCount(): number {
+		return (this.data.checkins ?? []).length
 	}
 
 	book(bookPath: string): StatsBook {
@@ -120,6 +145,8 @@ export class StatsStore {
 		const d = b.days[day] ?? { seconds: 0, pages: 0 }
 		d.seconds += seconds
 		d.pages += pages
+		const hours = d.hours ?? (d.hours = new Array(24).fill(0))
+		hours[new Date(now).getHours()] += seconds
 		b.days[day] = d
 		b.lastRead = now
 		this.saveSoon()
@@ -137,7 +164,23 @@ export class StatsStore {
 				const current = out.get(day) ?? { seconds: 0, pages: 0 }
 				current.seconds += stat.seconds
 				current.pages += stat.pages
+				if (stat.hours) {
+					const hours = current.hours ?? (current.hours = new Array(24).fill(0))
+					for (let i = 0; i < 24; i++) hours[i] += stat.hours[i] ?? 0
+				}
 				out.set(day, current)
+			}
+		}
+		return out
+	}
+
+	/** 全库按小时段合并的阅读秒数（24 项） */
+	hourTotals(): number[] {
+		const out = new Array(24).fill(0)
+		for (const book of Object.values(this.data.books)) {
+			for (const stat of Object.values(book.days ?? {})) {
+				if (!stat.hours) continue
+				for (let i = 0; i < 24; i++) out[i] += stat.hours[i] ?? 0
 			}
 		}
 		return out

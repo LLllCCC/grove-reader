@@ -36,6 +36,8 @@ export interface GroveLinkTarget {
 	pct?: number
 	/** PDF 专有：归一化到页面宽高的框选矩形（链接里的 `r=`），用于精确到句 */
 	pdfRects?: PdfRect[]
+	/** PDF++ 链接里的页面点坐标（原点左下角），打开后按页宽高换算成归一化矩形 */
+	pdfRectsPt?: PdfPointRect[]
 }
 
 export interface PdfRect {
@@ -43,6 +45,13 @@ export interface PdfRect {
 	t: number
 	w: number
 	h: number
+}
+
+export interface PdfPointRect {
+	l: number
+	t: number
+	r: number
+	b: number
 }
 
 /**

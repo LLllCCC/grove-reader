@@ -105,6 +105,29 @@ export interface LastLocation {
 	updatedAt: number
 }
 
+/** PDF 每本记住的视图偏好（不影响电子书/TXT） */
+export interface PdfViewPrefs {
+	zoomMode?: 'fit-width' | 'fit-page' | 'actual' | 'custom'
+	/** custom 模式下的缩放倍数（相对适合宽度） */
+	zoom?: number
+	flow?: 'scroll' | 'paged'
+	spread?: boolean
+	rotation?: 0 | 90 | 180 | 270
+}
+
+/** 手动阅读状态；未设置时按阅读进度自动判断 */
+export type ReadingStatus = 'want' | 'reading' | 'done' | 'unread'
+
+export const READING_STATUS_LABELS: Record<ReadingStatus, string> = {
+	reading: '在读',
+	want: '想读',
+	done: '读完',
+	unread: '未读',
+}
+
+/** 右键菜单与筛选下拉的顺序 */
+export const READING_STATUS_ORDER: ReadingStatus[] = ['reading', 'want', 'done', 'unread']
+
 export interface BookData {
 	version: number
 	/** 库内相对路径；库外书为绝对路径。作为打开与找回的标识 */
@@ -113,6 +136,14 @@ export interface BookData {
 	kind?: 'ebook' | 'pdf'
 	title: string
 	author: string
+	/** 分类（手动填写或 AI 补全） */
+	category?: string
+	/** 一句话简介 */
+	intro?: string
+	/** AI 补全标记；手动改过对应字段后清掉 */
+	aiMeta?: { author?: boolean; category?: boolean; intro?: boolean; at?: number }
+	/** 书架手动标记的阅读状态；缺省按进度自动判断 */
+	readingStatus?: ReadingStatus
 	/** 生成的阅读笔记路径（库内相对路径） */
 	notePath?: string
 	/** 本书单独使用的笔记模板 id；空 = 跟随默认模板 */
@@ -121,6 +152,12 @@ export interface BookData {
 	annotations: Annotation[]
 	/** 书签；旧数据没有该字段（读取时补空数组） */
 	bookmarks?: Bookmark[]
+	/** 跨设备合并用的删除墓碑：批注 id → 删除时间；防止另一台设备把已删批注写回来 */
+	deletedAnnotations?: Record<string, number>
+	/** 书签删除墓碑：书签 id → 删除时间 */
+	deletedBookmarks?: Record<string, number>
+	/** PDF 专属：缩放档/翻页方式/单双页/旋转，按书记忆 */
+	pdfView?: PdfViewPrefs
 }
 
 /** 一套可命名的笔记模板；path 为库内 Markdown 路径 */
@@ -169,6 +206,12 @@ export interface ReaderAppearance {
 	paragraphSpacing: number
 	/** 鼠标滚轮上下滚动时翻页（仅 EPUB 分页视图） */
 	wheelPageTurn: boolean
+	/** EPUB 正文分栏：0 = 跟随窗口，1 = 单栏，2 = 双栏（窄屏仍会自动单栏） */
+	epubColumns: 0 | 1 | 2
+	/** EPUB 翻页方式：分页 / 连续滚动 */
+	epubFlow: 'paginated' | 'scrolled'
+	/** EPUB 竖排（从右往左）；仅对支持排版的电子书生效 */
+	epubVertical: boolean
 }
 
 export const DEFAULT_APPEARANCE: ReaderAppearance = {
@@ -182,6 +225,9 @@ export const DEFAULT_APPEARANCE: ReaderAppearance = {
 	maxInlineSize: 700,
 	paragraphSpacing: 0,
 	wheelPageTurn: true,
+	epubColumns: 0,
+	epubFlow: 'paginated',
+	epubVertical: false,
 }
 
 // ------------------------------------------------------------------
@@ -200,6 +246,8 @@ export interface ShelfBookInfo {
 	seconds?: number
 	/** 已生成的阅读笔记路径（文件存在时才给） */
 	notePath?: string
+	/** 书架手动标记的阅读状态 */
+	readingStatus?: ReadingStatus
 }
 
 export interface ShelfDisplaySettings {
@@ -273,6 +321,10 @@ export interface GroveSettings {
 	shelfDisplay: ShelfDisplaySettings
 	/** 打开书本时是否自动展开右侧批注列表 */
 	openSidebarWithBook: boolean
+	/** 手机端点正文上方/下方 1/4 翻页（默认关，避免误触） */
+	mobileTapZones: boolean
+	/** 手机上双指轻按切换沉浸阅读（隐藏工具栏与侧栏） */
+	mobileTwoFingerImmersive: boolean
 	/** 新增/修改批注时，自动刷新已生成的阅读笔记（标记区外手写内容保留） */
 	autoUpdateNote: boolean
 	/**
@@ -298,6 +350,49 @@ export interface GroveSettings {
 	aiModel: string
 	/** AI 解释：自定义提示词，留空用内置 */
 	aiPrompt: string
+	/** 语义检索：嵌入服务 */
+	aiEmbeddingProvider: 'local' | 'zhipu' | 'siliconflow' | 'custom'
+	/** 语义检索：嵌入接口地址；空 = 用聊天接口地址（siliconflow 默认官方地址） */
+	aiEmbeddingBaseUrl: string
+	/** 语义检索：嵌入接口 Key；空 = 用聊天 Key（siliconflow 必须单独填） */
+	aiEmbeddingApiKey: string
+	/** 语义检索：嵌入模型名（OpenAI 兼容 /embeddings） */
+	aiEmbeddingModel: string
+	/** 语义检索：向量维度；服务不支持时会自动退回默认维度。0 = 不传 */
+	aiEmbeddingDimensions: number
+	/** PDF 链接格式：grove＝本插件双链；pdfplus＝PDF++ 的 #page=…&rect=… */
+	pdfLinkStyle: 'grove' | 'pdfplus'
+	/** PDF 链接别名：title-page＝书名 · 页码；page＝仅页码；snippet＝原文开头 */
+	pdfLinkAlias: 'title-page' | 'page' | 'snippet'
+	/** 阅读工具栏样式：icon＝图标；text＝文字按钮 */
+	toolbarStyle: 'icon' | 'text'
+	/** EPUB 高亮样式：wash＝下半段色带 + 底部细线；block＝整行色块 */
+	epubHighlightStyle: 'wash' | 'block'
+	/** 手机颜色菜单里「默认色」按钮使用的高亮色 key */
+	defaultHighlightColor: string
+	/** 工具栏里隐藏的动作（中文标签：评论 / 外观 / AI 问答 / 导读 / 笔记 / 书签 / 批注） */
+	hiddenToolbarActions: string[]
+	/** 工具栏动作按钮顺序（中文标签）；空数组＝默认顺序 */
+	toolbarOrder: string[]
+}
+
+/**
+ * 可排序的工具栏动作。颜色与「评论」固定在左侧，不参与排序。
+ * 新增动作时同时改这里和 readerActions 的渲染表。
+ */
+export const TOOLBAR_ACTIONS = ['外观', 'AI 问答', '导读', '笔记', '书签', '批注'] as const
+
+/** 合并用户顺序与默认顺序：忽略未知项和重复项，未列出的动作按默认顺序补在后面 */
+export function normalizeToolbarOrder(order?: string[]): string[] {
+	const out: string[] = []
+	for (const name of order ?? []) {
+		if (!(TOOLBAR_ACTIONS as readonly string[]).includes(name)) continue
+		if (!out.includes(name)) out.push(name)
+	}
+	for (const name of TOOLBAR_ACTIONS) {
+		if (!out.includes(name)) out.push(name)
+	}
+	return out
 }
 
 export const DEFAULT_SETTINGS: GroveSettings = {
@@ -317,6 +412,8 @@ export const DEFAULT_SETTINGS: GroveSettings = {
 	logoStyle: 'original',
 	shelfDisplay: { ...DEFAULT_SHELF_DISPLAY },
 	openSidebarWithBook: true,
+	mobileTapZones: false,
+	mobileTwoFingerImmersive: true,
 	autoUpdateNote: true,
 	excerptLinkStyle: 'wikilink',
 	backupFolder: BACKUP_FOLDER_NAME,
@@ -326,5 +423,17 @@ export const DEFAULT_SETTINGS: GroveSettings = {
 	aiBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
 	aiApiKey: '',
 	aiModel: 'glm-4-flash',
+	pdfLinkStyle: 'grove',
+	pdfLinkAlias: 'title-page',
+	toolbarStyle: 'icon',
+	epubHighlightStyle: 'wash',
+	defaultHighlightColor: 'yellow',
+	hiddenToolbarActions: [],
+	toolbarOrder: [],
 	aiPrompt: '',
+	aiEmbeddingProvider: 'local',
+	aiEmbeddingBaseUrl: '',
+	aiEmbeddingApiKey: '',
+	aiEmbeddingModel: 'embedding-3',
+	aiEmbeddingDimensions: 1024,
 }

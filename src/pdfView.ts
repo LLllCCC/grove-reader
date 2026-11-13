@@ -4,20 +4,28 @@ import { showAnnMenu } from './annMenu'
 import * as pdfjsLib from 'pdfjs-dist'
 import type { PDFDocumentProxy, PDFWorker } from 'pdfjs-dist'
 import type GroveReaderPlugin from './main'
+import type { ReaderCaps, ReaderEngine, ReaderKind } from './engine/types'
+import { createReaderSidebar, type ReaderSidebar } from './engine/readerChrome'
 import { Annotation, BookData, HIGHLIGHT_COLORS, VIEW_TYPE_GROVE_PDF, colorCss } from './types'
+import type { PdfViewPrefs } from './types'
 import { CommentModal, ConfirmModal } from './modals'
 import { JumpReturnBar } from './navReturn'
-import { createBookmarkSection, findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
+import { findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
 import { createColorControls } from './colorMenu'
-import { createCitationSection, filterBacklinkGroupsByCfi, type CitationSectionHandle, type ExcerptBacklinkGroup } from './backlinks'
-import { basenameOf, encodeParam, isAbsolutePath, normalizeSelectionText, pageFromFraction, randomId, truncate } from './util'
+import { filterBacklinkGroupsByCfi, type CitationSectionHandle, type ExcerptBacklinkGroup } from './backlinks'
+import { basenameOf, encodeParam, isAbsolutePath, normalizeSelectionText, pageFromFraction, randomId, setHighlightedText, truncate } from './util'
 import { joinPath } from './platformIO'
 import { canLinkBook, pdfPageEmbed, snippetOf, wikilinkFor } from './wikilink'
-import type { GroveLinkTarget, PdfRect } from './wikilink'
+import { appendExcerpt } from './excerptNote'
+import type { ExcerptMode } from './excerptStore'
+import type { GroveLinkTarget, PdfPointRect, PdfRect } from './wikilink'
 import { shortTitle } from './canvas'
 import type { SourceSection } from './portrait'
 import { BookAskModal } from './bookAskModal'
+import { GuideModal } from './guideModal'
 import { markupColorCss, markupOpacity, markupRects, markupSubtype, type PdfMarkupAnnotation } from './pdfAnnots'
+import { PdfThumbnailsModal, type PdfThumbDoc } from './pdfThumbs'
+import { pdfItemsToText, type PdfTextItem } from './pdfText'
 
 /** 常量定义在 types.ts（main.ts 不 import 本模块也要能判断 PDF 视图），这里保持原导出名 */
 export { VIEW_TYPE_GROVE_PDF }
@@ -39,7 +47,7 @@ interface PdfPageProxy {
 	getViewport(params: { scale: number; rotation?: number }): PdfViewport
 	render(params: { canvasContext: CanvasRenderingContext2D; viewport: PdfViewport }): { promise: Promise<void>; cancel(): void }
 	streamTextContent(): unknown
-	getTextContent(): Promise<{ items: Array<{ str?: string }> }>
+	getTextContent(): Promise<{ items: PdfTextItem[] }>
 	/** PDF 文件里自带的注解（Acrobat/Preview 画的高亮等），只读渲染 */
 	getAnnotations(params?: { intent?: string }): Promise<PdfMarkupAnnotation[]>
 	cleanup(): void
@@ -69,6 +77,20 @@ interface PdfSelection {
 	text: string
 }
 
+/** 归一化矩形跟着页面旋转：存储永远是 0° 坐标，显示时再转到当前角度 */
+function rotateNormalizedRect(rect: NormalizedRect, rotation: number): NormalizedRect {
+	const { l, t, w, h } = rect
+	if (rotation === 90) return { l: 1 - t - h, t: l, w: h, h: w }
+	if (rotation === 180) return { l: 1 - l - w, t: 1 - t - h, w, h }
+	if (rotation === 270) return { l: t, t: 1 - l - w, w: h, h: w }
+	return rect
+}
+
+/** 屏幕上的框选（当前旋转角度）换回 0° 存储坐标 */
+function unrotateNormalizedRect(rect: NormalizedRect, rotation: number): NormalizedRect {
+	return rotateNormalizedRect(rect, (360 - rotation) % 360)
+}
+
 interface PageEntry {
 	wrap: HTMLElement
 	canvas?: HTMLCanvasElement
@@ -76,6 +98,8 @@ interface PageEntry {
 	/** PDF 自带批注层：在画布之上、文字层与插件高亮之下 */
 	annDiv?: HTMLElement
 	hlDiv?: HTMLElement
+	/** 本页引用叠层：页码角标 + 引用处框选（不可交互，不挡划选） */
+	citeDiv?: HTMLElement
 	vp1w: number
 	vp1h: number
 	renderScale: number | null
@@ -149,7 +173,7 @@ class PdfRangeTransport extends pdfjsLib.PDFDataRangeTransport {
 	}
 }
 
-export class PdfView extends ItemView {
+export class PdfView extends ItemView implements ReaderEngine {
 	bookPath = ''
 	bookTitle = ''
 
@@ -165,6 +189,10 @@ export class PdfView extends ItemView {
 	private numPages = 0
 	private scale = 1
 	private zoom = 1
+	private zoomMode: NonNullable<PdfViewPrefs['zoomMode']> = 'fit-width'
+	private flow: NonNullable<PdfViewPrefs['flow']> = 'scroll'
+	private spread = false
+	private rotation: 0 | 90 | 180 | 270 = 0
 	private currentPage = 1
 	/** 跳转后的「返回原位置」浮条（挂 contentEl：pagesEl 是滚动容器，绝对定位会跟着页面滚走） */
 	private jumpReturn = new JumpReturnBar(() => this.contentEl ?? null)
@@ -196,8 +224,8 @@ export class PdfView extends ItemView {
 
 	private pagesEl!: HTMLElement
 	private sidebarEl!: HTMLElement
+	private chrome!: ReaderSidebar
 	private annListEl!: HTMLElement
-	private annCountEl!: HTMLElement
 	private searchInput!: HTMLInputElement
 	private sidebarQuery = ''
 	private tocSelect!: HTMLSelectElement
@@ -243,6 +271,12 @@ export class PdfView extends ItemView {
 
 	get ready(): boolean {
 		return !!(this.pdfDoc && this.data)
+	}
+
+	get kind(): ReaderKind { return 'pdf' }
+
+	get caps(): ReaderCaps {
+		return { text: false, appearance: false, zoom: true, encoding: false, imageOnly: false }
 	}
 
 	snapshot(): BookData | null {
@@ -320,15 +354,15 @@ export class PdfView extends ItemView {
 
 		const zoomOut = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '缩小' } })
 		setIcon(zoomOut, 'zoom-out')
-		zoomOut.addEventListener('click', () => this.#setZoom(this.zoom / 1.15))
+		zoomOut.addEventListener('click', () => this.#zoomBy(1 / 1.15))
 		this.zoomLabel = toolbar.createSpan('grove-progress-label')
-		this.zoomLabel.setText('100%')
+		this.zoomLabel.setText('适宽')
 		const zoomIn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '放大' } })
 		setIcon(zoomIn, 'zoom-in')
-		zoomIn.addEventListener('click', () => this.#setZoom(this.zoom * 1.15))
-		const fitBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '适应宽度' } })
-		setIcon(fitBtn, 'move-horizontal')
-		fitBtn.addEventListener('click', () => this.#setZoom(1))
+		zoomIn.addEventListener('click', () => this.#zoomBy(1.15))
+		const viewBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': 'PDF 排版：缩放 / 翻页 / 单双页 / 旋转' } })
+		setIcon(viewBtn, 'layout-dashboard')
+		viewBtn.addEventListener('click', () => this.#showViewMenu(viewBtn))
 
 		const tocWrap = toolbar.createDiv('grove-toc')
 		this.tocSelect = tocWrap.createEl('select', { cls: 'dropdown grove-toc-select' })
@@ -340,7 +374,7 @@ export class PdfView extends ItemView {
 		})
 
 		toolbar.createDiv('grove-sep')
-		this.colorMenuClose = createColorControls(toolbar, key => void this.#createHighlightFromPending(key))
+		this.colorMenuClose = createColorControls(toolbar, key => void this.#createHighlightFromPending(key), this.plugin.settings.defaultHighlightColor)
 		const commentBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '为划选文字添加评论' } })
 		setIcon(commentBtn, 'message-square-plus')
 		commentBtn.addEventListener('click', () => void this.#commentOnPending())
@@ -350,6 +384,10 @@ export class PdfView extends ItemView {
 		const askBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': 'AI 全书问答' } })
 		setIcon(askBtn, 'sparkles')
 		askBtn.addEventListener('click', () => new BookAskModal(this.app, this.plugin, this).open())
+
+		const guideBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': 'AI 按章导读' } })
+		setIcon(guideBtn, 'list-tree')
+		guideBtn.addEventListener('click', () => new GuideModal(this.app, this.plugin, this).open())
 
 		const noteBtn = toolbar.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': '生成 / 更新阅读笔记' } })
 		setIcon(noteBtn, 'file-text')
@@ -426,80 +464,49 @@ export class PdfView extends ItemView {
 			else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { this.prevPage(); e.preventDefault() }
 		})
 
-		this.sidebarEl = body.createDiv('grove-sidebar')
-		// 手机窄屏：批注栏默认收起，把宽度让给页面（打开成功后还会按设置再校一次）
-		if (this.plugin.isMobile) this.sidebarEl.classList.add('grove-hidden')
-		const sideHead = this.sidebarEl.createDiv('grove-sidebar-head')
-		this.annCountEl = sideHead.createSpan('grove-ann-count')
-		this.annCountEl.setText('0 个批注')
-		// 与 EPUB / TXT 对齐：手机端批注栏是覆盖式抽屉，必须有一个明确的退出按钮
-		const closeSidebar = sideHead.createEl('button', { cls: 'clickable-icon grove-sidebar-close', attr: { 'aria-label': '关闭批注栏', title: '关闭批注栏' } })
-		setIcon(closeSidebar, 'x')
-		closeSidebar.addEventListener('click', () => this.sidebarEl.classList.add('grove-hidden'))
-
-		// 书签区放在批注区之上：它是导航，不该被下面的搜索/筛选挡住
-		this.bookmarkSection = createBookmarkSection(this.sidebarEl, { onAdd: () => this.#toggleBookmark() })
-		this.pageCitationSection = createCitationSection(this.sidebarEl, {
-			title: '本页引用',
-			startCollapsed: true,
-			emptyText: '本页还没有笔记引用。',
+		const chrome = createReaderSidebar(body, {
+			startHidden: this.plugin.isMobile,
+			searchPlaceholder: '搜索批注…',
+			sortLabels: { position: '排序：位置', recent: '排序：最近' },
+			selectBarInControls: false,
+			fullTextResultsClass: 'grove-ann-list',
+			extraCitation: {
+				title: '本页引用',
+				startCollapsed: true,
+				emptyText: '本页还没有笔记引用。',
+			},
+			hooks: {
+				onAddBookmark: () => this.#toggleBookmark(),
+				onSearch: q => {
+					this.sidebarQuery = q
+					this.#saveFilterState()
+					this.#renderSidebar()
+				},
+				onToggleSort: () => {
+					this.sortMode = this.sortMode === 'position' ? 'recent' : 'position'
+					this.#saveFilterState()
+					this.#renderSidebar()
+				},
+				onToggleMultiSelect: () => this.#setSelectMode(!this.selectMode),
+				onDeleteSelected: () => this.#deleteSelected(),
+				onCancelSelect: () => this.#setSelectMode(false),
+				onRunFullTextSearch: () => this.#runContentSearch(),
+				onClearFullTextSearch: () => this.#clearContentSearch(),
+			},
 		})
-		this.citationSection = createCitationSection(this.sidebarEl)
-
-		// 全文搜索折叠区，与 EPUB 阅读器使用相同的侧栏结构。
-		this.fullTextSearchEl = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })
-		this.fullTextSearchEl.createEl('summary', { text: '全文搜索' })
-		const sControls = this.fullTextSearchEl.createDiv('grove-fulltext-search-controls')
-		this.contentSearchInput = sControls.createEl('input', {
-			cls: 'grove-ann-search',
-			attr: { type: 'search', placeholder: '输入关键词，按 Enter 搜索全文…' },
-		})
-		this.contentSearchInput.addEventListener('keydown', e => {
-			if (e.key === 'Enter') {
-				e.preventDefault()
-				this.#runContentSearch()
-			} else if (e.key === 'Escape') {
-				this.#clearContentSearch()
-			}
-		})
-		const sMeta = this.fullTextSearchEl.createDiv('grove-fulltext-search-meta')
-		this.searchCountEl = sMeta.createSpan('grove-fulltext-search-status')
-		this.searchCountEl.setText('输入关键词后按回车')
-		const clearSearchBtn = sMeta.createEl('button', { cls: 'grove-manage-btn', text: '清除', attr: { 'aria-label': '清除全文搜索' } })
-		clearSearchBtn.addEventListener('click', () => this.#clearContentSearch())
-		this.searchResultsEl = this.fullTextSearchEl.createDiv('grove-ann-list grove-fulltext-search-results')
-
-		// 批注列表与 EPUB 阅读器保持相同的排列方式。
-		const controls = this.sidebarEl.createDiv('grove-sidebar-controls')
-		this.searchInput = controls.createEl('input', {
-			cls: 'grove-ann-search',
-			attr: { type: 'search', placeholder: '搜索批注…' },
-		})
-		this.searchInput.addEventListener('input', () => {
-			this.sidebarQuery = this.searchInput.value.trim()
-			this.#saveFilterState()
-			this.#renderSidebar()
-		})
-		const manageRow = controls.createDiv('grove-ann-filters')
-		const sortBtn = manageRow.createEl('button', { cls: 'grove-manage-btn', text: '排序：位置' })
-		sortBtn.addEventListener('click', () => {
-			this.sortMode = this.sortMode === 'position' ? 'recent' : 'position'
-			sortBtn.setText(this.sortMode === 'position' ? '排序：位置' : '排序：最近')
-			this.#saveFilterState()
-			this.#renderSidebar()
-		})
-		const multiBtn = manageRow.createEl('button', { cls: 'grove-manage-btn', text: '多选' })
-		multiBtn.addEventListener('click', () => this.#setSelectMode(!this.selectMode))
-
-		this.selectBarEl = this.sidebarEl.createDiv('grove-select-bar grove-hidden')
-		this.selectCountEl = this.selectBarEl.createSpan('grove-select-count')
-		this.selectCountEl.setText('已选 0 条')
-		const delBtn = this.selectBarEl.createEl('button', { text: '删除所选', cls: 'grove-select-delete' })
-		delBtn.addEventListener('click', () => this.#deleteSelected())
-		const cancelBtn = this.selectBarEl.createEl('button', { text: '取消', cls: 'grove-select-cancel' })
-		cancelBtn.addEventListener('click', () => this.#setSelectMode(false))
-
-		this.annListEl = this.sidebarEl.createDiv('grove-ann-list')
+		this.chrome = chrome
+		this.sidebarEl = chrome.el
+		this.bookmarkSection = chrome.bookmark
+		this.pageCitationSection = chrome.pageCitation
+		this.citationSection = chrome.citation
+		this.fullTextSearchEl = chrome.fullTextSearchEl
+		this.contentSearchInput = chrome.fullTextInput
+		this.searchCountEl = chrome.fullTextStatus
+		this.searchResultsEl = chrome.fullTextResults
+		this.searchInput = chrome.searchInput
+		this.selectBarEl = chrome.selectBarEl
+		this.selectCountEl = chrome.selectCountEl
+		this.annListEl = chrome.listEl
 	}
 
 	#showEmpty(message: string): void {
@@ -521,6 +528,8 @@ export class PdfView extends ItemView {
 			const data = this.plugin.store.load(target)
 			data.kind = 'pdf'
 			this.data = data
+			// 每本书记住自己的缩放档 / 翻页方式 / 单双页 / 旋转
+			this.#applyViewPrefs()
 
 			// 扫描版 PDF 的整页图片是 JBIG2/JPX 编码，pdf.js 依赖随插件分发的
 			// wasm 解码资源（以及 cmaps / standard_fonts）；缺资源时页面会渲染成空白
@@ -766,10 +775,25 @@ export class PdfView extends ItemView {
 		// 等 ResizeObserver 拿到真实宽度后再重排
 		if (width <= 0) return
 		this.lastWidth = width
-		this.scale = Math.max(0.2, ((width - 32) / (this.pages.get(1)?.vp1w || 600)) * this.zoom)
+		const first = this.pages.get(1)
+		const firstSize = first ? this.#displaySize(first) : { w: 600, h: 800 }
+		const availableW = this.spread ? Math.max(120, (width - 48) / 2) : Math.max(120, width - 32)
+		const availableH = Math.max(120, this.pagesEl.clientHeight - 32)
+		const fitWidth = availableW / (firstSize.w || 600)
+		if (this.zoomMode === 'fit-page') {
+			this.scale = Math.min(fitWidth, availableH / (firstSize.h || 800))
+		} else if (this.zoomMode === 'actual') {
+			this.scale = 1
+		} else if (this.zoomMode === 'custom') {
+			this.scale = fitWidth * this.zoom
+		} else {
+			this.scale = fitWidth
+		}
+		this.scale = Math.max(0.2, this.scale)
 		for (const [n, p] of this.pages) {
-			p.wrap.style.width = `${Math.round(p.vp1w * this.scale)}px`
-			p.wrap.style.height = `${Math.round(p.vp1h * this.scale)}px`
+			const size = this.#displaySize(p)
+			p.wrap.style.width = `${Math.round(size.w * this.scale)}px`
+			p.wrap.style.height = `${Math.round(size.h * this.scale)}px`
 			p.wrap.style.setProperty('--total-scale-factor', String(this.scale))
 			// 正在渲染的页不能碰画布（并发 render 会抛错）：排队等它完成后按新缩放重画
 			if (p.rendering) {
@@ -787,13 +811,195 @@ export class PdfView extends ItemView {
 			p.textDone = false
 			this.#drawHighlightsOf(p.wrap)
 		}
-		this.zoomLabel.setText(`${Math.round(this.zoom * 100)}%`)
+		this.zoomLabel.setText(this.#zoomLabelText())
+		this.#updateBottomPadding()
 		void this.#renderVisible()
 	}
 
-	#setZoom(zoom: number): void {
-		this.zoom = Math.min(4, Math.max(0.4, zoom))
+	/** 一屏一页/双页时给底部留出「最后一页也能顶到视口上方」的空间 */
+	#updateBottomPadding(): void {
+		const last = this.pages.get(this.numPages)
+		const lastH = last ? this.#displaySize(last).h * this.scale : 0
+		const extra = this.flow === 'paged' || this.spread
+			? Math.max(40, this.pagesEl.clientHeight - lastH)
+			: 40
+		this.pagesEl.style.paddingBottom = `${Math.round(extra)}px`
+	}
+
+	#displaySize(p: PageEntry): { w: number; h: number } {
+		return this.rotation === 90 || this.rotation === 270
+			? { w: p.vp1h, h: p.vp1w }
+			: { w: p.vp1w, h: p.vp1h }
+	}
+
+	#fitWidthScale(): number {
+		const first = this.pages.get(1)
+		const size = first ? this.#displaySize(first) : { w: 600, h: 800 }
+		const width = this.pagesEl.clientWidth
+		const availableW = this.spread ? Math.max(120, (width - 48) / 2) : Math.max(120, width - 32)
+		return availableW / (size.w || 600)
+	}
+
+	#zoomLabelText(): string {
+		if (this.zoomMode === 'fit-width') return '适宽'
+		if (this.zoomMode === 'fit-page') return '适页'
+		if (this.zoomMode === 'actual') return '100%'
+		return `${Math.round(this.scale * 100)}%`
+	}
+
+	#zoomBy(factor: number): void {
+		const fitWidth = this.#fitWidthScale()
+		if (!(fitWidth > 0)) return
+		this.zoomMode = 'custom'
+		this.zoom = Math.min(4, Math.max(0.2, (this.scale * factor) / fitWidth))
+		this.#saveViewPrefs()
 		this.#relayout()
+	}
+
+	#setZoomMode(mode: NonNullable<PdfViewPrefs['zoomMode']>): void {
+		this.zoomMode = mode
+		this.#saveViewPrefs()
+		this.#relayout()
+	}
+
+	#setFlow(flow: NonNullable<PdfViewPrefs['flow']>): void {
+		this.flow = flow
+		this.#applyViewClasses()
+		this.#saveViewPrefs()
+		this.#updateBottomPadding()
+	}
+
+	#setSpread(spread: boolean): void {
+		this.spread = spread
+		this.#applyViewClasses()
+		this.#saveViewPrefs()
+		this.#relayout()
+	}
+
+	#setRotation(rotation: 0 | 90 | 180 | 270): void {
+		this.rotation = rotation
+		this.#saveViewPrefs()
+		this.#relayout()
+	}
+
+	#applyViewClasses(): void {
+		this.pagesEl?.toggleClass('grove-pdf-paged', this.flow === 'paged')
+		this.pagesEl?.toggleClass('grove-pdf-spread', this.spread)
+	}
+
+	#showViewMenu(anchor: HTMLElement): void {
+		const menu = new Menu()
+		menu.addItem(item => item.setTitle('适合宽度').setChecked(this.zoomMode === 'fit-width').onClick(() => this.#setZoomMode('fit-width')))
+		menu.addItem(item => item.setTitle('适合页面').setChecked(this.zoomMode === 'fit-page').onClick(() => this.#setZoomMode('fit-page')))
+		menu.addItem(item => item.setTitle('实际大小').setChecked(this.zoomMode === 'actual').onClick(() => this.#setZoomMode('actual')))
+		menu.addSeparator()
+		menu.addItem(item => item.setTitle('连续滚动').setChecked(this.flow === 'scroll').onClick(() => this.#setFlow('scroll')))
+		menu.addItem(item => item.setTitle('一屏一页').setChecked(this.flow === 'paged').onClick(() => this.#setFlow('paged')))
+		menu.addSeparator()
+		menu.addItem(item => item.setTitle('单页').setChecked(!this.spread).onClick(() => this.#setSpread(false)))
+		menu.addItem(item => item.setTitle('双页').setChecked(this.spread).onClick(() => this.#setSpread(true)))
+		menu.addSeparator()
+		menu.addItem(item => item.setTitle('页缩略图…').setIcon('gallery-horizontal').onClick(() => this.#openThumbnails()))
+		menu.addItem(item => item.setTitle('导出本页为图片').setIcon('image-down').onClick(() => void this.#exportCurrentPageImage()))
+		menu.addSeparator()
+		for (const rotation of [0, 90, 180, 270] as const) {
+			menu.addItem(item => item.setTitle(`旋转 ${rotation}°`).setChecked(this.rotation === rotation).onClick(() => this.#setRotation(rotation)))
+		}
+		const rect = anchor.getBoundingClientRect()
+		menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 })
+	}
+
+	#applyViewPrefs(): void {
+		const prefs = this.data?.pdfView
+		this.zoomMode = prefs?.zoomMode ?? 'fit-width'
+		this.zoom = prefs?.zoom ?? 1
+		this.flow = prefs?.flow ?? 'scroll'
+		this.spread = prefs?.spread ?? false
+		this.rotation = prefs?.rotation ?? 0
+		this.#applyViewClasses()
+	}
+
+	#saveViewPrefs(): void {
+		if (!this.data) return
+		this.data.pdfView = {
+			zoomMode: this.zoomMode,
+			zoom: this.zoom,
+			flow: this.flow,
+			spread: this.spread,
+			rotation: this.rotation,
+		}
+		this.#scheduleSave(true)
+	}
+
+	#openThumbnails(): void {
+		if (!this.pdfDoc) return
+		new PdfThumbnailsModal(
+			this.app,
+			this.pdfDoc as unknown as PdfThumbDoc,
+			this.currentPage,
+			n => this.#jumpToPageWithReturn(n),
+		).open()
+	}
+
+	async #exportCurrentPageImage(): Promise<void> {
+		const doc = this.pdfDoc
+		if (!doc) return
+		const n = this.currentPage
+		try {
+			const page = await doc.getPage(n)
+			// 默认 2 倍图，超大页面按像素预算降倍，避免一次性分配几百 MB 画布
+			const base = page.getViewport({ scale: 1, rotation: this.rotation })
+			let scale = 2
+			if (base.width * scale * base.height * scale > MAX_CANVAS_PIXELS) {
+				scale = Math.max(1, Math.sqrt(MAX_CANVAS_PIXELS / (base.width * base.height)))
+			}
+			const canvas = await this.#renderPageToCanvas(page, page.getViewport({ scale, rotation: this.rotation }))
+			const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+			if (!blob) throw new Error('PNG 编码失败')
+			const folder = joinPath(this.plugin.settings.notesFolder || '阅读笔记', '页图')
+			const vault = this.app.vault
+			if (!(await vault.adapter.exists(folder))) await vault.createFolder(folder)
+			const safe = (this.bookTitle || 'PDF').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80)
+			const path = joinPath(folder, `${safe}-第${n}页.png`)
+			await vault.adapter.writeBinary(path, await blob.arrayBuffer())
+			new Notice(`Grove Reader：已导出 ${path}`)
+		} catch (e) {
+			new Notice(`Grove Reader：导出页图失败（${e instanceof Error ? e.message : String(e)}）`)
+		}
+	}
+
+	/**
+	 * 把一页画到离屏画布。
+	 *
+	 * pdf.js 的分块渲染靠 requestAnimationFrame 推进；窗口被最小化 / 被遮挡时 rAF 会被暂停，
+	 * `render().promise` 就一直不落地，表现为「点了导出没反应」。导出期间临时用 setTimeout 驱动。
+	 */
+	async #renderPageToCanvas(page: PdfPageProxy, vp: PdfViewport): Promise<HTMLCanvasElement> {
+		const canvas = document.createElement('canvas')
+		canvas.width = Math.floor(vp.width)
+		canvas.height = Math.floor(vp.height)
+		const ctx = canvas.getContext('2d')
+		if (!ctx) throw new Error('无法获取 2D 画布')
+		const task = page.render({ canvasContext: ctx, viewport: vp })
+		const hidden = document.visibilityState === 'hidden'
+		const originalRaf = window.requestAnimationFrame
+		if (hidden) {
+			window.requestAnimationFrame = ((cb: FrameRequestCallback) => window.setTimeout(() => cb(performance.now()), 16)) as typeof window.requestAnimationFrame
+		}
+		let timer = 0
+		const timeout = new Promise<never>((_, reject) => {
+			timer = window.setTimeout(() => reject(new Error('页面渲染超时，请等窗口可见后重试')), 30_000)
+		})
+		try {
+			await Promise.race([task.promise, timeout])
+			return canvas
+		} catch (e) {
+			task.cancel()
+			throw e
+		} finally {
+			window.clearTimeout(timer)
+			if (hidden) window.requestAnimationFrame = originalRaf
+		}
 	}
 
 	#renderVisible(): void {
@@ -859,6 +1065,7 @@ export class PdfView extends ItemView {
 		p.renderScale = scale
 		try {
 			this.#ensurePageLayers(p)
+			this.#renderCitationMarks()
 			const page = await doc.getPage(n)
 			if (p.renderScale !== scale || this.scale !== scale || this.pdfDoc !== doc) {
 				if (this.pdfDoc === doc) p.renderScale = null
@@ -869,16 +1076,18 @@ export class PdfView extends ItemView {
 			if (p.vp1w !== vp1.width || p.vp1h !== vp1.height) {
 				p.vp1w = vp1.width
 				p.vp1h = vp1.height
-				p.wrap.style.width = `${Math.round(p.vp1w * this.scale)}px`
-				p.wrap.style.height = `${Math.round(p.vp1h * this.scale)}px`
+				const size = this.#displaySize(p)
+				p.wrap.style.width = `${Math.round(size.w * this.scale)}px`
+				p.wrap.style.height = `${Math.round(size.h * this.scale)}px`
 			}
 			// 渲染分辨率 = 缩放 × DPR，超过像素预算时按比例降低 DPR
 			let dpr = DPR
-			const cssPixels = p.vp1w * scale * p.vp1h * scale
+			const display = this.#displaySize(p)
+			const cssPixels = display.w * scale * display.h * scale
 			if (cssPixels * DPR * DPR > MAX_CANVAS_PIXELS) {
 				dpr = Math.max(1, Math.sqrt(MAX_CANVAS_PIXELS / cssPixels))
 			}
-			const vp = page.getViewport({ scale: scale * dpr })
+			const vp = page.getViewport({ scale: scale * dpr, rotation: this.rotation })
 			const canvas = p.canvas!
 			canvas.width = Math.floor(vp.width)
 			canvas.height = Math.floor(vp.height)
@@ -929,6 +1138,7 @@ export class PdfView extends ItemView {
 		p.annDiv = p.wrap.createDiv('grove-pdf-annlayer')
 		p.textDiv = p.wrap.createDiv('grove-pdf-textlayer textLayer')
 		p.hlDiv = p.wrap.createDiv('grove-pdf-hllayer')
+		p.citeDiv = p.wrap.createDiv('grove-pdf-citelayer')
 	}
 
 	#releasePageLayers(p: PageEntry): void {
@@ -944,6 +1154,8 @@ export class PdfView extends ItemView {
 		p.textDiv = undefined
 		p.hlDiv?.remove()
 		p.hlDiv = undefined
+		p.citeDiv?.remove()
+		p.citeDiv = undefined
 		p.textDone = false
 		p.searchText = undefined
 	}
@@ -1001,7 +1213,7 @@ export class PdfView extends ItemView {
 			const textDiv = p.textDiv
 			if (!textDiv) return false
 			textDiv.empty()
-			const vp = page.getViewport({ scale: this.scale })
+			const vp = page.getViewport({ scale: this.scale, rotation: this.rotation })
 			const tl = new (pdfjsLib as unknown as {
 				TextLayer: new (o: { textContentSource: unknown; container: HTMLElement; viewport: PdfViewport }) => { render(): Promise<void> }
 			}).TextLayer({ textContentSource: page.streamTextContent(), container: textDiv, viewport: vp })
@@ -1045,7 +1257,7 @@ export class PdfView extends ItemView {
 			return
 		}
 		if (!annots.length) return
-		const vp = page.getViewport({ scale: 1 })
+		const vp = page.getViewport({ scale: 1, rotation: this.rotation })
 		for (const a of annots) {
 			const subtype = markupSubtype(a)
 			if (!subtype) continue
@@ -1108,6 +1320,22 @@ export class PdfView extends ItemView {
 				low = mid + 1
 			} else {
 				high = mid - 1
+			}
+		}
+		// 滚到最底时，最后一页无法顶到视口上方（滚动条已到底）；
+		// 直接按「最后一行」算当前页，否则进度会永远停在倒数第二行。
+		if (this.pagesEl.scrollTop + this.pagesEl.clientHeight >= this.pagesEl.scrollHeight - 4) {
+			current = this.spread
+				? this.numPages - (this.numPages % 2 === 0 ? 1 : 0)
+				: this.numPages
+		}
+		// 双页模式下同一行两页 offsetTop 相同：当前页取行首，避免进度在 1/2 之间跳
+		if (this.spread) {
+			while (current > 1) {
+				const prev = this.pages.get(current - 1)
+				const cur = this.pages.get(current)
+				if (!prev || !cur || prev.wrap.offsetTop !== cur.wrap.offsetTop) break
+				current--
 			}
 		}
 		if (current !== this.currentPage && current >= 1 && current <= this.numPages) {
@@ -1192,7 +1420,7 @@ export class PdfView extends ItemView {
 	#scrollToPage(n: number, rects?: PdfRect[]): void {
 		const p = this.pages.get(n)
 		if (!p) return
-		const rect = rects?.[0]
+		const rect = rects?.[0] ? rotateNormalizedRect(rects[0], this.rotation) : null
 		// 有框选就滚到那一句（留一点页眉的余量）；没有就停在页顶
 		const top = rect
 			? p.wrap.offsetTop + rect.t * p.wrap.offsetHeight - Math.max(24, this.pagesEl.clientHeight * 0.18)
@@ -1204,7 +1432,8 @@ export class PdfView extends ItemView {
 	/** 回跳后短暂标出目标句，2 秒后淡出（不写进数据，不挡划选） */
 	#flashJumpRects(p: PageEntry, rects: PdfRect[]): void {
 		p.wrap.querySelectorAll('.grove-pdf-jump-mark').forEach(el => el.remove())
-		for (const r of rects.slice(0, 12)) {
+		for (const raw of rects.slice(0, 12)) {
+			const r = rotateNormalizedRect(raw, this.rotation)
 			const mark = p.wrap.createDiv('grove-pdf-jump-mark')
 			mark.style.left = `${r.l * 100}%`
 			mark.style.top = `${r.t * 100}%`
@@ -1214,6 +1443,10 @@ export class PdfView extends ItemView {
 		window.setTimeout(() => {
 			p.wrap.querySelectorAll('.grove-pdf-jump-mark').forEach(el => el.remove())
 		}, 2400)
+	}
+
+	jumpTo(cfi: string, fallback?: GroveLinkTarget): void {
+		this.jumpToCfi(cfi, fallback)
 	}
 
 	jumpToCfi(cfi: string, fallback?: GroveLinkTarget): void {
@@ -1229,7 +1462,7 @@ export class PdfView extends ItemView {
 			try {
 				const page = await this.pdfDoc.getPage(n)
 				const content = await page.getTextContent()
-				const text = content.items.map(item => item.str ?? '').join(' ').replace(/\s+/g, ' ').trim()
+				const text = pdfItemsToText(content.items ?? [])
 				if (text) out.push({ label: `第 ${n} 页`, text })
 			} catch {
 				// 单页取文失败就跳过
@@ -1267,7 +1500,8 @@ export class PdfView extends ItemView {
 		const sorted = [...this.data.annotations].sort((x, y) => (x.sectionIndex ?? 0) - (y.sectionIndex ?? 0))
 		for (const a of sorted) {
 			if (!a.pdf || a.pdf.page !== page) continue
-			for (const r of a.pdf.rects) {
+			for (const raw of a.pdf.rects) {
+				const r = rotateNormalizedRect(raw, this.rotation)
 				if (px >= r.l - pad && px <= r.l + r.w + pad && py >= r.t - pad && py <= r.t + r.h + pad) {
 					this.#revealInSidebar(a)
 					showAnnMenu({ x: e.clientX, y: e.clientY }, a.color, {
@@ -1316,11 +1550,44 @@ export class PdfView extends ItemView {
 		}
 		if (!page || page < 1 || page > this.numPages) return
 		const rects = fb?.pdfRects
+		if (fb?.pdfRectsPt?.length) {
+			void this.#jumpWithPointRects(page, fb.pdfRectsPt, remember)
+			return
+		}
 		if (!remember) {
 			this.#scrollToPage(page, rects)
 			return
 		}
 		this.#jumpToPageWithReturn(page, rects)
+	}
+
+	/** PDF++ 链接里是页面点坐标，等这一页拿到 viewport 再换算成归一化矩形 */
+	async #jumpWithPointRects(page: number, pts: PdfPointRect[], remember: boolean): Promise<void> {
+		const rects = await this.#normalizePointRects(page, pts)
+		if (remember) this.#jumpToPageWithReturn(page, rects)
+		else this.#scrollToPage(page, rects)
+	}
+
+	async #normalizePointRects(page: number, pts: PdfPointRect[]): Promise<PdfRect[]> {
+		if (!this.pdfDoc) return []
+		try {
+			const p = await this.pdfDoc.getPage(page)
+			const vp = p.getViewport({ scale: 1 })
+			const out: PdfRect[] = []
+			for (const r of pts.slice(0, 12)) {
+				// PDF 原点在左下角：左下点映射到屏幕下方，右上点映射到屏幕上方
+				const a = vp.convertToViewportPoint(r.l, r.b)
+				const b = vp.convertToViewportPoint(r.r, r.t)
+				const l = Math.min(a[0], b[0]) / vp.width
+				const t = Math.min(a[1], b[1]) / vp.height
+				const w = Math.abs(b[0] - a[0]) / vp.width
+				const h = Math.abs(b[1] - a[1]) / vp.height
+				if (w > 0 && h > 0) out.push({ l, t, w, h })
+			}
+			return out
+		} catch {
+			return []
+		}
 	}
 
 	/** 明确跳页（批注 / 目录）：跳完在左下角留「返回原位置」。翻页按钮不走这里 */
@@ -1397,6 +1664,46 @@ export class PdfView extends ItemView {
 			onJump: row => void this.plugin.openCitation(row),
 		})
 		this.#renderPageCitations()
+		this.#renderCitationMarks()
+	}
+
+	/**
+	 * 在页面上叠出「本页引用」：右上角角标显示条数，带 `r=` 的链接再画出虚线框。
+	 * 只画在已渲染的页上（虚拟化），点击角标展开侧栏的「本页引用」。
+	 */
+	#renderCitationMarks(): void {
+		for (const p of this.pages.values()) {
+			const layer = p.citeDiv
+			if (!layer) continue
+			layer.empty()
+			if (!this.citationGroups.length) continue
+			const page = Number(p.wrap.dataset.page)
+			const rects: PdfRect[] = []
+			let count = 0
+			for (const group of this.citationGroups) {
+				for (const row of group.rows) {
+					if (row.target.cfi !== `page:${page}`) continue
+					count++
+					for (const r of row.target.pdfRects ?? []) rects.push(r)
+				}
+			}
+			if (!count) continue
+			for (const raw of rects) {
+				const r = rotateNormalizedRect(raw, this.rotation)
+				const box = layer.createDiv('grove-pdf-cite-box')
+				box.style.left = `${r.l * 100}%`
+				box.style.top = `${r.t * 100}%`
+				box.style.width = `${r.w * 100}%`
+				box.style.height = `${r.h * 100}%`
+			}
+			const badge = layer.createDiv('grove-pdf-cite-badge')
+			badge.setText(`引用 ${count}`)
+			badge.title = '这一页被笔记引用；点击查看引用列表'
+			badge.addEventListener('click', ev => {
+				ev.stopPropagation()
+				this.sidebarEl.removeClass('grove-hidden')
+			})
+		}
 	}
 
 	/** 本页引用：从全书缓存里过滤当前 `page:N`，翻页只做内存过滤 */
@@ -1415,23 +1722,46 @@ export class PdfView extends ItemView {
 	}
 
 	#pageLink(page: number): string {
-		const label = `${shortTitle(this.bookTitle || 'PDF')} · ${this.#pageLabel(page)}`
+		const label = this.#linkAlias(this.#pageLabel(page))
 		if (canLinkBook(this.bookPath)) {
+			if ((this.plugin.settings.pdfLinkStyle ?? 'grove') === 'pdfplus') {
+				return this.#pdfPlusLink(page, undefined, label)
+			}
 			const link = wikilinkFor(this.bookPath, { cfi: `page:${page}`, chapter: this.#pageLabel(page) }, label)
 			if (link) return link
 		}
 		return `[${label}](obsidian://grove?path=${encodeParam(this.bookPath)}&cfi=${encodeParam(`page:${page}`)})`
 	}
 
+	/** 链接别名：书名 · 页码 / 仅页码 / 原文开头 */
+	#linkAlias(pageLabel: string, snippet?: string): string {
+		const mode = this.plugin.settings.pdfLinkAlias ?? 'title-page'
+		if (mode === 'page') return pageLabel
+		if (mode === 'snippet' && snippet?.trim()) return truncate(snippet.replace(/\s+/g, ' ').trim(), 18)
+		return `${shortTitle(this.bookTitle || 'PDF')} · ${pageLabel}`
+	}
+
+	/** PDF++ 形态：[[书.pdf#page=12&rect=l,t,w,h|别名]]（多框选只取第一块） */
+	#pdfPlusLink(page: number, rect: PdfRect | undefined, alias: string): string {
+		const f = (v: number): number => Math.round(v * 1000) / 1000
+		const sub = rect
+			? `page=${page}&rect=${f(rect.l)},${f(rect.t)},${f(rect.w)},${f(rect.h)}`
+			: `page=${page}`
+		return `[[${this.bookPath}#${sub}|${alias.replace(/\|/g, '｜')}]]`
+	}
+
 	#annotationLink(a: Annotation, page: number): string {
-		const label = `${shortTitle(this.bookTitle || 'PDF')} · ${this.#pageLabel(page)} · ${truncate(a.text.replace(/\s+/g, ' ').trim(), 18)}`
-		const target: GroveLinkTarget = {
-			cfi: a.cfi,
-			text: snippetOf(a.text),
-			chapter: this.#pageLabel(page),
-			pdfRects: a.pdf?.rects,
-		}
+		const label = this.#linkAlias(this.#pageLabel(page), a.text)
 		if (canLinkBook(this.bookPath)) {
+			if ((this.plugin.settings.pdfLinkStyle ?? 'grove') === 'pdfplus') {
+				return this.#pdfPlusLink(page, a.pdf?.rects?.[0], label)
+			}
+			const target: GroveLinkTarget = {
+				cfi: a.cfi,
+				text: snippetOf(a.text),
+				chapter: this.#pageLabel(page),
+				pdfRects: a.pdf?.rects,
+			}
 			const link = wikilinkFor(this.bookPath, target, label)
 			if (link) return link
 		}
@@ -1482,15 +1812,17 @@ export class PdfView extends ItemView {
 
 	/** 批注被外部改动（从笔记回写）后刷新侧栏 */
 	refreshAnnotations(): void {
+		// 外部同步后换成 store 合并后的对象，避免旧对象把别人的新增写没
+		if (this.bookPath) this.data = this.plugin.store.load(this.bookPath)
 		this.#renderSidebar()
 	}
 
 	nextPage(): void {
-		this.#scrollToPage(Math.min(this.numPages, this.currentPage + 1))
+		this.#scrollToPage(Math.min(this.numPages, this.currentPage + (this.spread ? 2 : 1)))
 	}
 
 	prevPage(): void {
-		this.#scrollToPage(Math.max(1, this.currentPage - 1))
+		this.#scrollToPage(Math.max(1, this.currentPage - (this.spread ? 2 : 1)))
 	}
 
 	// ------------------------------------------------------------------
@@ -1512,11 +1844,11 @@ export class PdfView extends ItemView {
 		}
 		const page = Number(wrap.dataset.page)
 		const wrapRect = wrap.getBoundingClientRect()
-		const rects: NormalizedRect[] = []
+		const displayRects: NormalizedRect[] = []
 		for (const r of Array.from(range.getClientRects())) {
 			if (r.width < 1 || r.height < 1) continue
 			if (r.right < wrapRect.left || r.left > wrapRect.right) continue
-			rects.push({
+			displayRects.push({
 				l: (r.left - wrapRect.left) / wrapRect.width,
 				t: (r.top - wrapRect.top) / wrapRect.height,
 				w: r.width / wrapRect.width,
@@ -1524,12 +1856,14 @@ export class PdfView extends ItemView {
 			})
 		}
 		const text = normalizeSelectionText(sel.toString().replace(/\r/g, ''))
-		if (!rects.length || !text) {
+		if (!displayRects.length || !text) {
 			this.#clearPending()
 			return
 		}
-		this.pending = { page, rects: rects.slice(0, 400), text }
-		this.#showPopup(wrap, rects)
+		// 数据里永远存 0° 坐标：旋转后再框选也不会让旧批注错位
+		const storedRects = displayRects.map(r => unrotateNormalizedRect(r, this.rotation))
+		this.pending = { page, rects: storedRects.slice(0, 400), text }
+		this.#showPopup(wrap, displayRects)
 	}
 
 	#clearPending(): void {
@@ -1550,25 +1884,75 @@ export class PdfView extends ItemView {
 		}
 		const commentBtn = popup.createEl('button', { text: '评论', cls: 'grove-pdf-popup-btn' })
 		commentBtn.addEventListener('click', () => void this.#commentOnPending())
+		const linkBtn = popup.createEl('button', { text: '链接', cls: 'grove-pdf-popup-btn' })
+		linkBtn.addEventListener('click', () => void this.#copyText(this.#pendingLink()))
 		const copyBtn = popup.createEl('button', { text: '复制', cls: 'grove-pdf-popup-btn' })
 		copyBtn.addEventListener('click', () => {
 			if (this.pending) void navigator.clipboard.writeText(this.pending.text).then(() => new Notice('Grove Reader：已复制'))
 			this.#clearPending()
+		})
+		const saveBtn = popup.createEl('button', { text: '摘录', cls: 'grove-pdf-popup-btn' })
+		saveBtn.title = '存为摘录 / 存为名词'
+		saveBtn.addEventListener('click', () => {
+			const pending = this.pending
+			if (!pending) return
+			const chapter = this.#pageLabel(pending.page)
+			const link = this.#pendingLink()
+			const save = (mode: ExcerptMode): void => {
+				void appendExcerpt(this.app, this.plugin.settings.notesFolder ?? '', {
+					bookTitle: this.bookTitle,
+					chapter,
+					text: pending.text,
+					link,
+					mode,
+				}).then(path => {
+					new Notice(`Grove Reader：已存到 ${path}`)
+					this.#clearPending()
+				}).catch(err => {
+					new Notice(`Grove Reader：保存失败（${err instanceof Error ? err.message : String(err)}）`)
+				})
+			}
+			const rect = saveBtn.getBoundingClientRect()
+			const menu = new Menu()
+			menu.addItem(item => item.setTitle('存为摘录').setIcon('quote').onClick(() => save('quote')))
+			menu.addItem(item => item.setTitle('存为名词').setIcon('list').onClick(() => save('term')))
+			menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 })
 		})
 		this.popup = popup
 
 		const contentRect = this.contentEl.getBoundingClientRect()
 		const last = rects[rects.length - 1]
 		const wrapRect = wrap.getBoundingClientRect()
-		const left = wrapRect.left + last.l * wrapRect.width + last.w * wrapRect.width / 2 - 116
+		const left = wrapRect.left + last.l * wrapRect.width + last.w * wrapRect.width / 2 - 140
 		const top = wrapRect.top + (last.t + last.h) * wrapRect.height - contentRect.top + 8
-		popup.style.left = `${Math.max(8, Math.min(left, contentRect.width - 240))}px`
+		popup.style.left = `${Math.max(8, Math.min(left, contentRect.width - 280))}px`
 		popup.style.top = `${Math.max(8, top)}px`
 	}
 
 	#hidePopup(): void {
 		this.popup?.remove()
 		this.popup = null
+	}
+
+	/** 当前划选的链接：别名与格式跟随设置，回跳精确到框选 */
+	#pendingLink(): string {
+		const pending = this.pending
+		if (!pending) return ''
+		const label = this.#linkAlias(this.#pageLabel(pending.page), pending.text)
+		if (canLinkBook(this.bookPath)) {
+			if ((this.plugin.settings.pdfLinkStyle ?? 'grove') === 'pdfplus') {
+				return this.#pdfPlusLink(pending.page, pending.rects[0], label)
+			}
+			const target: GroveLinkTarget = {
+				cfi: `page:${pending.page}`,
+				text: snippetOf(pending.text),
+				chapter: this.#pageLabel(pending.page),
+				pdfRects: pending.rects,
+			}
+			const link = wikilinkFor(this.bookPath, target, label)
+			if (link) return link
+		}
+		return `[${label}](obsidian://grove?path=${encodeParam(this.bookPath)}&cfi=${encodeParam(`page:${pending.page}`)})`
 	}
 
 	async #createHighlightFromPending(color: string): Promise<void> {
@@ -1613,7 +1997,8 @@ export class PdfView extends ItemView {
 		hlDiv.empty()
 		for (const a of this.data.annotations) {
 			if (!a.pdf || a.pdf.page !== page) continue
-			for (const r of a.pdf.rects) {
+			for (const raw of a.pdf.rects) {
+				const r = rotateNormalizedRect(raw, this.rotation)
 				const div = hlDiv.createDiv('grove-pdf-hl')
 				div.style.left = `${r.l * 100}%`
 				div.style.top = `${r.t * 100}%`
@@ -1919,7 +2304,8 @@ export class PdfView extends ItemView {
 		)
 		const q = this.sidebarQuery.toLowerCase()
 		const filtered = q ? all.filter(a => `${a.text}\n${a.note ?? ''}\n${a.chapter ?? ''}`.toLowerCase().includes(q)) : all
-		this.annCountEl.setText(q ? `${filtered.length} / ${all.length} 个批注` : `${all.length} 个批注`)
+		this.chrome.syncFilters(this.sidebarQuery, null, all.length, filtered.length)
+		this.chrome.syncSort(this.sortMode)
 		this.annListEl.empty()
 		this.annItemEls.clear()
 		if (!all.length) {
@@ -1952,7 +2338,7 @@ export class PdfView extends ItemView {
 			})
 			head.createSpan('grove-ann-chapter').setText(a.chapter || '')
 			const text = item.createDiv('grove-ann-text')
-			text.setText(truncate(a.text.trim(), 160))
+			setHighlightedText(text, truncate(a.text.trim(), 160), this.sidebarQuery)
 			text.addEventListener('click', () => this.#jumpToCfi(a.cfi))
 			if (a.note) item.createDiv('grove-ann-note').setText(truncate(a.note.trim(), 120))
 			const actions = item.createDiv('grove-ann-actions')

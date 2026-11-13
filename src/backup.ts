@@ -15,7 +15,7 @@ const MARKER = '.grove-backup'
 const CLASH_NAMES = ['books', 'covers', 'portraits', 'shelf.json', 'lists.json', 'data.json', 'oplog.json']
 
 /** 备份里必须剥掉的设置字段：值是凭据，一旦随备份流出就得换 Key */
-export const SECRET_SETTING_KEYS = ['aiApiKey'] as const
+export const SECRET_SETTING_KEYS = ['aiApiKey', 'aiEmbeddingApiKey'] as const
 
 export interface BackupInput {
 	io: PlatformIO
@@ -202,7 +202,7 @@ export async function exportDataBackup(input: BackupInput): Promise<BackupResult
 		'3. 把 data.json 放回 <库>/.obsidian/plugins/grove-reader/（插件根目录）；',
 		'4. 重新打开 Obsidian。',
 		'',
-		'注意：data.json 里的 AI Key（aiApiKey）已在备份时剔除，恢复后需要在',
+		'注意：data.json 里的 AI Key（aiApiKey / aiEmbeddingApiKey）已在备份时剔除，恢复后需要在',
 		'设置 → 阅读与笔记 → AI 解释 里重新填一次。这样备份文件夹可以放心同步、外发。',
 		'',
 		`最近备份时间：${new Date().toLocaleString('zh-CN', { hour12: false })}`,

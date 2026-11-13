@@ -13,7 +13,11 @@ import { HIGHLIGHT_COLORS } from './types'
  * 在工具栏里创建颜色入口。
  * 返回关闭弹层的清理函数（视图 onClose 时调用，避免游离节点留在 body 上）。
  */
-export function createColorControls(parent: HTMLElement, onPick: (color: string) => void): () => void {
+export function createColorControls(
+	parent: HTMLElement,
+	onPick: (color: string) => void,
+	defaultKey?: string,
+): () => void {
 	const noop = (): void => undefined
 	if (!Platform.isMobile) {
 		for (const c of HIGHLIGHT_COLORS) {
@@ -57,6 +61,16 @@ export function createColorControls(parent: HTMLElement, onPick: (color: string)
 		// 工具栏在 overflow 容器里，弹层必须挂 body；左右夹一下别出屏
 		menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - HIGHLIGHT_COLORS.length * 32 - 24))}px`
 		menu.style.top = `${rect.bottom + 6}px`
+		// 默认色一键直达，其余颜色仍列在下面
+		const fallback = HIGHLIGHT_COLORS.find(c => c.key === defaultKey) ?? HIGHLIGHT_COLORS[0]
+		const quick = menu.createEl('button', { cls: 'grove-color-default' })
+		quick.setText(`默认 · ${fallback.name}`)
+		quick.style.setProperty('--grove-color-default', fallback.css)
+		quick.addEventListener('click', ev => {
+			ev.stopPropagation()
+			close()
+			onPick(fallback.key)
+		})
 		for (const c of HIGHLIGHT_COLORS) {
 			const dot = menu.createEl('button', { cls: 'grove-color-dot', attr: { 'aria-label': `高亮（${c.name}）` } })
 			dot.style.backgroundColor = c.css

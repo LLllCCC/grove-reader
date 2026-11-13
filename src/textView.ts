@@ -1,5 +1,7 @@
-import { ItemView, Notice, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
+import { ItemView, Menu, Notice, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
+import type { ReaderCaps, ReaderEngine, ReaderKind } from './engine/types'
+import { createReaderSidebar, type ReaderSidebar } from './engine/readerChrome'
 import {
 	Annotation,
 	BACKGROUND_PRESETS,
@@ -11,17 +13,21 @@ import {
 } from './types'
 import { renderAppearancePanel } from './appearancePanel'
 import { JumpReturnBar } from './navReturn'
-import { createBookmarkSection, findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
+import { findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
 import { createReaderActions } from './readerActions'
-import { createCitationSection, type CitationSectionHandle } from './backlinks'
+import type { CitationSectionHandle } from './backlinks'
 import { CommentModal, ConfirmModal } from './modals'
 import { showAnnMenu } from './annMenu'
 import { AiPanel } from './aiPanel'
-import { basenameOf, cleanBookTitle, contrastFg, isDarkColor, randomId, truncate } from './util'
+import { basenameOf, cleanBookTitle, contrastFg, isDarkColor, randomId, setHighlightedText, truncate } from './util'
 import { decodeTextBuffer, TextViewState, VIEW_TYPE_GROVE_TEXT } from './textCodec'
 import type { GroveLinkTarget } from './wikilink'
+import { snippetOf, wikilinkFor } from './wikilink'
+import { appendExcerpt } from './excerptNote'
+import type { ExcerptMode } from './excerptStore'
 import type { SourceSection } from './portrait'
 import { BookAskModal } from './bookAskModal'
+import { GuideModal } from './guideModal'
 
 export { VIEW_TYPE_GROVE_TEXT } from './textCodec'
 
@@ -58,7 +64,7 @@ function parseTextCfi(cfi: string): { start: number; end: number } | null {
 	return { start, end }
 }
 
-export class TextView extends ItemView {
+export class TextView extends ItemView implements ReaderEngine {
 	bookPath = ''
 	private data: BookData | null = null
 	private bytes: ArrayBuffer | null = null
@@ -88,6 +94,8 @@ export class TextView extends ItemView {
 	/** 按下那一刻是否已经存在文字选区（拖选手柄时抬手选区可能已空，不能单看抬手状态） */
 	private touchHadSelection = false
 	private saveTimer: number | null = null
+	/** 手机 selectionchange 防抖，等选区手柄停稳再取文本 */
+	private mobileSelTimer: number | null = null
 
 	private pending: TextSelection | null = null
 	private popup: HTMLElement | null = null
@@ -113,8 +121,8 @@ export class TextView extends ItemView {
 	private appearPanelEl!: HTMLElement
 	private mobileToolbarHandle: HTMLElement | null = null
 	private sidebarEl!: HTMLElement
+	private chrome!: ReaderSidebar
 	private annListEl!: HTMLElement
-	private annCountEl!: HTMLElement
 	private searchInput!: HTMLInputElement
 	// 全文搜索（正文，不是批注）
 	private fullTextSearchEl: HTMLDetailsElement | null = null
@@ -126,9 +134,6 @@ export class TextView extends ItemView {
 	private fullTextLowerCache: string | null = null
 	/** 当前定位到的正文命中区间；翻页后消失，重新搜索会替换 */
 	private findHit: { start: number; end: number } | null = null
-	private filterDotEls = new Map<string, HTMLElement>()
-	private clearBtnEl!: HTMLButtonElement
-	private sortBtnEl!: HTMLButtonElement
 	private selectBarEl!: HTMLElement
 	private selectCountEl!: HTMLElement
 	private annItemEls = new Map<string, HTMLElement>()
@@ -149,6 +154,10 @@ export class TextView extends ItemView {
 	private alignToColumnTop = false
 	/** 首次渲染/定位过程中，忽略 ResizeObserver 的重排请求 */
 	private rendering = false
+	/** 手机短按高亮的 pointerdown 起点（Android tap 不一定派发 click） */
+	private textTap: { x: number; y: number; at: number } | null = null
+	/** pointerup 已经弹过菜单时，抑制随后补发的 click，避免菜单闪两次 */
+	private textClickGuard = 0
 	private layoutRetry = 0
 	private resizeObserver: ResizeObserver | null = null
 	private relayoutTimer: number | null = null
@@ -176,6 +185,12 @@ export class TextView extends ItemView {
 
 	get ready(): boolean {
 		return !!this.data
+	}
+
+	get kind(): ReaderKind { return 'txt' }
+
+	get caps(): ReaderCaps {
+		return { text: true, appearance: true, zoom: false, encoding: true, imageOnly: false }
 	}
 
 	snapshot(): BookData | null {
@@ -229,6 +244,10 @@ export class TextView extends ItemView {
 			window.clearTimeout(this.relayoutTimer)
 			this.relayoutTimer = null
 		}
+		if (this.mobileSelTimer != null) {
+			window.clearTimeout(this.mobileSelTimer)
+			this.mobileSelTimer = null
+		}
 		this.contentEl.empty()
 	}
 
@@ -249,6 +268,20 @@ export class TextView extends ItemView {
 				// 点击处理会把它当普通点按，顺手把刚选好的文字清掉（表现为选完自己消失）。
 				event.stopPropagation()
 				return
+			}
+			if (this.plugin.settings.mobileTapZones) {
+				const rect = this.scrollEl.getBoundingClientRect()
+				if (rect.height > 0) {
+					const y = (event.clientY - rect.top) / rect.height
+					if (y < 0.25) {
+						this.prevPage()
+						return
+					}
+					if (y > 0.75) {
+						this.nextPage()
+						return
+					}
+				}
 			}
 			this.#setMobileBarOpen(true)
 		})
@@ -296,16 +329,23 @@ export class TextView extends ItemView {
 		const actions = createReaderActions(toolbar, {
 			onColor: key => void this.#createHighlight(key),
 			onComment: () => void this.#commentOnSelection(),
+			onSelectionAi: anchor => this.openSelectionAiMenu(anchor),
 			onAppearance: () => this.#toggleAppearancePanel(),
 			onAsk: () => new BookAskModal(this.app, this.plugin, this).open(),
+			onGuide: () => new GuideModal(this.app, this.plugin, this).open(),
 			onNote: () => void this.plugin.generateNoteFor(this),
 			onBookmark: () => this.#toggleBookmark(),
 			onSidebar: () => this.sidebarEl.classList.toggle('grove-hidden'),
 		}, {
 			text: true,
+			selectionAi: this.plugin.isMobile,
 			appearance: true,
 			bookmark: true,
 			sidebar: true,
+			style: this.plugin.settings.toolbarStyle,
+			defaultColor: this.plugin.settings.defaultHighlightColor,
+			hidden: this.plugin.settings.hiddenToolbarActions,
+			order: this.plugin.settings.toolbarOrder,
 		})
 		this.colorMenuClose = actions.colorMenuClose
 		this.bookmarkBtnEl = actions.bookmarkBtn
@@ -385,7 +425,51 @@ export class TextView extends ItemView {
 			window.setTimeout(() => this.#captureSelection(), 10),
 		)
 		this.registerDomEvent(this.scrollEl, 'keyup', () => this.#captureSelection())
+		// 手机长按选词时 Android WebView 只弹系统菜单，不派发 mouseup；
+		// 用 selectionchange 兜底（选区被工具栏收起时不清 pending）。
+		if (this.plugin.isMobile) {
+			this.registerDomEvent(document, 'selectionchange', () => {
+				if (this.mobileSelTimer !== null) window.clearTimeout(this.mobileSelTimer)
+				this.mobileSelTimer = window.setTimeout(() => {
+					this.mobileSelTimer = null
+					const sel = window.getSelection()
+					if (!sel || sel.isCollapsed || sel.rangeCount === 0) return
+					const range = sel.getRangeAt(0)
+					if (!this.textEl.contains(range.commonAncestorContainer)) return
+					this.#captureSelection()
+				}, 200)
+			})
+		}
 		this.registerDomEvent(this.textEl, 'click', (e: MouseEvent) => this.#onTextClick(e))
+		// 手机：Android WebView 的 tap 可能被选择/光标处理吃掉，不派发 click；
+		// 补 pointerdown/pointerup 短按识别，点已有高亮时同样弹批注菜单。
+		if (this.plugin.isMobile) {
+			this.registerDomEvent(this.textEl, 'pointerdown', (ev: PointerEvent) => {
+				this.textTap = { x: ev.clientX, y: ev.clientY, at: Date.now() }
+			}, { capture: true })
+			this.registerDomEvent(this.textEl, 'pointerup', (ev: PointerEvent) => {
+				const start = this.textTap
+				this.textTap = null
+				if (!start) return
+				if (Date.now() - start.at > 650) return
+				if (Math.abs(ev.clientX - start.x) > 12 || Math.abs(ev.clientY - start.y) > 12) return
+				const target = ev.target instanceof Element ? ev.target : null
+				// Android 触摸事件的 target 有时被 Obsidian 的 mobile-tap 换成正文容器，
+				// 用坐标反查一次真实元素
+				const hit = (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null) ?? target
+				const mark = hit?.closest('mark.grove-txt-mark') as HTMLElement | null
+				if (!mark) return
+				if (window.getSelection()?.toString()) return
+				const a = mark.dataset.annId ? this.data?.annotations.find(x => x.id === mark.dataset.annId) : null
+				if (!a) return
+				this.textClickGuard = Date.now() + 500
+				// Obsidian 移动端会在抬指后补一次内部 tap 处理，立刻弹菜单会被它当成
+				// 「点空白」当场关掉；延后一点，让这次收尾动作先结束。
+				window.setTimeout(() => {
+					if (this.textEl?.isConnected) this.#showAnnotationMenu(a, ev)
+				}, 260)
+			}, { capture: true })
+		}
 
 		const pageBtns = this.readerEl.createDiv('grove-page-btns')
 		this.pageBtnsEl = pageBtns
@@ -421,94 +505,49 @@ export class TextView extends ItemView {
 	}
 
 	#buildSidebar(body: HTMLElement): void {
-		this.sidebarEl = body.createDiv('grove-sidebar grove-hidden')
-		const sideHead = this.sidebarEl.createDiv('grove-sidebar-head')
-		this.annCountEl = sideHead.createSpan('grove-ann-count')
-		this.annCountEl.setText('0 个批注')
-		const closeSidebar = sideHead.createEl('button', { cls: 'clickable-icon grove-sidebar-close', attr: { 'aria-label': '关闭批注栏', title: '关闭批注栏' } })
-		setIcon(closeSidebar, 'x')
-		closeSidebar.addEventListener('click', () => this.sidebarEl.classList.add('grove-hidden'))
-
-		// 书签区放在批注区之上：它是导航，不该被下面的搜索/筛选挡住
-		this.bookmarkSection = createBookmarkSection(this.sidebarEl, { onAdd: () => this.#toggleBookmark() })
-		this.citationSection = createCitationSection(this.sidebarEl)
-
-		// 正文全文搜索：与 EPUB 阅读器同一套 DOM/CSS，收起时不占空间
-		const fullTextSearch = this.sidebarEl.createEl('details', { cls: 'grove-fulltext-search' })
-		this.fullTextSearchEl = fullTextSearch as HTMLDetailsElement
-		fullTextSearch.createEl('summary', { text: '全文搜索' })
-		const fullTextSearchControls = fullTextSearch.createDiv('grove-fulltext-search-controls')
-		this.fullTextSearchInput = fullTextSearchControls.createEl('input', {
-			cls: 'grove-ann-search',
-			attr: { type: 'search', placeholder: '输入关键词，按 Enter 搜索本书…' },
+		const chrome = createReaderSidebar(body, {
+			startHidden: true,
+			colorFilter: true,
+			searchPlaceholder: '搜索批注（摘录 / 评论 / 章节）…',
+			sortLabels: { position: '排序：章节', recent: '排序：最近' },
+			hooks: {
+				onAddBookmark: () => this.#toggleBookmark(),
+				onSearch: q => {
+					this.sidebarQuery = q
+					this.#renderSidebar()
+				},
+				onColorFilter: key => {
+					this.sidebarColor = this.sidebarColor === key ? null : key
+					this.#renderSidebar()
+				},
+				onClearFilters: () => {
+					this.sidebarQuery = ''
+					this.sidebarColor = null
+					this.#renderSidebar()
+				},
+				onToggleSort: () => {
+					this.sortMode = this.sortMode === 'position' ? 'recent' : 'position'
+					this.#renderSidebar()
+				},
+				onToggleMultiSelect: () => this.#setSelectMode(!this.selectMode),
+				onDeleteSelected: () => this.#deleteSelected(),
+				onCancelSelect: () => this.#setSelectMode(false),
+				onRunFullTextSearch: () => this.#runFullTextSearch(),
+				onClearFullTextSearch: () => this.#clearFullTextSearch(),
+			},
 		})
-		this.fullTextSearchInput.addEventListener('keydown', e => {
-			if (e.key === 'Enter') {
-				e.preventDefault()
-				this.#runFullTextSearch()
-			} else if (e.key === 'Escape') {
-				this.#clearFullTextSearch()
-			}
-		})
-		const fullTextSearchMeta = fullTextSearch.createDiv('grove-fulltext-search-meta')
-		this.fullTextSearchStatus = fullTextSearchMeta.createSpan('grove-fulltext-search-status')
-		this.fullTextSearchStatus.setText('输入关键词后按 Enter 搜索全文')
-		const clearFullTextSearch = fullTextSearchMeta.createEl('button', {
-			cls: 'grove-manage-btn',
-			text: '清除',
-			attr: { 'aria-label': '清除全文搜索' },
-		})
-		clearFullTextSearch.addEventListener('click', () => this.#clearFullTextSearch())
-		this.fullTextSearchResults = fullTextSearch.createDiv('grove-fulltext-search-results')
-
-		const controls = this.sidebarEl.createDiv('grove-sidebar-controls')
-		this.searchInput = controls.createEl('input', {
-			cls: 'grove-ann-search',
-			attr: { type: 'search', placeholder: '搜索批注（摘录 / 评论 / 章节）…' },
-		})
-		this.searchInput.addEventListener('input', () => {
-			this.sidebarQuery = this.searchInput.value.trim()
-			this.#renderSidebar()
-		})
-		const filterRow = controls.createDiv('grove-ann-filters')
-		for (const c of HIGHLIGHT_COLORS) {
-			const dot = filterRow.createEl('button', {
-				cls: 'grove-filter-dot',
-				attr: { 'aria-label': `只看${c.name}色批注`, title: `只看${c.name}色` },
-			})
-			dot.style.backgroundColor = c.css
-			dot.addEventListener('click', () => {
-				this.sidebarColor = this.sidebarColor === c.key ? null : c.key
-				this.#renderSidebar()
-			})
-			this.filterDotEls.set(c.key, dot)
-		}
-		this.clearBtnEl = filterRow.createEl('button', { cls: 'grove-filter-clear grove-hidden', text: '清除筛选' })
-		this.clearBtnEl.addEventListener('click', () => {
-			this.sidebarQuery = ''
-			this.sidebarColor = null
-			this.searchInput.value = ''
-			this.#renderSidebar()
-		})
-		const manageRow = controls.createDiv('grove-ann-filters')
-		this.sortBtnEl = manageRow.createEl('button', { cls: 'grove-manage-btn', text: '排序：章节' })
-		this.sortBtnEl.addEventListener('click', () => {
-			this.sortMode = this.sortMode === 'position' ? 'recent' : 'position'
-			this.sortBtnEl.setText(this.sortMode === 'position' ? '排序：章节' : '排序：最近')
-			this.#renderSidebar()
-		})
-		const multiBtn = manageRow.createEl('button', { cls: 'grove-manage-btn', text: '多选' })
-		multiBtn.addEventListener('click', () => this.#setSelectMode(!this.selectMode))
-
-		this.selectBarEl = controls.createDiv('grove-select-bar grove-hidden')
-		this.selectCountEl = this.selectBarEl.createSpan('grove-select-count')
-		this.selectCountEl.setText('已选 0 条')
-		const delBtn = this.selectBarEl.createEl('button', { text: '删除所选', cls: 'grove-select-delete' })
-		delBtn.addEventListener('click', () => this.#deleteSelected())
-		const cancelBtn = this.selectBarEl.createEl('button', { text: '取消', cls: 'grove-select-cancel' })
-		cancelBtn.addEventListener('click', () => this.#setSelectMode(false))
-
-		this.annListEl = this.sidebarEl.createDiv('grove-ann-list')
+		this.chrome = chrome
+		this.sidebarEl = chrome.el
+		this.bookmarkSection = chrome.bookmark
+		this.citationSection = chrome.citation
+		this.fullTextSearchEl = chrome.fullTextSearchEl
+		this.fullTextSearchInput = chrome.fullTextInput
+		this.fullTextSearchStatus = chrome.fullTextStatus
+		this.fullTextSearchResults = chrome.fullTextResults
+		this.searchInput = chrome.searchInput
+		this.selectBarEl = chrome.selectBarEl
+		this.selectCountEl = chrome.selectCountEl
+		this.annListEl = chrome.listEl
 	}
 
 	#showEmpty(message: string): void {
@@ -1291,7 +1330,7 @@ export class TextView extends ItemView {
 	}
 
 	/** AI 全书问答：按识别出的章节切正文；没有章节就整本当一节 */
-	extractAiSections(): SourceSection[] {
+	async extractAiSections(): Promise<SourceSection[]> {
 		const text = this.#fullText()
 		if (!text) return []
 		const marks = this.chapters.filter(c => c.offset >= 0 && c.offset < text.length)
@@ -1410,6 +1449,8 @@ export class TextView extends ItemView {
 
 	/** 批注被外部改动（从笔记回写）后刷新侧栏与当前页高亮 */
 	refreshAnnotations(): void {
+		// 外部同步后换成 store 合并后的对象，避免旧对象把别人的新增写没
+		if (this.bookPath) this.data = this.plugin.store.load(this.bookPath)
 		this.#renderSidebar()
 		if (!this.bytes) return
 		// 正在选字时先别重绘：重绘会重建正文 DOM，把用户选到一半的文字冲掉。
@@ -1593,7 +1634,9 @@ export class TextView extends ItemView {
 		const cfi = this.#currentCfi()
 		const on = !!cfi && findBookmarkIndex(this.data?.bookmarks ?? [], cfi) >= 0
 		this.bookmarkBtnEl?.toggleClass('is-active', on)
-		if (this.bookmarkBtnEl) setIcon(this.bookmarkBtnEl, on ? 'bookmark-check' : 'bookmark')
+		if (!this.bookmarkBtnEl) return
+		if (this.plugin.settings.toolbarStyle === 'text') this.bookmarkBtnEl.setText('书签')
+		else setIcon(this.bookmarkBtnEl, on ? 'bookmark-check' : 'bookmark')
 	}
 
 	#renderBookmarks(): void {
@@ -1707,12 +1750,55 @@ export class TextView extends ItemView {
 			this.#clearPending()
 		})
 
-		const explainBtn = popup.createEl('button', { text: '解释' })
-		explainBtn.title = '用 AI 解释这段文字'
-		explainBtn.style.cssText = buttonCss
-		explainBtn.addEventListener('click', e => {
+		// 摘录：复制回跳双链 / 存为摘录 / 存为名词（落在独立的摘录文件里）
+		const saveBtn = popup.createEl('button', { text: '摘录' })
+		saveBtn.title = '复制回跳链接 / 存为摘录 / 存为名词'
+		saveBtn.style.cssText = buttonCss
+		saveBtn.addEventListener('click', e => {
 			e.preventDefault()
-			void this.#explainSelection()
+			const pending = this.pending
+			if (!pending) return
+			const chapter = this.#chapterAt(pending.start)
+			const link = wikilinkFor(this.bookPath, {
+				cfi: `txt:${pending.start}-${pending.end}`,
+				text: snippetOf(pending.text),
+				chapter,
+			}, truncate(pending.text.replace(/\s+/g, ' ').trim(), 18))
+			const save = (mode: ExcerptMode): void => {
+				void appendExcerpt(this.app, this.plugin.settings.notesFolder ?? '', {
+					bookTitle: this.bookTitle,
+					chapter,
+					text: pending.text,
+					link,
+					mode,
+				}).then(path => {
+					new Notice(`Grove Reader：已存到 ${path}`)
+					this.#clearPending()
+				}).catch(err => {
+					new Notice(`Grove Reader：保存失败（${err instanceof Error ? err.message : String(err)}）`)
+				})
+			}
+			const rect = saveBtn.getBoundingClientRect()
+			const menu = new Menu()
+			menu.addItem(item => item.setTitle('复制回跳双链').setIcon('link').onClick(() => {
+				void navigator.clipboard.writeText(link).then(() => new Notice('Grove Reader：已复制双链'))
+			}))
+			menu.addItem(item => item.setTitle('存为摘录').setIcon('quote').onClick(() => save('quote')))
+			menu.addItem(item => item.setTitle('存为名词').setIcon('list').onClick(() => save('term')))
+			menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 })
+		})
+
+		const aiBtn = popup.createEl('button', { text: 'AI' })
+		aiBtn.title = 'AI 解释 / 翻译 / 摘要'
+		aiBtn.style.cssText = buttonCss
+		aiBtn.addEventListener('click', e => {
+			e.preventDefault()
+			const rect = aiBtn.getBoundingClientRect()
+			const menu = new Menu()
+			menu.addItem(item => item.setTitle('解释').setIcon('message-circle-question').onClick(() => void this.#runAiTask('explain')))
+			menu.addItem(item => item.setTitle('翻译').setIcon('languages').onClick(() => void this.#runAiTask('translate')))
+			menu.addItem(item => item.setTitle('摘要').setIcon('align-left').onClick(() => void this.#runAiTask('summarize')))
+			menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 })
 		})
 
 		document.body.appendChild(popup)
@@ -1730,8 +1816,22 @@ export class TextView extends ItemView {
 		popup.style.top = `${Math.round(top)}px`
 	}
 
-	/** 划词解释：与 EPUB 共用 aiPanel，未配置 AI 时由浮层给出明确提示 */
-	async #explainSelection(): Promise<void> {
+	/** 手机工具栏的「AI」：用当前待处理选区弹 解释 / 翻译 / 摘要 菜单 */
+	openSelectionAiMenu(anchor: HTMLElement): void {
+		if (!this.pending) {
+			new Notice('Grove Reader：先划选一段文字')
+			return
+		}
+		const rect = anchor.getBoundingClientRect()
+		const menu = new Menu()
+		menu.addItem(item => item.setTitle('解释').setIcon('message-circle-question').onClick(() => void this.#runAiTask('explain')))
+		menu.addItem(item => item.setTitle('翻译').setIcon('languages').onClick(() => void this.#runAiTask('translate')))
+		menu.addItem(item => item.setTitle('摘要').setIcon('align-left').onClick(() => void this.#runAiTask('summarize')))
+		menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 })
+	}
+
+	/** 划词 AI：解释 / 翻译 / 摘要，与 EPUB 共用 aiPanel */
+	async #runAiTask(task: 'explain' | 'translate' | 'summarize'): Promise<void> {
 		const pending = this.pending
 		if (!pending) return
 		const text = pending.text
@@ -1743,7 +1843,7 @@ export class TextView extends ItemView {
 			model: this.plugin.settings.aiModel ?? '',
 			prompt: this.plugin.settings.aiPrompt ?? '',
 		}
-		await this.aiPanel.explain(cfg, text, bar)
+		await this.aiPanel.run(cfg, text, task, bar)
 	}
 
 	#hidePopup(): void {
@@ -1765,6 +1865,8 @@ export class TextView extends ItemView {
 	}
 
 	#onTextClick(e: MouseEvent): void {
+		// pointerup 已经弹过菜单（手机短按路径），别让补发的 click 再弹一次
+		if (Date.now() < this.textClickGuard) return
 		const target = e.target as HTMLElement | null
 		const mark = target?.closest('mark.grove-txt-mark') as HTMLElement | null
 		if (!mark) return
@@ -1969,9 +2071,8 @@ export class TextView extends ItemView {
 			return `${a.text}\n${a.note ?? ''}\n${a.chapter ?? ''}`.toLowerCase().includes(q)
 		})
 
-		this.annCountEl.setText(filtering ? `${filtered.length} / ${all.length} 个批注` : `${all.length} 个批注`)
-		this.clearBtnEl.toggleClass('grove-hidden', !filtering)
-		for (const [key, dot] of this.filterDotEls) dot.toggleClass('is-active', this.sidebarColor === key)
+		this.chrome.syncFilters(this.sidebarQuery, this.sidebarColor, all.length, filtered.length)
+		this.chrome.syncSort(this.sortMode)
 
 		this.annListEl.empty()
 		this.annItemEls.clear()
@@ -2045,7 +2146,7 @@ export class TextView extends ItemView {
 		head.createSpan('grove-ann-dot').style.backgroundColor = colorCss(a.color)
 		head.createSpan('grove-ann-chapter').setText(a.chapter || '')
 		const text = item.createDiv('grove-ann-text')
-		text.setText(truncate(a.text.trim(), 160))
+		setHighlightedText(text, truncate(a.text.trim(), 160), this.sidebarQuery)
 		text.addEventListener('click', () => this.jumpTo(a.cfi))
 		if (a.note) item.createDiv('grove-ann-note').setText(truncate(a.note.trim(), 120))
 		const actions = item.createDiv('grove-ann-actions')

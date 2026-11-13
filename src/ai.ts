@@ -1,6 +1,10 @@
 import { requestUrl } from 'obsidian'
 import type { PortraitChunk } from './portrait'
 import { buildAskPrompt } from './portrait'
+import { buildMultiBookPrompt, type MultiBookMaterial } from './multiBookPrompt'
+
+export { buildMultiBookPrompt } from './multiBookPrompt'
+export type { MultiBookMaterial } from './multiBookPrompt'
 
 /** 划词解释 / 全书问答都走 OpenAI 兼容的 /chat/completions，换服务只要改地址和模型名 */
 export interface AiConfig {
@@ -77,12 +81,27 @@ export async function chatCompletion(
 	return answer
 }
 
+/** 划词 AI 动作：解释 / 翻译 / 摘要 */
+export type SelectionAiTask = 'explain' | 'translate' | 'summarize'
+
 /** 调用 AI 解释一段文字 */
 export async function explainSelection(cfg: AiConfig, text: string): Promise<string> {
 	return chatCompletion(cfg, [
 		{ role: 'system', content: (cfg.prompt || '').trim() || DEFAULT_PROMPT },
 		{ role: 'user', content: `请解释这段文字：\n\n${text.trim()}` },
 	], { temperature: 0.3, maxTokens: 700 })
+}
+
+/** 划词翻译 / 摘要；解释复用上面的自定义提示词 */
+export async function transformSelection(cfg: AiConfig, text: string, task: SelectionAiTask): Promise<string> {
+	if (task === 'explain') return explainSelection(cfg, text)
+	const system = task === 'translate'
+		? '你是一位翻译助手。把用户选中的文字翻译成简体中文；如果原文已经是中文，翻译成自然、准确的英文。只输出译文，不要解释、不要寒暄。'
+		: '你是一位阅读助手。用 3-5 句话概括用户选中文字的核心意思，保留关键人物、概念、结论和数字；不要复述原文、不要评价、不要寒暄。'
+	return chatCompletion(cfg, [
+		{ role: 'system', content: system },
+		{ role: 'user', content: text.trim() },
+	], { temperature: 0.2, maxTokens: 800 })
 }
 
 /** 为全书索引概括一段正文 */
@@ -107,18 +126,153 @@ export async function summarizePortraitChunk(
 	return answer.replace(/\s+/g, ' ').trim()
 }
 
-/** 全书问答：把命中的要点与摘录交给 AI */
+/** 为按章导读概括一章正文 */
+export async function summarizeGuideSection(
+	cfg: AiConfig,
+	bookTitle: string,
+	chapter: string,
+	text: string,
+): Promise<string> {
+	const answer = await chatCompletion(cfg, [
+		{
+			role: 'system',
+			content:
+				'你在为一本书写分章导读。请用 2-4 句话说明这一章讲了什么：' +
+				'关键人物、事件、概念与结论，最后可以给一句阅读提示。' +
+				'只输出导读，不要复述原文、不要评价、不要寒暄。',
+		},
+		{
+			role: 'user',
+			content: `书名：《${bookTitle || '未命名'}》\n章节：${chapter || '正文'}\n\n${text}`,
+		},
+	], { temperature: 0.3, maxTokens: 400 })
+	return answer.replace(/\s+/g, ' ').trim()
+}
+
+/** 向量嵌入：OpenAI 兼容 /embeddings，分批请求；维度参数被服务拒绝时自动退回默认维度 */
+export async function embedTexts(
+	cfg: AiConfig,
+	texts: string[],
+	options: { model?: string; dimensions?: number; batchSize?: number } = {},
+): Promise<number[][]> {
+	if (!texts.length) return []
+	const base = cfg.baseUrl.trim().replace(/\/+$/, '')
+	const url = /\/embeddings$/.test(base) ? base : `${base}/embeddings`
+	const model = (options.model ?? '').trim() || 'embedding-3'
+	const batchSize = Math.max(1, Math.min(32, options.batchSize ?? 16))
+	const request = async (batch: string[], withDims: boolean): Promise<{ vectors?: number[][]; error?: string }> => {
+		const body: Record<string, unknown> = { model, input: batch }
+		if (withDims && options.dimensions && options.dimensions > 0) body.dimensions = options.dimensions
+		const res = await requestUrl({
+			url,
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				Authorization: `Bearer ${cfg.apiKey.trim()}`,
+			},
+			body: JSON.stringify(body),
+			throw: false,
+		})
+		if (res.status >= 400) {
+			let detail = ''
+			try {
+				const j = res.json as { error?: { message?: string }; message?: string }
+				detail = j?.error?.message || j?.message || ''
+			} catch {
+				detail = (res.text || '').slice(0, 160)
+			}
+			return { error: `${res.status}${detail ? ` · ${detail}` : ''}` }
+		}
+		const json = res.json as { data?: Array<{ embedding?: number[] }> }
+		const data = json?.data ?? []
+		if (data.length !== batch.length) return { error: '嵌入返回条数与请求不一致' }
+		return { vectors: data.map(item => item.embedding ?? []) }
+	}
+	const out: number[][] = []
+	for (let i = 0; i < texts.length; i += batchSize) {
+		const batch = texts
+			.slice(i, i + batchSize)
+			.map(text => String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 2000))
+		let result = await request(batch, true)
+		// 有些兼容服务不认 dimensions：400 时退回默认维度
+		if (result.error && options.dimensions && /\b400\b|dimension/i.test(result.error)) {
+			result = await request(batch, false)
+		}
+		if (result.error || !result.vectors) throw new Error(result.error || '嵌入失败')
+		for (const vector of result.vectors) {
+			if (!vector.length) throw new Error('嵌入返回空向量')
+			out.push(vector)
+		}
+	}
+	return out
+}
+
+/** 多书一起问：材料里带书名，要求跨书比较时注明出处 */
+export async function answerMultiBookQuestion(
+	cfg: AiConfig,
+	question: string,
+	materials: MultiBookMaterial[],
+	history: AskTurn[] = [],
+): Promise<string> {
+	const prompt = buildMultiBookPrompt(question, materials)
+	const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+		{
+			role: 'system',
+			content: '你是一位严谨的中文阅读助手。只根据用户提供的多本书材料回答，材料不足时明确说明，不要编造。',
+		},
+	]
+	for (const turn of history.slice(-HISTORY_TURNS)) {
+		const text = turn.text.trim()
+		if (!text) continue
+		messages.push({
+			role: turn.role,
+			content: turn.role === 'assistant' && text.length > HISTORY_ANSWER_CHARS
+				? `${text.slice(0, HISTORY_ANSWER_CHARS)}…`
+				: text,
+		})
+	}
+	messages.push({ role: 'user', content: prompt })
+	return chatCompletion(cfg, messages, { temperature: 0.3, maxTokens: 1000 })
+}
+
+/** 多轮追问时保留的一轮对话 */
+export interface AskTurn {
+	role: 'user' | 'assistant'
+	text: string
+}
+
+const HISTORY_TURNS = 6
+const HISTORY_ANSWER_CHARS = 900
+
+/**
+ * 全书问答：把命中的要点与摘录交给 AI。
+ * history 传最近的问答轮次，追问时可以接着说「第二点再展开」这类话；
+ * 每轮仍然按当前问题重新检索材料，避免旧材料串味。
+ */
 export async function answerBookQuestion(
 	cfg: AiConfig,
 	bookTitle: string,
 	question: string,
 	chunks: PortraitChunk[],
+	history: AskTurn[] = [],
 ): Promise<string> {
-	return chatCompletion(cfg, [
+	const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
 		{
 			role: 'system',
-			content: '你是一位严谨的中文阅读助手。只根据用户提供的书内材料回答，材料不足时明确说明，不要编造。',
+			content: '你是一位严谨的中文阅读助手。只根据用户提供的书内材料回答，材料不足时明确说明，不要编造。'
+				+ '用户可能在前面的问答基础上继续追问，请结合上下文回答。',
 		},
-		{ role: 'user', content: buildAskPrompt(bookTitle, question, chunks) },
-	], { temperature: 0.3, maxTokens: 900 })
+	]
+	for (const turn of history.slice(-HISTORY_TURNS)) {
+		const text = turn.text.trim()
+		if (!text) continue
+		messages.push({
+			role: turn.role,
+			content: turn.role === 'assistant' && text.length > HISTORY_ANSWER_CHARS
+				? `${text.slice(0, HISTORY_ANSWER_CHARS)}…`
+				: text,
+		})
+	}
+	messages.push({ role: 'user', content: buildAskPrompt(bookTitle, question, chunks) })
+	return chatCompletion(cfg, messages, { temperature: 0.3, maxTokens: 900 })
 }

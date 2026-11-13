@@ -1,12 +1,13 @@
-import { ItemView, Menu, Notice, Platform, WorkspaceLeaf, requestUrl, setIcon } from 'obsidian'
+import { ItemView, Menu, Notice, Platform, WorkspaceLeaf, normalizePath, requestUrl, setIcon } from 'obsidian'
 import type { TAbstractFile } from 'obsidian'
 import { TFile } from 'obsidian'
 import { makeBook } from '../lib/foliate-js/view.js'
 import type GroveReaderPlugin from './main'
-import { FORMAT_LABELS, ShelfBookInfo, isReaderExt, isShelfExt } from './types'
+import { FORMAT_LABELS, LIBRARY_ROOT, READING_STATUS_LABELS, READING_STATUS_ORDER, SHELF_EXTRA_EXTS, SUPPORTED_BOOK_EXTS, ShelfBookInfo, isReaderExt, isShelfExt, type ReadingStatus } from './types'
 import { basenameOf, cleanBookTitle, duplicateKeyOf, formatAuthor, formatBytes, formatDuration, formatLanguageMap, isAbsolutePath, relativeTime, stripNumericTitlePrefix, stripTitleAuthor, truncate } from './util'
 import { PlatformIO, joinPath, readJsonFile, writeJsonFile } from './platformIO'
 import { BookInfoModal, ConfirmModal, CoverUrlModal, DeleteBookModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
+import { BookMetaModal } from './bookMetaModal'
 import type { BookInfoValues } from './modals'
 import type { BookList } from './lists'
 import { computeShelfWindow, estimateRowHeight, spacerHeight } from './shelfWindow'
@@ -85,6 +86,8 @@ export interface ShelfEntry {
 	title?: string
 	author?: string
 	publisher?: string
+	category?: string
+	intro?: string
 	/** 封面图片文件名（位于 data/covers/ 下） */
 	cover?: string
 	/** 用户手动更换过的封面：重新解析时保留 */
@@ -393,6 +396,8 @@ export class BookshelfView extends ItemView {
 	private listsEl!: HTMLElement
 	/** 'all' = 全部，'none' = 未分类，其余为书单 id */
 	private listFilter = 'all'
+	/** 手动阅读状态筛选（不持久化，和书单筛选一样属于本次会话） */
+	private statusFilter: ReadingStatus | 'all' = 'all'
 	private toolsEl!: HTMLElement
 	private emptyEl!: HTMLElement
 	private continueEl!: HTMLElement
@@ -529,6 +534,20 @@ export class BookshelfView extends ItemView {
 			void this.refresh()
 		})
 
+		// 手动阅读状态筛选：只筛已标记的书，没标记的归到「全部」
+		const statusWrap = this.toolsEl.createDiv('grove-shelf-status-filter')
+		statusWrap.createSpan('grove-shelf-sort-label').setText('状态')
+		const statusSelect = statusWrap.createEl('select', { cls: 'dropdown' })
+		statusSelect.createEl('option', { value: 'all', text: '全部' })
+		for (const key of READING_STATUS_ORDER) {
+			statusSelect.createEl('option', { value: key, text: READING_STATUS_LABELS[key] })
+		}
+		statusSelect.value = this.statusFilter
+		statusSelect.addEventListener('change', () => {
+			this.statusFilter = statusSelect.value as ReadingStatus | 'all'
+			this.#applySearch()
+		})
+
 		// 书架右上角三个动作：添加文件夹 / 重新扫描 / 阅读统计
 		const actions = this.listsRowEl.createDiv('grove-shelf-tools-actions')
 		const action = (icon: string, label: string, onClick: () => void): void => {
@@ -537,6 +556,7 @@ export class BookshelfView extends ItemView {
 			btn.addEventListener('click', onClick)
 		}
 		action('folder-plus', '添加扫描文件夹', () => void this.#addFolder())
+		action('upload', '导入书籍…', () => this.#importBooks())
 		action('refresh-cw', '重新扫描', () => void this.refresh({ rescan: true }))
 		action('bar-chart-2', '阅读统计', () => new ReadingStatsModal(this.app, this.plugin).open())
 	}
@@ -775,7 +795,8 @@ export class BookshelfView extends ItemView {
 		if (!q) return true
 		const entry = this.plugin.shelfCache.get(path)
 		const hit = (s?: string): boolean => !!s && s.toLowerCase().includes(q)
-		return hit(entry?.title) || hit(entry?.author) || hit(entry?.publisher) || hit(basenameOf(path))
+		return hit(entry?.title) || hit(entry?.author) || hit(entry?.publisher)
+			|| hit(entry?.category) || hit(entry?.intro) || hit(basenameOf(path))
 	}
 
 	/**
@@ -790,10 +811,15 @@ export class BookshelfView extends ItemView {
 			this.lastSearch = q
 			this.contentEl.scrollTop = 0
 		}
-		this.filteredPaths = q ? this.allPaths.filter(path => this.#matches(path, q)) : this.allPaths.slice()
+		const byStatus = this.statusFilter === 'all'
+			? this.allPaths
+			: this.allPaths.filter(path => this.statsMap.get(path)?.readingStatus === this.statusFilter)
+		this.filteredPaths = q ? byStatus.filter(path => this.#matches(path, q)) : byStatus.slice()
 		this.#renderWindow(true)
 		if (this.filteredPaths.length === 0 && this.allPaths.length > 0) {
-			this.#showEmpty('没有匹配的书。试试只输书名或作者里的关键词。')
+			this.#showEmpty(this.statusFilter === 'all'
+				? '没有匹配的书。试试只输书名或作者里的关键词。'
+				: `没有标记为「${READING_STATUS_LABELS[this.statusFilter]}」的书。右键书籍卡片可以设置阅读状态。`)
 		} else {
 			this.emptyEl.addClass('grove-hidden')
 		}
@@ -1007,10 +1033,14 @@ export class BookshelfView extends ItemView {
 	#editInfo(path: string): void {
 		const cache = this.plugin.shelfCache
 		const entry = cache.get(path) ?? {}
+		const data = this.plugin.store.load(path)
 		const current: BookInfoValues = {
 			title: entry.title ?? cleanBookTitle(basenameOf(path)),
-			author: entry.author ?? '',
+			author: entry.author ?? data.author ?? '',
 			publisher: entry.publisher ?? '',
+			category: entry.category ?? data.category ?? '',
+			intro: entry.intro ?? data.intro ?? '',
+			aiMeta: data.aiMeta,
 		}
 		new BookInfoModal(this.app, current, values => {
 			cache.set(path, {
@@ -1018,8 +1048,22 @@ export class BookshelfView extends ItemView {
 				title: values.title || undefined,
 				author: values.author || undefined,
 				publisher: values.publisher,
+				category: values.category || undefined,
+				intro: values.intro || undefined,
 				manualMeta: true,
 			})
+			// 手动改过的字段不再算 AI 补全
+			const next = this.plugin.store.load(path)
+			const aiMeta = { ...(next.aiMeta ?? {}) }
+			if (values.author !== (next.author ?? '')) delete aiMeta.author
+			if (values.category !== (next.category ?? '')) delete aiMeta.category
+			if (values.intro !== (next.intro ?? '')) delete aiMeta.intro
+			next.category = values.category || undefined
+			next.intro = values.intro || undefined
+			if (values.author) next.author = values.author
+			if (Object.keys(aiMeta).length) next.aiMeta = aiMeta
+			else delete next.aiMeta
+			this.plugin.store.save(next)
 			// 同步进批注数据：笔记标题/阅读界面标题取的是 data.title
 			this.plugin.syncBookMeta(
 				path,
@@ -1028,6 +1072,11 @@ export class BookshelfView extends ItemView {
 			)
 			void this.refresh()
 		}).open()
+	}
+
+	/** AI 补全作者 / 分类 / 简介：只填空字段，预览确认后写回 */
+	#aiMeta(path: string): void {
+		new BookMetaModal(this.app, this.plugin, path, () => void this.refresh()).open()
 	}
 
 	#pickList(path: string): void {
@@ -1044,6 +1093,20 @@ export class BookshelfView extends ItemView {
 			lists.setMember(path, picked ? picked.id : null)
 			void this.refresh()
 		}).open()
+	}
+
+	/** 手动标记阅读状态（null = 清除，回到按进度自动判断） */
+	#setReadingStatus(path: string, status: ReadingStatus | null): void {
+		const data = this.plugin.store.load(path)
+		if (status) data.readingStatus = status
+		else delete data.readingStatus
+		this.plugin.store.save(data)
+		// 已生成的笔记里 grove_status 跟着变
+		this.plugin.refreshNoteForBook(path)
+		new Notice(status
+			? `Grove Reader：已标记为「${READING_STATUS_LABELS[status]}」`
+			: 'Grove Reader：已清除手动阅读状态')
+		void this.refresh()
 	}
 
 	async #changeCoverByUrl(path: string, card: HTMLElement): Promise<void> {
@@ -1189,6 +1252,8 @@ export class BookshelfView extends ItemView {
 		// 悬浮/键盘聚焦：只保留一个自定义提示，整合书名、文件名、大小与阅读信息
 		const detailLines = [title]
 		if (author) detailLines.push(author)
+		if (entry?.category) detailLines.push(`分类：${entry.category}`)
+		if (entry?.intro) detailLines.push(truncate(entry.intro, 80))
 		detailLines.push(`文件：${basenameOf(path)}`)
 		if (size != null) detailLines.push(`大小：${formatBytes(size)}`)
 		if (info?.seconds) detailLines.push(`累计阅读：${formatDuration(info.seconds)}`)
@@ -1258,6 +1323,11 @@ export class BookshelfView extends ItemView {
 			badge.setText('疑似重复')
 			badge.title = `文件名与其他 ${dupes.length} 本书高度相似：\n${dupes.map(d => basenameOf(d)).join('\n')}`
 		}
+		if (info?.readingStatus) {
+			const status = meta.createSpan(`grove-shelf-badge grove-shelf-status grove-status-${info.readingStatus}`)
+			status.setText(READING_STATUS_LABELS[info.readingStatus])
+			status.title = '手动标记的阅读状态（右键卡片可修改）'
+		}
 
 		// 拖拽到书单标签上即可归类
 		card.draggable = true
@@ -1287,6 +1357,21 @@ export class BookshelfView extends ItemView {
 				const name = plugin.lists.lists().find(l => l.id === lid)?.name
 				item.setTitle(name ? `移入书单（当前：${name}）` : '移入书单…').setIcon('list').onClick(() => this.#pickList(path))
 			})
+			// 阅读状态：手动标记后覆盖按进度自动判断的状态
+			const currentStatus = plugin.store.load(path).readingStatus
+			for (const key of READING_STATUS_ORDER) {
+				menu.addItem(item => item
+					.setTitle(`标记为${READING_STATUS_LABELS[key]}`)
+					.setIcon(currentStatus === key ? 'check' : 'circle')
+					.onClick(() => this.#setReadingStatus(path, key)))
+			}
+			if (currentStatus) {
+				menu.addItem(item => item
+					.setTitle('清除阅读状态')
+					.setIcon('x')
+					.onClick(() => this.#setReadingStatus(path, null)))
+			}
+			menu.addItem(item => item.setTitle('AI 补全书籍信息…').setIcon('sparkles').onClick(() => this.#aiMeta(path)))
 			menu.addItem(item => item.setTitle('重新解析封面与信息').setIcon('refresh-cw').onClick(() => {
 				const entry = this.plugin.shelfCache.get(path)
 				const run = (): void => {
@@ -1592,5 +1677,62 @@ export class BookshelfView extends ItemView {
 		if (i >= 0) this.plugin.settings.scanFolders.splice(i, 1)
 		await this.plugin.saveSettings()
 		await this.refresh({ rescan: true })
+	}
+
+	/**
+	 * 导入书籍：选中的文件复制进库内第一个扫描文件夹（没有就用 Grove Reader/书籍），
+	 * 同名文件自动加 (2)(3) 后缀，原文件不动。
+	 */
+	#importBooks(): void {
+		const input = createEl('input', { type: 'file' })
+		input.accept = [...SUPPORTED_BOOK_EXTS, ...SHELF_EXTRA_EXTS].map(ext => `.${ext}`).join(',')
+		input.multiple = true
+		input.addEventListener('change', () => {
+			void (async () => {
+				const files = Array.from(input.files ?? [])
+				if (!files.length) return
+				const { plugin } = this
+				const folders = plugin.settings.scanFolders ?? []
+				const target = folders.find(f => !isAbsolutePath(f)) ?? `${LIBRARY_ROOT}/书籍`
+				if (!folders.length) {
+					plugin.settings.scanFolders = [target]
+					await plugin.saveSettings()
+				}
+				try {
+					if (!(await this.app.vault.adapter.exists(target))) await this.app.vault.createFolder(target)
+				} catch {
+					// 目录已存在或创建失败，写文件时会再报错
+				}
+				let done = 0
+				const failed: string[] = []
+				for (const file of files) {
+					const ext = (file.name.split('.').pop() ?? '').toLowerCase()
+					if (!isShelfExt(ext)) {
+						failed.push(file.name)
+						continue
+					}
+					const dot = file.name.lastIndexOf('.')
+					const stem = dot > 0 ? file.name.slice(0, dot) : file.name
+					const suffix = dot > 0 ? file.name.slice(dot) : ''
+					let path = normalizePath(`${target}/${file.name}`)
+					let i = 2
+					while (this.app.vault.getAbstractFileByPath(path) || await this.app.vault.adapter.exists(path)) {
+						path = normalizePath(`${target}/${stem} (${i})${suffix}`)
+						i++
+					}
+					try {
+						await this.app.vault.createBinary(path, await file.arrayBuffer())
+						done++
+					} catch (e) {
+						console.error('[Grove Reader] 导入书籍失败', file.name, e)
+						failed.push(file.name)
+					}
+				}
+				if (done) new Notice(`Grove Reader：已导入 ${done} 本书到 ${target}`)
+				if (failed.length) new Notice(`Grove Reader：${failed.length} 个文件导入失败（${failed.slice(0, 3).join('、')}）`, 8000)
+				if (done) await this.refresh({ rescan: true })
+			})()
+		})
+		input.click()
 	}
 }

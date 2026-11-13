@@ -1,9 +1,7 @@
-import { App, Modal, Notice, setIcon } from 'obsidian'
+import { App, Modal, Notice, normalizePath, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
-import type { ReaderView } from './readerView'
-import type { PdfView } from './pdfView'
-import type { TextView } from './textView'
-import { answerBookQuestion, hintFor, isAiConfigured, summarizePortraitChunk, type AiConfig } from './ai'
+import type { ReaderEngine } from './engine/types'
+import { answerBookQuestion, hintFor, isAiConfigured, summarizePortraitChunk, type AiConfig, type AskTurn } from './ai'
 import {
 	chunkSections,
 	loadPortrait,
@@ -17,40 +15,21 @@ import {
 	type PortraitDoc,
 	type SourceSection,
 } from './portrait'
+import { confirmAsync } from './modals'
+import { MultiBookAskModal } from './multiBookAskModal'
+import { sanitizeFileName } from './util'
 
-type AskView = ReaderView | PdfView | TextView
+type AskView = ReaderEngine
+
+/** 一轮已经完成的问答；追问时作为上下文传给 AI */
+interface AskExchange {
+	question: string
+	answer: string
+	refs: PortraitChunk[]
+}
 
 const NOT_CONFIGURED =
 	'还没有配置 AI。请到 设置 → 阅读 → AI 解释 填入接口地址、模型与 API Key（推荐智谱 GLM-4-Flash，免费）'
-
-function confirmAsync(app: App, message: string, okText = '继续'): Promise<boolean> {
-	return new Promise(resolve => {
-		const modal = new Modal(app)
-		let answered = false
-		modal.onOpen = (): void => {
-			modal.contentEl.empty()
-			modal.contentEl.createEl('h3', { text: '确认操作' })
-			modal.contentEl.createEl('p', { text: message })
-			const buttons = modal.contentEl.createDiv('modal-button-container')
-			const ok = buttons.createEl('button', { text: okText, cls: 'mod-cta' })
-			ok.addEventListener('click', () => {
-				answered = true
-				resolve(true)
-				modal.close()
-			})
-			const cancel = buttons.createEl('button', { text: '取消' })
-			cancel.addEventListener('click', () => {
-				answered = true
-				resolve(false)
-				modal.close()
-			})
-		}
-		modal.onClose = (): void => {
-			if (!answered) resolve(false)
-		}
-		modal.open()
-	})
-}
 
 /**
  * AI 全书问答（压缩要点版）：
@@ -64,8 +43,7 @@ export class BookAskModal extends Modal {
 	private asking = false
 	private progress = ''
 	private question = ''
-	private answer = ''
-	private refs: PortraitChunk[] = []
+	private exchanges: AskExchange[] = []
 	private buildToken = 0
 	private askToken = 0
 	private progressEl: HTMLElement | null = null
@@ -136,6 +114,9 @@ export class BookAskModal extends Modal {
 			del.disabled = this.building
 			del.addEventListener('click', () => void this.#deleteIndex())
 		}
+		const multi = actions.createEl('button', { text: '多书一起问…' })
+		multi.disabled = this.building
+		multi.addEventListener('click', () => new MultiBookAskModal(this.app, this.plugin).open())
 		if (this.building) {
 			const cancel = actions.createEl('button', { text: '取消', cls: 'mod-warning' })
 			cancel.addEventListener('click', () => {
@@ -172,25 +153,47 @@ export class BookAskModal extends Modal {
 		ask.disabled = this.asking || this.building || !this.portrait?.chunks.length
 		ask.addEventListener('click', () => void this.#ask())
 
+		if (this.exchanges.length) {
+			const tools = root.createDiv('grove-ask-tools')
+			tools.createSpan('grove-ask-tools-label').setText(`已进行 ${this.exchanges.length} 轮问答`)
+			const save = tools.createEl('button', { text: '存为笔记' })
+			save.disabled = this.asking
+			save.addEventListener('click', () => void this.#saveConversation())
+			const clear = tools.createEl('button', { text: '清空对话' })
+			clear.disabled = this.asking
+			clear.addEventListener('click', () => {
+				this.askToken++
+				this.asking = false
+				this.exchanges = []
+				this.#render()
+			})
+		}
+
 		const answer = root.createDiv('grove-ask-answer')
 		this.answerEl = answer
+		for (const exchange of this.exchanges) {
+			const block = answer.createDiv('grove-ask-turn')
+			block.createDiv('grove-ask-q').setText(exchange.question)
+			const body = block.createDiv('grove-ask-a')
+			for (const para of exchange.answer.split(/\n+/).map(s => s.trim()).filter(Boolean)) {
+				body.createEl('p', { text: para })
+			}
+			if (exchange.refs.length) {
+				const refs = block.createDiv('grove-ask-refs')
+				refs.createSpan('grove-ask-refs-label').setText('参考')
+				for (const ref of exchange.refs) {
+					const chip = refs.createSpan('grove-ask-ref')
+					chip.setText(ref.chapter || '正文')
+					chip.setAttribute('title', ref.summary)
+				}
+			}
+		}
 		if (this.asking) {
 			answer.createDiv('grove-ask-loading').setText('正在检索要点并生成回答…')
-		} else if (this.answer) {
-			for (const para of this.answer.split(/\n+/).map(s => s.trim()).filter(Boolean)) {
-				answer.createEl('p', { text: para })
-			}
-		} else if (this.loaded && this.portrait?.chunks.length) {
-			answer.createDiv('grove-ask-empty').setText('索引已就绪，输入问题后按「提问」（Ctrl+Enter 也可以）。')
-		}
-		if (this.refs.length && !this.asking) {
-			const refs = root.createDiv('grove-ask-refs')
-			refs.createSpan('grove-ask-refs-label').setText('参考')
-			for (const ref of this.refs) {
-				const chip = refs.createSpan('grove-ask-ref')
-				chip.setText(ref.chapter || '正文')
-				chip.setAttribute('title', ref.summary)
-			}
+		} else if (this.loaded && this.portrait?.chunks.length && !this.exchanges.length) {
+			answer.createDiv('grove-ask-empty').setText(
+				'索引已就绪，输入问题后按「提问」（Ctrl+Enter 也可以）。之后可以接着追问，前面几轮对话会一并带上。',
+			)
 		}
 	}
 
@@ -207,8 +210,7 @@ export class BookAskModal extends Modal {
 		}
 		const token = ++this.buildToken
 		this.building = true
-		this.answer = ''
-		this.refs = []
+		this.exchanges = []
 		this.#render()
 		try {
 			this.#updateProgress('正在读取正文…')
@@ -313,26 +315,87 @@ export class BookAskModal extends Modal {
 		}
 		const token = ++this.askToken
 		this.asking = true
-		this.answer = ''
-		this.refs = pickChunks(tokenizeQuery(question), this.portrait.chunks, 5)
+		this.question = ''
+		const refs = pickChunks(tokenizeQuery(question), this.portrait.chunks, 5)
+		const history: AskTurn[] = []
+		for (const exchange of this.exchanges) {
+			history.push({ role: 'user', text: exchange.question })
+			history.push({ role: 'assistant', text: exchange.answer })
+		}
 		this.#render()
-		const target = this.answerEl
+		this.answerEl?.scrollIntoView({ block: 'nearest' })
 		try {
-			const answer = await answerBookQuestion(cfg, this.view.bookTitle || '未命名', question, this.refs)
+			const answer = await answerBookQuestion(cfg, this.view.bookTitle || '未命名', question, refs, history)
 			if (token !== this.askToken) return
-			this.answer = answer
+			this.exchanges.push({ question, answer, refs })
 		} catch (e) {
 			if (token !== this.askToken) return
 			const msg = e instanceof Error ? e.message : String(e)
-			this.answer = `调用失败：${msg}${hintFor(msg)}`
+			this.exchanges.push({ question, answer: `调用失败：${msg}${hintFor(msg)}`, refs })
 		} finally {
 			if (token === this.askToken) {
 				this.asking = false
 				this.#render()
-				this.answerEl?.scrollIntoView({ block: 'nearest' })
-				void target
+				this.answerEl?.scrollIntoView({ block: 'end' })
 			}
 		}
+	}
+
+	/** 把当前对话整段落成一篇 Markdown 笔记，放在「笔记文件夹/AI 问答」下 */
+	async #saveConversation(): Promise<void> {
+		if (!this.exchanges.length) return
+		const title = this.view.bookTitle || '未命名'
+		const base = (this.plugin.settings.notesFolder?.trim() || '阅读笔记').replace(/\\/g, '/').replace(/\/+$/, '')
+		const folder = normalizePath(`${base}/AI 问答`)
+		try {
+			if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder)
+		} catch {
+			// 写文件时会再报错
+		}
+		const now = new Date()
+		const p = (n: number): string => String(n).padStart(2, '0')
+		const stamp = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}`
+		const stem = sanitizeFileName(`${title} - AI 问答 ${stamp}`)
+		let target = normalizePath(`${folder}/${stem}.md`)
+		let i = 2
+		while (this.app.vault.getAbstractFileByPath(target) || await this.app.vault.adapter.exists(target)) {
+			target = normalizePath(`${folder}/${stem} ${i}.md`)
+			i++
+		}
+		const lines = [
+			'---',
+			`grove-ask: ${this.#bookId}`,
+			`book: "${title.replace(/"/g, "'")}"`,
+			`book-path: "${this.view.bookPath.replace(/"/g, "'")}"`,
+			`created: ${now.toISOString()}`,
+			'tags:',
+			'  - 阅读/AI问答',
+			'---',
+			'',
+			`# 《${title}》AI 问答`,
+			'',
+			`> 由 Grove Reader 生成 · ${now.toLocaleString('zh-CN')}`,
+			'',
+		]
+		this.exchanges.forEach((exchange, index) => {
+			lines.push(`## ${index + 1}. ${exchange.question}`)
+			lines.push('')
+			lines.push(exchange.answer.trim())
+			lines.push('')
+			if (exchange.refs.length) {
+				const chapters = [...new Set(exchange.refs.map(ref => ref.chapter || '正文'))]
+				lines.push(`参考：${chapters.join('、')}`)
+				lines.push('')
+			}
+		})
+		try {
+			await this.app.vault.create(target, lines.join('\n'))
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e)
+			new Notice(`Grove Reader：保存失败（${msg}）`)
+			return
+		}
+		new Notice(`Grove Reader：已存为笔记 ${target}`)
 	}
 
 	async #deleteIndex(): Promise<void> {
@@ -341,8 +404,7 @@ export class BookAskModal extends Modal {
 		if (!ok) return
 		await removePortrait(this.plugin.io, this.plugin.getDataRoot(), this.#bookId)
 		this.portrait = null
-		this.answer = ''
-		this.refs = []
+		this.exchanges = []
 		this.#render()
 		new Notice('Grove Reader：已删除要点索引')
 	}

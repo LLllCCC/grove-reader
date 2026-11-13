@@ -17,6 +17,7 @@ import {
 	ShelfBookInfo,
 	BACKUP_FOLDER_NAME,
 	FORMAT_LABELS,
+	READING_STATUS_LABELS,
 	VIEW_TYPE_GROVE_PDF,
 } from './types'
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
@@ -34,10 +35,18 @@ import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLAT
 import type { NoteExtraFields } from './notes'
 import { collectExcerptBacklinks, type ExcerptBacklinkRow } from './backlinks'
 import { BookAskModal } from './bookAskModal'
+import { MultiBookAskModal } from './multiBookAskModal'
+import { GuideModal } from './guideModal'
+import { LibrarySearchModal } from './librarySearch'
 import { movePortrait } from './portrait'
+import { moveGuide } from './guide'
+import { moveVectorDoc } from './vectorIndex'
+import { chatCompletion, isAiConfigured } from './ai'
 import { parseGroveHref } from './wikilink'
+import { parsePdfPlusHref } from './pdfLink'
 import type { GroveLinkTarget, ParsedGroveLink } from './wikilink'
-import { bookIdFor, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
+import type { ReaderEngine } from './engine/types'
+import { bookIdFor, basenameOf, cleanBookTitle, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
 import { isReaderExt, isShelfExt } from './types'
 import { usageDocMarkdown, USAGE_DOC_NAME } from './usageDoc'
 import { LOGO_OPTIONS, logoById } from './logos'
@@ -154,6 +163,9 @@ export default class GroveReaderPlugin extends Plugin {
 			void this.reloadAllBooks()
 		})
 
+		// 手机双指轻按切沉浸阅读（设置里可关）
+		this.#registerImmersiveGesture()
+
 		// 外部同步（Syncthing 等）改动批注 JSON 时，重新读进内存并刷新界面
 		this.registerEvent(this.app.vault.on('modify', file => {
 			if (!(file instanceof TFile) || file.extension !== 'json') return
@@ -197,6 +209,13 @@ export default class GroveReaderPlugin extends Plugin {
 		// 摘录双链：`[[书.epub#grove-cfi=…|⤴ 回原文]]` 的点击接管。
 		// 捕获阶段先手，阅读视图与 Live Preview 都能拦；只认自家子路径，别的链接一律放行。
 		this.registerDomEvent(document, 'click', ev => this.#onGroveLinkClick(ev), { capture: true })
+		// 手机 Live Preview 的 CM6 链接不一定派发 click（tap 被编辑器自己消费），补 pointerup 兜底
+		if (this.isMobile) {
+			this.registerDomEvent(document, 'pointerdown', ev => {
+				this.#tapStart = { x: ev.clientX, y: ev.clientY, at: Date.now() }
+			}, { capture: true })
+			this.registerDomEvent(document, 'pointerup', ev => this.#onGroveLinkPointerUp(ev), { capture: true })
+		}
 		// 笔记里的摘录双链随编辑变化：解析完自动刷新打开中的「引用」页签
 		this.registerEvent(this.app.metadataCache.on('resolved', () => {
 			if (this.backlinkTimer != null) window.clearTimeout(this.backlinkTimer)
@@ -206,11 +225,11 @@ export default class GroveReaderPlugin extends Plugin {
 			this.debug('workspace', 'file-open', file?.path ?? null)
 			const pend = this.#pendingGroveLink
 			if (!pend || !file) return
-			if (file.path !== pend.link.vaultPath) return
+			if (file.path !== pend.path) return
 			window.clearTimeout(pend.timer)
 			this.#pendingGroveLink = null
 			// 稍等一拍让 Obsidian 的导航完全收尾，再换成 Grove 视图
-			window.setTimeout(() => void this.openGroveLink(pend.link), 30)
+			window.setTimeout(pend.open, 30)
 		}))
 		// 文件列表里的 TXT 也提供「用 Grove Reader 打开」，自动识别 GBK/GB18030
 		this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
@@ -263,6 +282,7 @@ export default class GroveReaderPlugin extends Plugin {
 	onunload(): void {
 		// 各视图的 onClose 会负责落盘与销毁渲染器；这里再兜一层排队中的批注写入
 		void this.store?.flush()
+		document.body.removeClass('grove-immersive')
 		this.stats?.saveNow()
 		void this.stats?.flush()
 		this.oplog?.saveNow()
@@ -359,7 +379,7 @@ export default class GroveReaderPlugin extends Plugin {
 		}
 		new ConfirmModal(
 			this.app,
-			`将移除 ${count} 项失效引用（书架缓存、书单、统计、笔记路径、AI 要点索引），不会删除任何书籍或批注 JSON。继续？`,
+			`将移除 ${count} 项失效引用（书架缓存、书单、统计、笔记路径、AI 要点索引、语义索引），不会删除任何书籍或批注 JSON。继续？`,
 			() => void this.cleanupHealth(report),
 		).open()
 	}
@@ -391,6 +411,14 @@ export default class GroveReaderPlugin extends Plugin {
 				removed++
 			} catch {
 				// 已被手动删除或占用，下次体检再处理
+			}
+		}
+		for (const item of report.vectorIssues) {
+			try {
+				await this.io.remove(joinPath(this.dataRoot, 'vectors', item.file))
+				removed++
+			} catch {
+				// 索引可由原书重建，删不掉就下次再清
 			}
 		}
 		this.shelfCache.saveNow()
@@ -433,6 +461,9 @@ export default class GroveReaderPlugin extends Plugin {
 	async restoreTrash(id: string): Promise<void> {
 		if (!this.trash) return
 		const entry = await this.trash.restore(id)
+		// 删除时 store.delete() 已经把这本书移出内存；恢复后必须把 data.json 重新读入，
+		// 否则再次打开会拿空数据把刚恢复的批注/书签覆盖掉
+		await this.store.reloadFromDisk(bookIdFor(entry.bookPath))
 		this.shelfCache.set(entry.bookPath, entry.shelfEntry ?? {})
 		if (entry.statsEntry) this.stats.setBook(entry.bookPath, entry.statsEntry)
 		if (entry.listId) this.lists.setMember(entry.bookPath, entry.listId)
@@ -646,15 +677,145 @@ export default class GroveReaderPlugin extends Plugin {
 		return this.dataRoot
 	}
 
+	/**
+	 * 沉浸阅读：隐藏 Grove 工具栏与侧栏。
+	 * 桌面端顺带切换系统全屏；手机端只做 CSS 隐藏（Obsidian 移动端没有网页全屏）。
+	 */
+	toggleImmersive(force?: boolean): void {
+		const want = force ?? !document.body.classList.contains('grove-immersive')
+		document.body.toggleClass('grove-immersive', want)
+		this.debug('ui', 'immersive', { on: want })
+		if (this.isMobile) return
+		try {
+			if (want && !document.fullscreenElement) {
+				void document.documentElement.requestFullscreen?.()?.catch(() => undefined)
+			} else if (!want && document.fullscreenElement === document.documentElement) {
+				void document.exitFullscreen?.()?.catch(() => undefined)
+			}
+		} catch {
+			// 全屏被系统拒绝时，CSS 隐藏仍然生效
+		}
+	}
+
+	/** 双指轻按切沉浸：两指都抬起且未明显移动、用时 < 320ms 才算轻按 */
+	#registerImmersiveGesture(): void {
+		let twoFinger: { x: number; y: number; at: number } | null = null
+		this.registerDomEvent(document, 'touchstart', (ev: TouchEvent) => {
+			if (!this.isMobile || !this.settings.mobileTwoFingerImmersive || ev.touches.length !== 2) {
+				twoFinger = null
+				return
+			}
+			if (!document.querySelector('.grove-content')) return
+			const a = ev.touches[0]
+			const b = ev.touches[1]
+			twoFinger = { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2, at: Date.now() }
+		}, { passive: true })
+		this.registerDomEvent(document, 'touchmove', (ev: TouchEvent) => {
+			if (!twoFinger || ev.touches.length !== 2) return
+			const a = ev.touches[0]
+			const b = ev.touches[1]
+			const dx = (a.clientX + b.clientX) / 2 - twoFinger.x
+			const dy = (a.clientY + b.clientY) / 2 - twoFinger.y
+			if (dx * dx + dy * dy > 18 * 18) twoFinger = null
+		}, { passive: true })
+		this.registerDomEvent(document, 'touchend', (ev: TouchEvent) => {
+			if (!twoFinger || ev.touches.length > 0) return
+			const quick = Date.now() - twoFinger.at <= 320
+			twoFinger = null
+			if (quick) this.toggleImmersive()
+		}, { passive: true })
+	}
+
 	/** 书改名/移动时迁移 AI 要点索引（与批注数据同步，避免索引变成孤儿） */
 	migratePortrait(oldPath: string, newPath: string): void {
 		const from = this.store.bookId(oldPath)
 		const to = this.store.bookId(newPath)
 		if (!from || !to || from === to) return
 		void movePortrait(this.io, this.dataRoot, from, to, newPath).catch(() => undefined)
+		void moveGuide(this.io, this.dataRoot, from, to, newPath).catch(() => undefined)
+		void moveVectorDoc(this.io, this.dataRoot, from, to, newPath).catch(() => undefined)
 	}
 
-	private withAnyReader(checking: boolean, run: (view: ReaderView | PdfView | TextView) => unknown): boolean {
+	/** AI 按主题整理书单：一次请求把书架上的书分 3-6 组，写进书单 */
+	organizeThemeLists(): void {
+		const s = this.settings
+		const cfg = { baseUrl: s.aiBaseUrl ?? '', apiKey: s.aiApiKey ?? '', model: s.aiModel ?? '' }
+		if (!isAiConfigured(cfg)) {
+			new Notice('Grove Reader：还没有配置 AI。设置 → 阅读 → AI 解释 里填入接口地址与 API Key', 8000)
+			return
+		}
+		const entries = this.shelfCache.entries()
+			.filter(([path]) => isShelfExt((path.split('.').pop() ?? '').toLowerCase()))
+			.slice(0, 60)
+		if (!entries.length) {
+			new Notice('Grove Reader：书架还没有书，先添加扫描文件夹或导入书籍')
+			return
+		}
+		new ConfirmModal(
+			this.app,
+			`将调用 AI 把 ${entries.length} 本书按主题整理成 3-6 个书单（一次请求，使用你自己的 API Key）。已有同名书单会复用，书原来的书单不会被清掉。继续？`,
+			() => {
+				void (async () => {
+					const lines = entries.map(([path, entry], i) => {
+						const title = entry.title || cleanBookTitle(basenameOf(path))
+						return `${i + 1}. ${title}${entry.author ? ` — ${entry.author}` : ''}`
+					})
+					let answer = ''
+					try {
+						answer = await chatCompletion(cfg, [
+							{
+								role: 'system',
+								content: '你是图书管理员。把用户给出的书按主题分组，每组 3-12 本；' +
+									'组名用简洁中文（不超过 8 字），不要「其他」「杂项」这类兜底组。' +
+									'只输出 JSON 数组，格式：[{"name":"组名","books":[1,3,5]}]，不要解释。',
+							},
+							{ role: 'user', content: lines.join('\n') },
+						], { temperature: 0.2, maxTokens: 900 })
+					} catch (e) {
+						new Notice(`Grove Reader：整理失败（${e instanceof Error ? e.message : String(e)}）`, 8000)
+						return
+					}
+					let groups: Array<{ name?: unknown; books?: unknown }> = []
+					try {
+						const start = answer.indexOf('[')
+						const end = answer.lastIndexOf(']')
+						groups = JSON.parse(answer.slice(start, end + 1)) as typeof groups
+					} catch {
+						new Notice('Grove Reader：AI 返回的内容不是可识别的 JSON，换本模型再试')
+						return
+					}
+					let assigned = 0
+					let created = 0
+					for (const group of groups) {
+						const name = String(group?.name ?? '').trim().slice(0, 20)
+						if (!name) continue
+						const list = this.lists.lists().find(l => l.name === name) ?? this.lists.create(name)
+						created++
+						for (const raw of Array.isArray(group?.books) ? group.books : []) {
+							const entry = entries[Number(raw) - 1]
+							if (!entry) continue
+							this.lists.setMember(entry[0], list.id)
+							assigned++
+						}
+					}
+					if (!assigned) {
+						new Notice('Grove Reader：AI 没有给出可用的分组')
+						return
+					}
+					this.oplog.add('AI 整理书单', `${created} 个书单 / ${assigned} 本书`)
+					new Notice(`Grove Reader：已整理出 ${created} 个书单，归入 ${assigned} 本书`)
+					for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_BOOKSHELF)) {
+						const view = leaf.view
+						if (view instanceof BookshelfView) void view.refresh()
+					}
+				})()
+			},
+			'开始整理',
+			'mod-cta',
+		).open()
+	}
+
+	private withAnyReader(checking: boolean, run: (view: ReaderEngine) => unknown): boolean {
 		const r = this.activeReader()
 		if (r?.ready) {
 			if (!checking) run(r)
@@ -942,25 +1103,69 @@ export default class GroveReaderPlugin extends Plugin {
 	private backlinkTimer: number | null = null
 
 	/** 手机端双链的挂起跳转：等 Obsidian 自己的导航落地（file-open），再换成 Grove 视图 */
-	#pendingGroveLink: { link: ParsedGroveLink; timer: number } | null = null
+	#pendingGroveLink: { path: string; open: () => void; timer: number } | null = null
 
-	/** 手机端双链的挂起跳转：等 Obsidian 自己的导航落地（file-open），再换成 Grove 视图 */
+	/** 手机端点按识别：Live Preview 的 CM6 链接不走 document click，只能自己看 pointerup */
+	#tapStart: { x: number; y: number; at: number } | null = null
 
 	#onGroveLinkClick(ev: MouseEvent): void {
 		const target = ev.target as HTMLElement | null
-		const anchor = target?.closest?.('[data-href], a[href]') as HTMLElement | null
-		let raw = anchor ? (anchor.getAttribute('data-href') || anchor.getAttribute('href') || '') : ''
-		// 实时预览里的内部链接是 CM6 节点（只有 class，没有 data-href），
-		// 位置得从编辑器文档里反查：定位到点击处所在行，再挑包住它的那对 [[ ]]
-		if (!raw && target) raw = this.#hrefFromLivePreview(target) ?? ''
+		const raw = this.#groveHrefAt(target)
 		// 手机上没有 CDP、console 也不进 logcat：疑似链接点击就记进 debug 日志（开着调试模式时）
 		const cls = typeof target?.className === 'string' ? target.className.slice(0, 80) : String(target?.className ?? '')
 		this.debug('link', 'click', { prevented: ev.defaultPrevented, target: cls, raw: raw.slice(0, 100) })
 		if (ev.defaultPrevented) return
-		if (!raw.includes('grove-')) return
-		const parsed = parseGroveHref(raw)
-		if (!parsed) return
+		this.#openGroveHref(raw, ev)
+	}
 
+	/**
+	 * 手机 Live Preview 里点内部双链时，CM6 自己处理 tap，可能不派发 document click；
+	 * 在 pointerup 上补一层：短按、位移小、落点能解析出 grove 链接才接管。
+	 */
+	#onGroveLinkPointerUp(ev: PointerEvent): void {
+		const start = this.#tapStart
+		this.#tapStart = null
+		if (!start) return
+		if (Date.now() - start.at > 650) return
+		if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) > 12) return
+		const target = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null
+		const raw = this.#groveHrefAt(target)
+		if (!raw) return
+		this.debug('link', 'pointerup', { target: target?.className ?? '', raw: raw.slice(0, 100) })
+		this.#openGroveHref(raw, null)
+	}
+
+	/** 从点击目标里找 grove 链接：阅读模式有 data-href，Live Preview 要回编辑器文档反查 */
+	#groveHrefAt(target: HTMLElement | null): string {
+		const anchor = target?.closest?.('[data-href], a[href]') as HTMLElement | null
+		const raw = anchor ? (anchor.getAttribute('data-href') || anchor.getAttribute('href') || '') : ''
+		if (raw) return raw
+		return target ? (this.#hrefFromLivePreview(target) ?? '') : ''
+	}
+
+	#openGroveHref(raw: string, ev: MouseEvent | null): void {
+		if (!raw) return
+		if (raw.includes('grove-')) {
+			const parsed = parseGroveHref(raw)
+			if (!parsed) return
+			this.#handleLinkClick(ev, parsed.vaultPath, () => void this.openGroveLink(parsed))
+			return
+		}
+		// PDF++ 形态：`[[书.pdf#page=12&selection=…]]`，Obsidian 自己只会打开第一页
+		const pdfLink = parsePdfPlusHref(raw)
+		if (!pdfLink) return
+		const pdfFile = this.#resolveLinkedFile(pdfLink.bookPath)
+		if (!pdfFile) return
+		const linkTarget: GroveLinkTarget = {
+			cfi: `page:${pdfLink.page}`,
+			pdfRects: pdfLink.rects,
+			pdfRectsPt: pdfLink.pointRects,
+		}
+		this.#handleLinkClick(ev, pdfFile.path, () => void this.openBookByPath(pdfFile.path, linkTarget.cfi, linkTarget))
+	}
+
+	/** 链接点击：桌面端直接拦下；手机端等 Obsidian 导航落地后再换成 Grove 视图 */
+	#handleLinkClick(ev: MouseEvent | null, path: string, open: () => void): void {
 		if (this.isMobile) {
 			// 手机端实测：Obsidian 自己的链接处理器（mobile-tap）也会打开这个文件，
 			// 而且晚于我们的 setViewState 落地，把 Grove 视图顶回原生编辑器（0.33.2 回归）。
@@ -971,15 +1176,25 @@ export default class GroveReaderPlugin extends Plugin {
 				if (!pend) return
 				this.#pendingGroveLink = null
 				this.debug('link', 'file-open 未到达，兜底直接打开')
-				void this.openGroveLink(pend.link)
+				pend.open()
 			}, 900)
-			this.#pendingGroveLink = { link: parsed, timer }
+			this.#pendingGroveLink = { path, open, timer }
 			return
 		}
+		if (!ev) return
 		ev.preventDefault()
 		ev.stopPropagation()
 		ev.stopImmediatePropagation()
-		void this.openGroveLink(parsed)
+		open()
+	}
+
+	/** 链接里的书路径 → 库内文件：先按原路径找，再让 Obsidian 按链接名解析 */
+	#resolveLinkedFile(path: string): TFile | null {
+		const direct = this.app.vault.getAbstractFileByPath(normalizePath(path))
+		if (direct instanceof TFile) return direct
+		const name = path.split('/').pop() ?? path
+		const found = this.app.metadataCache.getFirstLinkpathDest(name, '')
+		return found instanceof TFile ? found : null
 	}
 
 	/** 从实时预览的链接节点反查它的 `路径#定位` 源码；不是链接节点返回 null */
@@ -1002,13 +1217,20 @@ export default class GroveReaderPlugin extends Plugin {
 			}
 			const pos = cm.posAtDOM(span, 0)
 			const at = view.editor.offsetToPos(pos)
-			const line = view.editor.getLine(at.line) ?? ''
-			this.debug('link', 'LP 反查', { line: at.line, ch: at.ch, text: line.slice(0, 60) })
+			// Live Preview 的源码行可能把一条 `[[…]]` 折成多行（长路径 + 长别名），
+			// 只看当前行会只拿到 `回原文]]`，所以拼上前后几行再按游标位置找。
+			const from = Math.max(0, at.line - 4)
+			const to = Math.min(view.editor.lineCount() - 1, at.line + 1)
+			const lines: string[] = []
+			for (let i = from; i <= to; i++) lines.push(view.editor.getLine(i) ?? '')
+			const text = lines.join('\n')
+			const cursor = lines.slice(0, at.line - from).reduce((n, line) => n + line.length + 1, 0) + at.ch
+			this.debug('link', 'LP 反查', { line: at.line, ch: at.ch, from, to, text: text.slice(0, 80) })
 			const re = /\[\[([^[\]]+)\]\]/g
-			for (let m = re.exec(line); m; m = re.exec(line)) {
+			for (let m = re.exec(text); m; m = re.exec(text)) {
 				const start = m.index
 				const end = m.index + m[0].length
-				if (at.ch >= start && at.ch <= end) return m[1]
+				if (cursor >= start && cursor <= end) return m[1]
 			}
 			return null
 		} catch (e) {
@@ -1082,6 +1304,15 @@ export default class GroveReaderPlugin extends Plugin {
 		return this.desktopFs.readBytes(abs)
 	}
 
+	/** 书籍文件的修改时间与大小；库内走 TFile，库外走文件层 */
+	async statBook(bookPath: string): Promise<{ mtime: number; size: number } | null> {
+		const f = this.app.vault.getAbstractFileByPath(bookPath)
+		if (f instanceof TFile) return { mtime: f.stat.mtime, size: f.stat.size }
+		const abs = isAbsolutePath(bookPath) ? bookPath : joinPath(this.vaultBase, bookPath)
+		const st = await this.io.stat(abs)
+		return st ? { mtime: st.mtime, size: st.size } : null
+	}
+
 	/**
 	 * pdfjs 运行时资源（wasm / cmaps / standard_fonts / worker）的访问 URL。
 	 * 资源随插件分发在插件目录 pdfjs/ 下；桌面 FileSystemAdapter 与手机 CapacitorAdapter
@@ -1151,6 +1382,7 @@ export default class GroveReaderPlugin extends Plugin {
 				notePath: notePath && this.app.vault.getAbstractFileByPath(notePath) instanceof TFile ? notePath : undefined,
 				lastRead: stats?.lastRead || undefined,
 				seconds: stats?.seconds || undefined,
+				readingStatus: data.readingStatus,
 			})
 		}
 		return map
@@ -1221,6 +1453,26 @@ export default class GroveReaderPlugin extends Plugin {
 			checkCallback: checking => this.withAnyReader(checking, v => new BookAskModal(this.app, this, v).open()),
 		})
 		this.addCommand({
+			id: 'book-guide',
+			name: '按章导读（AI 逐章摘要）',
+			checkCallback: checking => this.withAnyReader(checking, v => new GuideModal(this.app, this, v).open()),
+		})
+		this.addCommand({
+			id: 'multi-book-ask',
+			name: '多书一起问（跨书 AI 问答）',
+			callback: () => new MultiBookAskModal(this.app, this).open(),
+		})
+		this.addCommand({
+			id: 'theme-lists',
+			name: 'AI 按主题整理书单',
+			callback: () => this.organizeThemeLists(),
+		})
+		this.addCommand({
+			id: 'toggle-immersive',
+			name: '切换沉浸阅读（隐藏工具栏 / 侧栏）',
+			callback: () => this.toggleImmersive(),
+		})
+		this.addCommand({
 			id: 'rescan-bookshelf',
 			name: '重新扫描书架',
 			callback: () => {
@@ -1254,6 +1506,11 @@ export default class GroveReaderPlugin extends Plugin {
 			id: 'migrate-data-folder',
 			name: '迁移数据文件夹…',
 			callback: () => this.promptMigrateDataFolder(),
+		})
+		this.addCommand({
+			id: 'search-library-fulltext',
+			name: '全库搜索（正文，含 PDF）',
+			callback: () => new LibrarySearchModal(this.app, this).open(),
 		})
 		this.addCommand({
 			id: 'search-current-book-fulltext',
@@ -1336,7 +1593,7 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	/** 把单条批注画成书摘卡 PNG，存到 Grove Reader/书摘卡 */
-	async exportQuoteCard(view: ReaderView | PdfView | TextView, annotationId: string): Promise<void> {
+	async exportQuoteCard(view: ReaderEngine, annotationId: string): Promise<void> {
 		const data = view.snapshot()
 		const a = data?.annotations.find(x => x.id === annotationId)
 		if (!data || !a) {
@@ -1386,7 +1643,7 @@ export default class GroveReaderPlugin extends Plugin {
 	// ------------------------------------------------------------------
 
 	/** 把批注发到 Canvas；ids 为空表示整本书 */
-	async exportToCanvas(view: ReaderView | PdfView | TextView, ids?: string[]): Promise<void> {
+	async exportToCanvas(view: ReaderEngine, ids?: string[]): Promise<void> {
 		const data = view.snapshot()
 		if (!data) {
 			new Notice('Grove Reader：当前没有已打开的书籍')
@@ -1547,7 +1804,7 @@ export default class GroveReaderPlugin extends Plugin {
 	}
 
 	/** 从阅读笔记回写批注：先算差异、弹窗勾选，再写数据（不改笔记本身） */
-	async openNoteSync(view: ReaderView | PdfView | TextView): Promise<void> {
+	async openNoteSync(view: ReaderEngine): Promise<void> {
 		const data = view.snapshot()
 		if (!data) {
 			new Notice('Grove Reader：当前没有已打开的书籍')
@@ -1585,7 +1842,7 @@ export default class GroveReaderPlugin extends Plugin {
 		}).open()
 	}
 
-	async generateNoteFor(view: ReaderView | PdfView | TextView): Promise<void> {
+	async generateNoteFor(view: ReaderEngine): Promise<void> {
 		const data = view.snapshot()
 		if (!data) {
 			new Notice('Grove Reader：当前没有已打开的书籍')
@@ -1714,7 +1971,9 @@ export default class GroveReaderPlugin extends Plugin {
 			annotations: data.annotations.length,
 			format: FORMAT_LABELS[ext] ?? ext.toUpperCase(),
 			progress,
-			status: progress >= 99 ? '读完' : progress > 0 ? '在读' : '想读',
+			status: data.readingStatus
+				? READING_STATUS_LABELS[data.readingStatus]
+				: progress >= 99 ? '读完' : progress > 0 ? '在读' : '想读',
 			seconds: stat.seconds,
 			lastRead: stat.lastRead || data.lastLocation?.updatedAt || 0,
 			publisher: this.shelfCache.get(data.bookPath)?.publisher ?? '',
@@ -1750,7 +2009,7 @@ export default class GroveReaderPlugin extends Plugin {
 	private pendingNoteEdits = new Set<string>()
 
 	/** 批注/元数据变更后防抖刷新已存在的笔记（不新建、不弹 Notice、不跳转） */
-	scheduleNoteRefresh(view: ReaderView | PdfView | TextView): void {
+	scheduleNoteRefresh(view: ReaderEngine): void {
 		if (!this.settings.autoUpdateNote) return
 		if (this.noteRefreshTimer != null) window.clearTimeout(this.noteRefreshTimer)
 		this.noteRefreshTimer = window.setTimeout(() => {
@@ -1759,7 +2018,7 @@ export default class GroveReaderPlugin extends Plugin {
 		}, 1500)
 	}
 
-	async #autoRefreshNote(view: ReaderView | PdfView | TextView): Promise<void> {
+	async #autoRefreshNote(view: ReaderEngine): Promise<void> {
 		const data = view.snapshot()
 		if (!data) return
 		const file = this.#noteFileFor(data)

@@ -1,8 +1,98 @@
-import { BookData, DATA_VERSION } from './types'
+import { BookData, DATA_VERSION, type Annotation, type Bookmark } from './types'
 import { PlatformIO, baseName, joinPath, stripExt } from './platformIO'
 import { basenameOf, bookIdFor, cleanBookTitle, stripNumericTitlePrefix, stripTitleAuthor } from './util'
 
 const BACKUP_INTERVAL_MS = 10 * 60 * 1000
+/** 删除墓碑保留期：超过这个时间的墓碑会被清掉，磁盘上不会无限增长 */
+const TOMBSTONE_TTL_MS = 180 * 24 * 60 * 60 * 1000
+
+/** 合并两台设备的删除墓碑：取较新的删除时间 */
+function mergeTombstones(
+	disk: Record<string, number> | undefined,
+	local: Record<string, number> | undefined,
+): Record<string, number> {
+	const merged: Record<string, number> = {}
+	for (const source of [disk, local]) {
+		for (const [id, at] of Object.entries(source ?? {})) {
+			if (!id || !Number.isFinite(at)) continue
+			if (!(id in merged) || merged[id] < at) merged[id] = at
+		}
+	}
+	return merged
+}
+
+/** 清掉过期墓碑；坏值一律丢弃 */
+function pruneTombstones(map: Record<string, number> | undefined): Record<string, number> {
+	const now = Date.now()
+	const out: Record<string, number> = {}
+	for (const [id, at] of Object.entries(map ?? {})) {
+		if (!id || !Number.isFinite(at)) continue
+		if (now - at > TOMBSTONE_TTL_MS) continue
+		out[id] = at
+	}
+	return out
+}
+
+/** 批注合并：同一 id 取 updatedAt 更新的版本，墓碑优先 */
+function mergeAnnotations(
+	disk: Annotation[],
+	local: Annotation[],
+	deleted: Record<string, number>,
+): Annotation[] {
+	const map = new Map<string, Annotation>()
+	for (const item of disk) if (item?.id) map.set(item.id, item)
+	for (const item of local) {
+		if (!item?.id) continue
+		const current = map.get(item.id)
+		if (!current || (item.updatedAt ?? 0) > (current.updatedAt ?? 0)) map.set(item.id, item)
+	}
+	return [...map.values()].filter(item => !deleted[item.id])
+}
+
+/** 书签合并：书签不可编辑，同一 id 视为同一条；墓碑优先 */
+function mergeBookmarks(
+	disk: Bookmark[],
+	local: Bookmark[],
+	deleted: Record<string, number>,
+): Bookmark[] {
+	const map = new Map<string, Bookmark>()
+	for (const item of disk) if (item?.id) map.set(item.id, item)
+	for (const item of local) if (item?.id && !map.has(item.id)) map.set(item.id, item)
+	return [...map.values()].filter(item => !deleted[item.id])
+}
+
+/** 合并批注/书签/墓碑；base 先放入，incoming 里更新的版本覆盖 */
+function mergeTrackedCollections(
+	base: BookData,
+	incoming: BookData,
+): Pick<BookData, 'annotations' | 'bookmarks' | 'deletedAnnotations' | 'deletedBookmarks'> {
+	const deletedAnnotations = mergeTombstones(base.deletedAnnotations, incoming.deletedAnnotations)
+	const deletedBookmarks = mergeTombstones(base.deletedBookmarks, incoming.deletedBookmarks)
+	return {
+		annotations: mergeAnnotations(base.annotations, incoming.annotations, deletedAnnotations),
+		bookmarks: mergeBookmarks(base.bookmarks ?? [], incoming.bookmarks ?? [], deletedBookmarks),
+		deletedAnnotations,
+		deletedBookmarks,
+	}
+}
+
+/** 只比较合并关心的字段，避免键顺序不同造成「假变化」反复写盘 */
+function mergeSignature(data: BookData): string {
+	const annotations = data.annotations
+		.map(item => `${item.id}@${item.updatedAt ?? 0}`)
+		.sort()
+		.join('|')
+	const bookmarks = (data.bookmarks ?? []).map(item => item.id).sort().join('|')
+	const deadA = Object.entries(data.deletedAnnotations ?? {})
+		.map(([id, at]) => `${id}@${at}`)
+		.sort()
+		.join('|')
+	const deadB = Object.entries(data.deletedBookmarks ?? {})
+		.map(([id, at]) => `${id}@${at}`)
+		.sort()
+		.join('|')
+	return `${annotations}\n${bookmarks}\n${deadA}\n${deadB}`
+}
 
 /**
  * 批注数据存储：每本书一个 JSON 文件。
@@ -25,6 +115,12 @@ export class BookStore {
 	 * 表现之一就是手机端正文每秒重绘、刚选中的文字被冲掉。
 	 */
 	private lastWritten = new Map<string, string>()
+	/**
+	 * 每个数据对象上次保存时有哪些批注/书签，用于检测「本次保存少了谁」并补删除墓碑。
+	 * 用对象做键（而不是书籍 id）：外部同步后视图可能还持有旧对象，
+	 * 旧对象缺的「别人的新批注」不该被误记成删除。
+	 */
+	private known = new WeakMap<BookData, { annotations: Set<string>; bookmarks: Set<string> }>()
 	private loaded = false
 	/** 预载失败时暂停写入：宁可弹错，也不能用空数据覆盖磁盘上的批注 */
 	private preloadError: Error | null = null
@@ -81,6 +177,7 @@ export class BookStore {
 			if (!data) continue
 			this.#normalize(data)
 			this.cache.set(id, data)
+			this.#rememberKnown(data)
 		}
 	}
 
@@ -131,8 +228,9 @@ export class BookStore {
 		} catch {
 			return false
 		}
-		// 内容和刚写下去的一模一样 → 这条 modify 是我们自己造成的，不必刷新界面
-		if (this.lastWritten.get(id) === raw) return false
+		// 内容和刚写下去的一模一样 → 这条 modify 是我们自己造成的，不必刷新界面；
+		// 但内存里没有这本书时（回收站恢复前 store.delete 清过缓存）仍要读入，否则打开会拿空数据覆盖
+		if (this.lastWritten.get(id) === raw && this.cache.has(id)) return false
 		let data: BookData | null = null
 		try {
 			data = JSON.parse(raw) as BookData
@@ -145,8 +243,25 @@ export class BookStore {
 			data = repaired
 		}
 		this.#normalize(data)
-		this.cache.set(id, data)
+		const previous = this.cache.get(id)
 		this.lastWritten.set(id, raw)
+		if (!previous) {
+			this.cache.set(id, data)
+			this.#rememberKnown(data)
+			return true
+		}
+		// 多设备同步时，另一台可能带着旧内容把文件写回来：
+		// 批注/书签按 id 合并，删除墓碑优先；进度按 updatedAt 取新。
+		const merged: BookData = { ...data, ...mergeTrackedCollections(data, previous) }
+		const localNewer = previous.lastLocation
+			&& (!merged.lastLocation || previous.lastLocation.updatedAt > merged.lastLocation.updatedAt)
+		if (localNewer) merged.lastLocation = previous.lastLocation
+		this.#normalize(merged)
+		// 合并结果和磁盘内容不同（本机有更新的批注/墓碑）才写回，避免两台设备来回空写
+		const changed = mergeSignature(merged) !== mergeSignature(data)
+		this.cache.set(id, merged)
+		this.#rememberKnown(merged)
+		if (changed) this.save(merged)
 		return true
 	}
 
@@ -182,8 +297,23 @@ export class BookStore {
 		}
 		this.#normalize(data)
 		const id = this.bookId(data.bookPath)
-		this.cache.set(id, data)
-		this.#enqueue(id, data)
+		// 先按这个对象自身的已知 id 记墓碑（视图删掉的条目在这里补删除时间）
+		this.#recordTombstones(data)
+		const existing = this.cache.get(id)
+		let target = data
+		if (existing && existing !== data) {
+			// 视图可能还拿着同步前的旧对象：保存时与缓存里的合并结果再并一次，
+			// 避免它把另一台设备刚同步进来的批注/书签覆盖掉。
+			target = { ...existing, ...data, ...mergeTrackedCollections(existing, data) }
+			if (existing.lastLocation
+				&& (!target.lastLocation || existing.lastLocation.updatedAt > target.lastLocation.updatedAt)) {
+				target.lastLocation = existing.lastLocation
+			}
+			this.#normalize(target)
+		}
+		this.cache.set(id, target)
+		this.#rememberKnown(target)
+		this.#enqueue(id, target)
 	}
 
 	/** 等待所有排队中的写入落盘（视图关闭、插件卸载、测试断言前调用） */
@@ -215,6 +345,42 @@ export class BookStore {
 				// 没有备份目录是常态
 			}
 		})()
+	}
+
+	/** 记录「这个对象这次保存时有哪些批注/书签」，供下一次保存对比出删除项 */
+	#rememberKnown(data: BookData): void {
+		this.known.set(data, {
+			annotations: new Set(data.annotations.map(item => item.id)),
+			bookmarks: new Set((data.bookmarks ?? []).map(item => item.id)),
+		})
+	}
+
+	/**
+	 * 对比同一个数据对象上一次保存的已知 id：本次少掉的批注/书签就是用户删掉的，补一条墓碑。
+	 * 视图层不用逐处改删除逻辑，统一在这里兜底；没见过的对象只建立基线，不产生墓碑。
+	 */
+	#recordTombstones(data: BookData): void {
+		const known = this.known.get(data)
+		if (!known) return
+		const now = Date.now()
+		const currentAnnotations = new Set(data.annotations.map(item => item.id))
+		const deadAnnotations = { ...(data.deletedAnnotations ?? {}) }
+		let annotationsChanged = false
+		for (const oldId of known.annotations) {
+			if (currentAnnotations.has(oldId) || deadAnnotations[oldId]) continue
+			deadAnnotations[oldId] = now
+			annotationsChanged = true
+		}
+		if (annotationsChanged) data.deletedAnnotations = deadAnnotations
+		const currentBookmarks = new Set((data.bookmarks ?? []).map(item => item.id))
+		const deadBookmarks = { ...(data.deletedBookmarks ?? {}) }
+		let bookmarksChanged = false
+		for (const oldId of known.bookmarks) {
+			if (currentBookmarks.has(oldId) || deadBookmarks[oldId]) continue
+			deadBookmarks[oldId] = now
+			bookmarksChanged = true
+		}
+		if (bookmarksChanged) data.deletedBookmarks = deadBookmarks
 	}
 
 	#enqueue(id: string, data: BookData): void {
@@ -267,12 +433,23 @@ export class BookStore {
 		// 书签是后加的字段：旧数据没有，补空数组；坏的条目直接丢掉
 		if (!Array.isArray(data.bookmarks)) data.bookmarks = []
 		else data.bookmarks = data.bookmarks.filter(b => b && typeof b.cfi === 'string' && typeof b.id === 'string')
+		// 删除墓碑：清掉过期与坏值，空对象不落盘
+		const deadAnnotations = pruneTombstones(data.deletedAnnotations)
+		if (Object.keys(deadAnnotations).length) data.deletedAnnotations = deadAnnotations
+		else delete data.deletedAnnotations
+		const deadBookmarks = pruneTombstones(data.deletedBookmarks)
+		if (Object.keys(deadBookmarks).length) data.deletedBookmarks = deadBookmarks
+		else delete data.deletedBookmarks
 		if (typeof data.version !== 'number') data.version = DATA_VERSION
 		if (typeof data.title !== 'string') data.title = ''
 		if (typeof data.author !== 'string') data.author = ''
 		// 与书架一致：洗掉下载站前缀/截图后缀/OCR 标记，并去掉标题尾部的作者括号
 		if (data.title) data.title = stripTitleAuthor(cleanBookTitle(stripNumericTitlePrefix(data.title)), data.author)
 		if (typeof data.templateId !== 'string' || !data.templateId) delete data.templateId
+		// 手动阅读状态只认四个值；手改坏的数据当作未设置
+		if (data.readingStatus && !['want', 'reading', 'done', 'unread'].includes(data.readingStatus)) {
+			delete data.readingStatus
+		}
 	}
 
 	/** 在内存里按 bookPath / 唯一文件名找回旧 ID 的数据，并把它挂到新 ID 下 */

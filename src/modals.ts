@@ -1,4 +1,4 @@
-import { App, AbstractInputSuggest, FuzzySuggestModal, Modal, Notice, TFile, TFolder, setIcon } from 'obsidian'
+import { App, AbstractInputSuggest, FuzzySuggestModal, Modal, Notice, TFile, TFolder, normalizePath, setIcon } from 'obsidian'
 import { Annotation, colorName, isShelfExt } from './types'
 import { colorDot, normalizeTerms, searchDocs } from './search'
 import type { SearchDoc } from './search'
@@ -11,6 +11,7 @@ import type { HealthReport } from './health'
 import type { SyncChange, SyncPlan } from './noteSync'
 import { filterGlobalBookmarks } from './globalBookmarks'
 import type { GlobalBookmarkRow } from './globalBookmarks'
+import { posterFileName, renderReadingPoster } from './poster'
 
 export class BookPickerModal extends FuzzySuggestModal<TFile> {
 	constructor(app: App, private onPick: (file: TFile) => void) {
@@ -101,6 +102,36 @@ export class ConfirmModal extends Modal {
 	}
 }
 
+/** ConfirmModal 的 Promise 版：需要 await 的流程（生成前的花费确认等）用它 */
+export function confirmAsync(app: App, message: string, okText = '继续', okClass = 'mod-cta'): Promise<boolean> {
+	return new Promise(resolve => {
+		const modal = new Modal(app)
+		let answered = false
+		modal.onOpen = (): void => {
+			modal.contentEl.empty()
+			modal.contentEl.createEl('h3', { text: '确认操作' })
+			modal.contentEl.createEl('p', { text: message })
+			const buttons = modal.contentEl.createDiv('modal-button-container')
+			const ok = buttons.createEl('button', { text: okText, cls: okClass })
+			ok.addEventListener('click', () => {
+				answered = true
+				resolve(true)
+				modal.close()
+			})
+			const cancel = buttons.createEl('button', { text: '取消' })
+			cancel.addEventListener('click', () => {
+				answered = true
+				resolve(false)
+				modal.close()
+			})
+		}
+		modal.onClose = (): void => {
+			if (!answered) resolve(false)
+		}
+		modal.open()
+	})
+}
+
 // ------------------------------------------------------------------
 // 书单
 // ------------------------------------------------------------------
@@ -134,6 +165,10 @@ export interface BookInfoValues {
 	title: string
 	author: string
 	publisher: string
+	category: string
+	intro: string
+	/** 哪些字段是 AI 补全的，用来在编辑框旁标一下 */
+	aiMeta?: { author?: boolean; category?: boolean; intro?: boolean }
 }
 
 /** 手动编辑书名/作者/出版社（元数据缺失或解析不准时的兜底） */
@@ -149,19 +184,37 @@ export class BookInfoModal extends Modal {
 	onOpen(): void {
 		this.contentEl.empty()
 		this.contentEl.createEl('h3', { text: '编辑书籍信息' })
-		const mk = (label: string, key: keyof BookInfoValues): HTMLInputElement => {
-			this.contentEl.createEl('div', { text: label, cls: 'grove-info-label' })
+		const label = (text: string, ai = false): void => {
+			const row = this.contentEl.createDiv('grove-info-label')
+			row.setText(text)
+			if (ai) row.createSpan({ cls: 'grove-info-ai', text: 'AI 生成' })
+		}
+		const mk = (text: string, key: keyof BookInfoValues, ai = false): HTMLInputElement => {
+			label(text, ai)
 			const input = this.contentEl.createEl('input', { type: 'text', cls: 'grove-folder-input' })
-			input.value = this.values[key]
+			input.value = String(this.values[key] ?? '')
 			return input
 		}
 		const title = mk('书名', 'title')
-		const author = mk('作者', 'author')
+		const author = mk('作者', 'author', this.values.aiMeta?.author)
 		const publisher = mk('出版社', 'publisher')
+		const category = mk('分类', 'category', this.values.aiMeta?.category)
+		label('一句话简介', this.values.aiMeta?.intro)
+		const intro = this.contentEl.createEl('textarea', {
+			cls: 'grove-comment-input',
+			attr: { rows: '3', placeholder: '例如：一本讲如何用环境设计替代意志力的实用小书' },
+		})
+		intro.value = this.values.intro
 		const buttons = this.contentEl.createDiv('modal-button-container')
 		const ok = buttons.createEl('button', { text: '保存', cls: 'mod-cta' })
 		ok.addEventListener('click', () => {
-			this.onSave({ title: title.value.trim(), author: author.value.trim(), publisher: publisher.value.trim() })
+			this.onSave({
+				title: title.value.trim(),
+				author: author.value.trim(),
+				publisher: publisher.value.trim(),
+				category: category.value.trim(),
+				intro: intro.value.trim(),
+			})
 			this.close()
 		})
 		const cancel = buttons.createEl('button', { text: '取消' })
@@ -493,6 +546,23 @@ export class ReadingStatsModal extends Modal {
 		card('活跃天数', `${streak.activeDays} 天`, '有阅读记录的天数')
 		card('累计阅读', formatDuration(totalSec), `${books.length} 本书`)
 
+		// 手动打卡：和「今日阅读」互补，读完一小段也能标记今天来过
+		const checkRow = this.contentEl.createDiv('grove-stats-checkin')
+		const checked = stats.checkedIn(today)
+		const checkBtn = checkRow.createEl('button', {
+			text: checked ? '今日已打卡' : '今日打卡',
+			cls: checked ? '' : 'mod-cta',
+		})
+		checkBtn.disabled = checked
+		checkBtn.addEventListener('click', () => {
+			if (!stats.checkin()) return
+			new Notice('Grove Reader：今日打卡成功')
+			this.onOpen()
+		})
+		checkRow.createSpan('grove-stats-checkin-count').setText(`累计打卡 ${stats.checkinCount()} 天`)
+		const posterBtn = checkRow.createEl('button', { text: '生成阅读海报' })
+		posterBtn.addEventListener('click', () => void this.#savePoster())
+
 		const heatDays = stats.recentDays(84)
 		const heatTotal = heatDays.reduce((sum, d) => sum + d.seconds, 0)
 		const heatPages = heatDays.reduce((sum, d) => sum + d.pages, 0)
@@ -517,6 +587,39 @@ export class ReadingStatsModal extends Modal {
 		legend.createSpan({ text: '少' })
 		for (let i = 0; i <= 4; i++) legend.createDiv(`grove-stats-heat-cell is-level-${i}`)
 		legend.createSpan({ text: '多' })
+
+		// —— 最近 14 天趋势 ——
+		const trendDays = stats.recentDays(14)
+		const trendMax = Math.max(1, ...trendDays.map(d => d.seconds))
+		const trendHead = this.contentEl.createDiv('grove-stats-chart-head')
+		trendHead.createSpan('grove-stats-chart-title').setText('最近 14 天')
+		const trend = this.contentEl.createDiv('grove-stats-chart')
+		for (const d of trendDays) {
+			const col = trend.createDiv('grove-stats-col')
+			const track = col.createDiv('grove-stats-col-track')
+			const bar = track.createDiv('grove-stats-col-bar')
+			bar.style.height = `${Math.max(2, Math.round((d.seconds / trendMax) * 100))}%`
+			col.title = `${d.day}：${d.seconds ? formatDuration(d.seconds) : '未阅读'}`
+			col.createSpan('grove-stats-col-date').setText(d.day.slice(5))
+			if (d.day === today) col.addClass('is-today')
+		}
+
+		// —— 阅读时段（4 小时一段） ——
+		const hours = stats.hourTotals()
+		const buckets = [0, 4, 8, 12, 16, 20].map(start =>
+			hours.slice(start, start + 4).reduce((sum, v) => sum + v, 0))
+		const bucketMax = Math.max(1, ...buckets)
+		const rhythmHead = this.contentEl.createDiv('grove-stats-chart-head')
+		rhythmHead.createSpan('grove-stats-chart-title').setText('阅读时段')
+		const rhythm = this.contentEl.createDiv('grove-stats-chart is-rhythm')
+		buckets.forEach((seconds, i) => {
+			const col = rhythm.createDiv('grove-stats-col')
+			const track = col.createDiv('grove-stats-col-track')
+			const bar = track.createDiv('grove-stats-col-bar')
+			bar.style.height = `${Math.max(2, Math.round((seconds / bucketMax) * 100))}%`
+			col.title = `${i * 4}–${i * 4 + 4} 点：${seconds ? formatDuration(seconds) : '未阅读'}`
+			col.createSpan('grove-stats-col-date').setText(`${i * 4}–${i * 4 + 4}`)
+		})
 
 		const table = this.contentEl.createEl('table', { cls: 'grove-stats-table' })
 		const head = table.createEl('tr')
@@ -555,6 +658,41 @@ export class ReadingStatsModal extends Modal {
 		if (minutes < 30) return 2
 		if (minutes < 60) return 3
 		return 4
+	}
+
+	/** 阅读海报：统计画成 1080×1440 PNG，存到 Grove Reader/书摘卡/ */
+	async #savePoster(): Promise<void> {
+		const stats = this.plugin.stats
+		const books = stats.sortedBooks()
+		const streak = stats.streak()
+		const canvas = renderReadingPoster({
+			date: new Date(),
+			todaySeconds: stats.dailyTotals().get(todayKey())?.seconds ?? 0,
+			totalSeconds: books.reduce((sum, [, b]) => sum + b.seconds, 0),
+			streakCurrent: streak.current,
+			streakLongest: streak.longest,
+			activeDays: streak.activeDays,
+			checkins: stats.checkinCount(),
+			days: stats.recentDays(14),
+			books: books.slice(0, 3).map(([path, b]) => ({
+				title: cleanBookTitle(basenameOf(path)),
+				seconds: b.seconds,
+			})),
+		})
+		const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+		if (!blob) {
+			new Notice('Grove Reader：海报生成失败，请稍后再试')
+			return
+		}
+		const folder = normalizePath('Grove Reader/书摘卡')
+		try {
+			if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder)
+			const path = normalizePath(`${folder}/${posterFileName()}`)
+			await this.app.vault.createBinary(path, await blob.arrayBuffer())
+			new Notice(`Grove Reader：阅读海报已保存到 ${path}`)
+		} catch (e) {
+			new Notice(`Grove Reader：保存海报失败（${e instanceof Error ? e.message : String(e)}）`)
+		}
 	}
 
 	onClose(): void {
@@ -657,12 +795,12 @@ export class HealthReportModal extends Modal {
 		this.contentEl.createEl('h3', { text: '数据体检' })
 		const issueCount = report.missingBooks.length + report.missingNotes.length + report.duplicates.length
 			+ report.staleShelf.length + report.staleLists.length + report.staleStats.length + report.brokenNoteIds.length
-			+ report.orphanPortraits.length
+			+ report.orphanPortraits.length + report.vectorIssues.length
 		this.contentEl.createEl('p', {
 			text: `批注数据 ${report.jsonCount} 份 / ${report.annotationCount} 条；发现 ${issueCount} 项需要关注。`,
 		})
 		if (!issueCount) {
-			this.contentEl.createEl('p', { text: '没有发现结构性问题：书籍路径、笔记、书架、书单、统计和 AI 要点索引都能对上。' })
+			this.contentEl.createEl('p', { text: '没有发现结构性问题：书籍路径、笔记、书架、书单、统计、AI 要点索引和语义索引都能对上。' })
 		} else {
 			const body = this.contentEl.createDiv('grove-health-body')
 			const section = (title: string, items: string[]): void => {
@@ -682,6 +820,10 @@ export class HealthReportModal extends Modal {
 			section('笔记里的书籍 ID 找不到数据', report.brokenNoteIds.map(b => `${b.note} → ${b.id.slice(0, 12)}…`))
 			section('AI 要点索引对应的书已不存在', report.orphanPortraits.map(p =>
 				`《${p.title || '未命名'}》 · ${p.bookPath || '无路径'}`))
+			section('语义索引损坏或对应的书已不存在', report.vectorIssues.map(v =>
+				v.reason === 'broken'
+					? `${v.file} · 文件损坏或缺少字段`
+					: `《${v.title || '未命名'}》 · ${v.bookPath || '无路径'}`))
 			if (report.missingBooks.length) {
 				this.contentEl.createEl('p', {
 					cls: 'setting-item-description',
@@ -725,6 +867,9 @@ export class HealthReportModal extends Modal {
 		add('统计失效', report.staleStats)
 		add('笔记 ID 失联', report.brokenNoteIds.map(b => `${b.note} ${b.id}`))
 		add('AI 要点索引孤儿', report.orphanPortraits.map(p => `《${p.title || '未命名'}》 ${p.bookPath}`))
+		add('语义索引失效', report.vectorIssues.map(v => v.reason === 'broken'
+			? `${v.file} 损坏`
+			: `《${v.title || '未命名'}》 ${v.bookPath}`))
 		return lines.join('\n')
 	}
 

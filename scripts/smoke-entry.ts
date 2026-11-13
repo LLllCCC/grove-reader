@@ -7,7 +7,8 @@ import { BookStore } from '../src/store'
 import { DesktopIO } from '../src/desktopIO'
 import { buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, NOTE_BEGIN, NOTE_END, renderNoteTemplate, resolveExcerptLinkStyle } from '../src/notes'
 import { STATS_IDLE_MS, STATS_TICK_MS, StatsStore, accrueTick, todayKey } from '../src/stats'
-import { BookData } from '../src/types'
+import { BookData, type Annotation, type Bookmark } from '../src/types'
+import { READING_STATUS_LABELS, READING_STATUS_ORDER, normalizeToolbarOrder } from '../src/types'
 import { bookIdFor, compareCfi, formatDuration, pageFromFraction, relativeTime } from '../src/util'
 import { applySync, normalizeExcerpt, parseNoteEntries, planSync } from '../src/noteSync'
 import { buildSearchIndex, searchDocs } from '../src/search'
@@ -16,6 +17,7 @@ import { buildHealthReport, healthCleanupCount } from '../src/health'
 import { checkMigrateTarget, exportDataBackup, migrateDataFolder } from '../src/backup'
 import { appendCards, buildCardText, emptyCanvas, parseCanvas, serializeCanvas, shortTitle } from '../src/canvas'
 import { buildSubpath, parseGroveHref, parseSubpath, pdfPageEmbed, snippetOf, wikilinkFor } from '../src/wikilink'
+import { parsePdfPlusHref } from '../src/pdfLink'
 import { filterBacklinkGroupsByCfi } from '../src/backlinkFilter'
 import { markupColorCss, markupOpacity, markupRects, markupSubtype } from '../src/pdfAnnots'
 import { collectGlobalBookmarks, filterGlobalBookmarks } from '../src/globalBookmarks'
@@ -35,6 +37,37 @@ import {
 	tokenizeQuery,
 } from '../src/portrait'
 import { computeShelfWindow, estimateRowHeight, spacerHeight } from '../src/shelfWindow'
+import { excerptFileName, excerptMarkdown } from '../src/excerptStore'
+import { buildMultiBookPrompt } from '../src/multiBookPrompt'
+import { parseMetaSuggestion } from '../src/bookMeta'
+import { highlightBands } from '../src/epubHighlight'
+import { LOCAL_EMBED_DIMS, localVector } from '../src/localEmbed'
+import {
+	chunkHash,
+	decodeVector,
+	dotProduct,
+	encodeVector,
+	loadVectorDoc,
+	moveVectorDoc,
+	planVectorChunks,
+	planVectorReuse,
+	removeVectorDoc,
+	saveVectorDoc,
+	unitVector,
+	vectorDocIsStale,
+	vectorPath,
+} from '../src/vectorIndex'
+import {
+	guidePath,
+	guidePromptText,
+	loadGuide,
+	moveGuide,
+	planGuideUnits,
+	removeGuide,
+	resumableGuideItems,
+	saveGuide,
+	type GuideDoc,
+} from '../src/guide'
 
 async function main(): Promise<void> {
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-data-'))
@@ -512,13 +545,24 @@ fs.writeFileSync(path.join(hRoot, 'portraits', 'gone.json'), JSON.stringify({
 fs.writeFileSync(path.join(hRoot, 'portraits', 'orphan.json'), JSON.stringify({
 	version: 1, bookPath: 'Grove Reader/书籍/unknown.epub', title: '孤儿', chunks: [],
 }))
+fs.mkdirSync(path.join(hRoot, 'vectors'), { recursive: true })
+fs.writeFileSync(path.join(hRoot, 'vectors', 'ok.json'), JSON.stringify({
+	version: 1, bookPath: 'Grove Reader/书籍/ok.epub', title: '正常', dims: 2, chunks: [{}],
+}))
+fs.writeFileSync(path.join(hRoot, 'vectors', 'gone.json'), JSON.stringify({
+	version: 1, bookPath: 'Grove Reader/书籍/gone.epub', title: '丢了', dims: 2, chunks: [{}],
+}))
+fs.writeFileSync(path.join(hRoot, 'vectors', 'broken.json'), '{"version":1,"chunks":')
 const hr = await buildHealthReport(new DesktopIO(), hv, hRoot, '')
 assert.equal(hr.jsonCount, 2)
 assert.equal(hr.annotationCount, 1)
 assert.equal(hr.missingBooks.length, 1)
 assert.equal(hr.staleShelf.length, 1)
 assert.equal(hr.orphanPortraits.length, 2, '缺书与无批注数据的索引都算孤儿')
-assert.equal(healthCleanupCount(hr), 3)
+assert.equal(hr.vectorIssues.length, 2, '语义索引坏文件与缺书各算一项')
+assert.equal(hr.vectorIssues.filter(v => v.reason === 'broken').length, 1)
+assert.equal(hr.vectorIssues.filter(v => v.reason === 'orphan').length, 1)
+assert.equal(healthCleanupCount(hr), 5)
 
 // 29. 备份导出（PlatformIO 版）：正常导出、标记文件、目标被占用时阻断
 const bv = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-backup-'))
@@ -952,6 +996,435 @@ assert.equal(await storeDedupe.reloadFromDisk(bookIdFor('Books/x.epub')), true, 
 	assert.equal(resumableChunks(docWith(made, 'partial'), chunks).length, 3)
 }
 
+// 43. AI 按章导读：章节规划、超长拆分、超多合并、续建校验、独立落盘
+{
+	// 正常三章：一章一个单元，pct 从 0 起递增，EPUB/TXT 不带 cfi
+	const units = planGuideUnits([
+		{ label: '第一章', text: '一'.repeat(100) },
+		{ label: '第二章', text: '二'.repeat(100) },
+		{ label: '第三章', text: '三'.repeat(100) },
+	])
+	assert.equal(units.length, 3)
+	assert.deepEqual(units.map(u => u.label), ['第一章', '第二章', '第三章'])
+	assert.equal(units[0].pct, 0)
+	assert.ok(units[1].pct > units[0].pct && units[2].pct > units[1].pct, 'pct 应递增')
+	assert.equal(units[0].cfi, '', '电子书章节不带 cfi，靠章节名 + pct 降级')
+	assert.equal(units[0].text.length, 100, '规划结果应带正文供生成使用')
+
+	// PDF 页标签 → page:N，合并页组时取第一页
+	const pdfUnits = planGuideUnits([
+		{ label: '第 1 页', text: 'a'.repeat(50) },
+		{ label: '第 2 页', text: 'b'.repeat(50) },
+	])
+	assert.equal(pdfUnits[0].cfi, 'page:1')
+	assert.equal(pdfUnits[1].cfi, 'page:2')
+
+	// 超长章节按上限拆开，后续分片标「续」
+	const split = planGuideUnits([{ label: '长章', text: '句'.repeat(5000) }], 60, 1200)
+	assert.ok(split.length >= 4, '超长章节应被拆开')
+	assert.ok(split.every(u => u.text.length <= 1201), '单片不应超过上限太多')
+	assert.ok(split[1].label.includes('续'), split[1].label)
+	assert.equal(split[0].cfi, '')
+
+	// 章节太多时相邻合并，总量不超过 maxGuides
+	const many = Array.from({ length: 100 }, (_, i) => ({ label: `第 ${i + 1} 页`, text: 'x'.repeat(30) }))
+	const merged = planGuideUnits(many, 20)
+	assert.ok(merged.length <= 20, merged.length.toString())
+	assert.ok(merged[0].label.includes('~'), '合并组应写成范围标签')
+	assert.equal(merged[0].cfi, 'page:1', '合并组沿用第一页定位')
+
+	// 续建：只复用 partial 且章节名/长度对得上的前缀
+	const docOf = (items: typeof units, status: 'ready' | 'partial'): GuideDoc => ({
+		version: 1,
+		bookPath: 'Books/a.epub',
+		title: '甲',
+		createdAt: 1,
+		updatedAt: 1,
+		status,
+		items: items.map(u => ({
+			index: u.index,
+			label: u.label,
+			summary: '导读',
+			chars: u.chars,
+			cfi: u.cfi,
+			pct: u.pct,
+		})),
+	})
+	assert.equal(resumableGuideItems(null, units).length, 0)
+	assert.equal(resumableGuideItems(docOf(units.slice(0, 2), 'partial'), units).length, 2)
+	assert.equal(resumableGuideItems(docOf(units.slice(0, 2), 'ready'), units).length, 0, 'ready 应走重新生成')
+	const changedText = units.map((u, i) => i === 1 ? { ...u, chars: u.chars + 1 } : u)
+	assert.equal(resumableGuideItems(docOf(units.slice(0, 2), 'partial'), changedText).length, 1, '章节长度变了只复用前面的')
+
+	// 落盘：路径、往返、改名迁移、删除
+	assert.equal(guidePath('Grove Reader', 'abc'), 'Grove Reader/guides/abc.json')
+	const gio = new DesktopIO()
+	const groot = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-guide-'))
+	await saveGuide(gio, groot, 'abc', docOf(units, 'ready'))
+	const loaded = await loadGuide(gio, groot, 'abc')
+	assert.equal(loaded?.items.length, 3)
+	assert.equal(loaded?.items[1].summary, '导读')
+	await moveGuide(gio, groot, 'abc', 'def', 'Books/b.epub')
+	assert.equal(await loadGuide(gio, groot, 'abc'), null, '改名后旧 id 导读应消失')
+	assert.equal((await loadGuide(gio, groot, 'def'))?.bookPath, 'Books/b.epub')
+	await removeGuide(gio, groot, 'def')
+	assert.equal(await loadGuide(gio, groot, 'def'), null)
+
+	// 超长正文只取头尾，避免一次请求塞整章
+	const clipped = guidePromptText('头'.repeat(3000) + '中'.repeat(3000) + '尾'.repeat(3000), 1000)
+	assert.ok(clipped.length <= 1020, clipped.length.toString())
+	assert.ok(clipped.startsWith('头') && clipped.endsWith('尾'), '截断应保留头尾')
+	assert.ok(clipped.includes('中间省略'))
+}
+
+// 44. 书架手动阅读状态：文案、顺序、持久化、坏值清理
+{
+	assert.equal(READING_STATUS_LABELS.reading, '在读')
+	assert.equal(READING_STATUS_LABELS.want, '想读')
+	assert.deepEqual(READING_STATUS_ORDER, ['reading', 'want', 'done', 'unread'])
+	const rs = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-reading-status-'))
+	const st = new BookStore(rs, 0, new DesktopIO())
+	await st.preload()
+	const b = st.load('Books/status.epub')
+	b.readingStatus = 'want'
+	st.save(b)
+	await st.flush()
+	const st2 = new BookStore(rs, 0, new DesktopIO())
+	await st2.preload()
+	assert.equal(st2.load('Books/status.epub').readingStatus, 'want', '手动状态应能持久化')
+	const bad = st2.load('Books/status.epub')
+	;(bad as unknown as { readingStatus: string }).readingStatus = 'bogus'
+	st2.save(bad)
+	await st2.flush()
+	assert.equal(st2.load('Books/status.epub').readingStatus, undefined, '非法状态应被清掉')
+}
+
+// 45. 跨设备同步：另一台设备写回的旧进度不能覆盖本机新进度
+{
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-progress-sync-'))
+	const st = new BookStore(dir, 0, new DesktopIO())
+	await st.preload()
+	const p = 'Sync/进度.epub'
+	const id = bookIdFor(p)
+	const data = st.load(p)
+	data.lastLocation = { cfi: 'txt:100-110', index: 1, fraction: 0.6, updatedAt: 2000 }
+	st.save(data)
+	await st.flush()
+	const file = path.join(dir, 'data', 'books', `${id}.json`)
+	const older = JSON.parse(fs.readFileSync(file, 'utf-8'))
+	older.lastLocation = { cfi: 'txt:10-20', index: 0, fraction: 0.1, updatedAt: 1000 }
+	fs.writeFileSync(file, JSON.stringify(older))
+	assert.equal(await st.reloadFromDisk(id), true)
+	assert.equal(st.load(p).lastLocation?.updatedAt, 2000, '旧进度不应覆盖新进度')
+	assert.equal(st.load(p).lastLocation?.fraction, 0.6)
+	const newer = JSON.parse(fs.readFileSync(file, 'utf-8'))
+	newer.lastLocation = { cfi: 'txt:900-910', index: 9, fraction: 0.95, updatedAt: 3000 }
+	fs.writeFileSync(file, JSON.stringify(newer))
+	await st.reloadFromDisk(id)
+	assert.equal(st.load(p).lastLocation?.updatedAt, 3000, '更新的进度应被采纳')
+	assert.equal(st.load(p).lastLocation?.fraction, 0.95)
+}
+
+// 46. 划词摘录：文件名、引用块、名词行
+{
+	assert.equal(excerptFileName('围城'), '围城 摘录.md')
+	assert.equal(excerptFileName('《围城》'), '围城 摘录.md', '书名已带书名号时不再套一层')
+	assert.equal(excerptFileName('  '), '未命名 摘录.md')
+	const date = new Date('2026-11-13T10:00:00')
+	const quote = excerptMarkdown({
+		bookTitle: '围城',
+		chapter: '第一章',
+		text: '第一行\n第二行',
+		link: '[[书.epub#grove-cfi=x|回原文]]',
+		mode: 'quote',
+	}, date)
+	assert.ok(quote.startsWith('> 第一行\n> 第二行'), quote)
+	assert.ok(quote.includes('—— 《围城》 · 第一章'), quote)
+	assert.ok(quote.includes('回原文'), quote)
+	const term = excerptMarkdown({ bookTitle: '围城', chapter: '第一章', text: '  派生  ', mode: 'term' }, date)
+	assert.equal(term, '- **派生**（第一章）')
+	assert.equal(excerptMarkdown({ bookTitle: '围城', text: '   ', mode: 'quote' }, date), '', '空选中不产出内容')
+}
+
+// 47. 向量索引：切块偏移、Base64 往返、余弦、落盘与迁移
+{
+	const txtChunks = planVectorChunks([
+		{ label: '第一章', text: '甲'.repeat(2000), start: 100 },
+		{ label: '第二章', text: '乙'.repeat(100), start: 2200 },
+	] as never, 'txt', 1000)
+	assert.equal(txtChunks.length, 3, '长节应切成两块，短节一块')
+	assert.equal(txtChunks[0].cfi, 'txt:100-1100')
+	assert.equal(txtChunks[1].cfi, 'txt:1100-2100')
+	assert.equal(txtChunks[2].cfi, 'txt:2200-2300')
+	const pdfChunks = planVectorChunks([
+		{ label: '第 3 页', text: 'x'.repeat(2500), page: 3 },
+	] as never, 'pdf', 1000)
+	assert.equal(pdfChunks.length, 3)
+	assert.ok(pdfChunks.every(c => c.cfi === 'page:3'), 'PDF 每块都落到同一页')
+	const unit = unitVector([3, 4])
+	assert.ok(Math.abs(unit[0] - 0.6) < 1e-6 && Math.abs(unit[1] - 0.8) < 1e-6)
+	const back = decodeVector(encodeVector(unit))
+	assert.ok(Math.abs(back[0] - 0.6) < 1e-6 && Math.abs(back[1] - 0.8) < 1e-6, 'Base64 往返应无损')
+	assert.ok(Math.abs(dotProduct(unit, unit) - 1) < 1e-6)
+	assert.ok(Math.abs(dotProduct(unit, unitVector([4, 3])) - 0.96) < 1e-6, '余弦应为点积')
+
+	assert.equal(vectorPath('Grove Reader', 'abc'), 'Grove Reader/vectors/abc.json')
+	const vio = new DesktopIO()
+	const vroot = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-vector-'))
+	const doc = {
+		version: 1 as const,
+		bookPath: 'Books/a.epub',
+		title: '甲',
+		model: 'embedding-3',
+		dims: 2,
+		createdAt: 1,
+		updatedAt: 1,
+		chunks: [{
+			label: '第一章',
+			start: 0,
+			cfi: '',
+			pct: 0,
+			preview: '预览',
+			vector: encodeVector(unit),
+		}],
+	}
+	await saveVectorDoc(vio, vroot, 'abc', doc)
+	const loadedDoc = await loadVectorDoc(vio, vroot, 'abc')
+	assert.equal(loadedDoc?.chunks.length, 1)
+	assert.equal(loadedDoc?.dims, 2)
+	assert.ok(Math.abs(decodeVector(loadedDoc!.chunks[0].vector)[1] - 0.8) < 1e-6)
+	await moveVectorDoc(vio, vroot, 'abc', 'def', 'Books/b.epub')
+	assert.equal(await loadVectorDoc(vio, vroot, 'abc'), null, '改名后旧 id 索引应消失')
+	assert.equal((await loadVectorDoc(vio, vroot, 'def'))?.bookPath, 'Books/b.epub')
+	await removeVectorDoc(vio, vroot, 'def')
+	assert.equal(await loadVectorDoc(vio, vroot, 'def'), null)
+}
+
+// 48. 离线词法向量：维度、相关文本相似度应高于无关文本
+{
+	const q = unitVector(Array.from(localVector('怎样才能坚持一个新习惯')))
+	const related = unitVector(Array.from(localVector('养成新习惯的关键是把它拆到足够小，每天重复')))
+	const unrelated = unitVector(Array.from(localVector('周末去了公园，湖边树开始变黄')))
+	assert.equal(localVector('测试').length, LOCAL_EMBED_DIMS)
+	assert.ok(dotProduct(q, related) > dotProduct(q, unrelated), '相关段落应比无关段落更接近查询')
+	assert.ok(dotProduct(q, related) > 0.15, `相关度太低：${dotProduct(q, related).toFixed(3)}`)
+	assert.ok(Math.abs(dotProduct(unitVector(Array.from(localVector('同一段文字'))), q) - dotProduct(unitVector(Array.from(localVector('同一段文字'))), q)) < 1e-6, '同文本向量应稳定')
+}
+
+// 49. 向量索引失效判断：mtime / 大小变化才算旧，老索引缺字段时不误判
+{
+	assert.equal(vectorDocIsStale({ sourceMtime: 100, sourceSize: 10 }, { mtime: 100, size: 10 }), false)
+	assert.equal(vectorDocIsStale({ sourceMtime: 100, sourceSize: 10 }, { mtime: 200, size: 10 }), true, 'mtime 变了应为旧索引')
+	assert.equal(vectorDocIsStale({ sourceMtime: 100, sourceSize: 10 }, { mtime: 100, size: 11 }), true, '大小变了应为旧索引')
+	assert.equal(vectorDocIsStale({}, { mtime: 100, size: 10 }), false, '旧版索引没有 mtime 时不判旧')
+	assert.equal(vectorDocIsStale({ sourceMtime: 100, sourceSize: 10 }, null), false, '读不到文件状态时不判旧')
+}
+
+// 50. 工具栏顺序：未知项与重复项被忽略，未列出的动作按默认顺序补齐
+{
+	assert.deepEqual(normalizeToolbarOrder(), ['外观', 'AI 问答', '导读', '笔记', '书签', '批注'])
+	assert.deepEqual(
+		normalizeToolbarOrder(['批注', '未知', '外观', '批注']),
+		['批注', '外观', 'AI 问答', '导读', '笔记', '书签'],
+	)
+	assert.deepEqual(normalizeToolbarOrder(['书签'])[0], '书签')
+}
+
+// 51. 跨设备合并：按 id 合并、删除墓碑优先、旧对象保存不覆盖新同步
+{
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grove-merge-'))
+	const st = new BookStore(dir, 0, new DesktopIO())
+	await st.preload()
+	const book = 'Sync/合并.epub'
+	const id = bookIdFor(book)
+	const file = path.join(dir, 'data', 'books', `${id}.json`)
+	const mkAnn = (aid: string, text: string, updatedAt: number): Annotation => ({
+		id: aid, cfi: `txt:${updatedAt}`, text, color: 'yellow', createdAt: 1, updatedAt,
+	})
+	const a1 = mkAnn('a1', '本地一', 1000)
+	const a2 = mkAnn('a2', '共同', 2000)
+	const b1: Bookmark = { id: 'b1', cfi: 'txt:1', label: '书签一', createdAt: 1 }
+	const b2: Bookmark = { id: 'b2', cfi: 'txt:2', label: '书签二', createdAt: 2 }
+	const data = st.load(book)
+	data.annotations.push(a1, a2)
+	data.bookmarks = [b1, b2]
+	st.save(data)
+	await st.flush()
+	// 本机删除 a1 / b1
+	data.annotations = data.annotations.filter(a => a.id !== 'a1')
+	data.bookmarks = data.bookmarks.filter(b => b.id !== 'b1')
+	st.save(data)
+	await st.flush()
+	const afterDelete = JSON.parse(fs.readFileSync(file, 'utf-8'))
+	assert.ok(afterDelete.deletedAnnotations?.a1 > 0, '删除批注应写墓碑')
+	assert.ok(afterDelete.deletedBookmarks?.b1 > 0, '删除书签应写墓碑')
+
+	// 另一台设备拿着旧文件写回（还带着 a1/b1，且没有墓碑）
+	const oldDevice = {
+		version: 1, bookPath: book, title: '', author: '',
+		annotations: [mkAnn('a1', '另一台的一', 1000), mkAnn('a2', '共同', 2000)],
+		bookmarks: [b1, b2],
+		lastLocation: { cfi: 'txt:9', index: 0, updatedAt: 500 },
+	}
+	fs.writeFileSync(file, JSON.stringify(oldDevice))
+	await st.reloadFromDisk(id)
+	const merged = st.load(book)
+	assert.equal(merged.annotations.some(a => a.id === 'a1'), false, '墓碑应压住旧设备写回的批注')
+	assert.equal(merged.annotations.some(a => a.id === 'a2'), true)
+	assert.equal(merged.bookmarks?.some(b => b.id === 'b1'), false, '墓碑应压住旧设备写回的书签')
+	assert.equal(merged.bookmarks?.some(b => b.id === 'b2'), true)
+	await st.flush()
+	const mergedFile = JSON.parse(fs.readFileSync(file, 'utf-8'))
+	assert.ok(mergedFile.deletedAnnotations?.a1 > 0, '合并结果应把墓碑写回磁盘')
+
+	// 同一 id 的批注：updatedAt 新的版本胜出，另一台新增的保留
+	fs.writeFileSync(file, JSON.stringify({
+		...oldDevice,
+		annotations: [mkAnn('a2', '另一台改过', 3000), mkAnn('a3', '另一台新增', 3000)],
+		bookmarks: [b2],
+	}))
+	await st.reloadFromDisk(id)
+	const merged2 = st.load(book)
+	assert.equal(merged2.annotations.find(a => a.id === 'a2')?.text, '另一台改过')
+	assert.equal(merged2.annotations.some(a => a.id === 'a3'), true, '另一台新增的批注应保留')
+
+	// 视图拿着同步前的旧对象保存：不能把刚同步进来的 a3 覆盖掉
+	st.save(data)
+	await st.flush()
+	assert.equal(st.load(book).annotations.some(a => a.id === 'a3'), true, '旧对象保存时应与缓存合并')
+
+	// 过期墓碑在保存时清理
+	const expired = st.load(book)
+	expired.deletedAnnotations = {
+		...(expired.deletedAnnotations ?? {}),
+		old: Date.now() - 181 * 24 * 60 * 60 * 1000,
+	}
+	st.save(expired)
+	await st.flush()
+	const pruned = JSON.parse(fs.readFileSync(file, 'utf-8'))
+	assert.equal(pruned.deletedAnnotations?.old, undefined, '过期墓碑应在保存时清掉')
+}
+
+// 52. 增量索引：正文指纹稳定、只复用未改动块、换模型或无指纹时整本重嵌
+{
+	assert.equal(chunkHash('同样的正文'), chunkHash('同样的正文'), '同一正文指纹应稳定')
+	assert.notEqual(chunkHash('同样的正文'), chunkHash('同样的正文。'), '正文变化指纹应变化')
+	const vector = encodeVector([1, 0])
+	const makeDoc = (
+		chunks: Array<{ hash?: string; vector: string }>,
+		model = 'local:hash-256',
+	): Record<string, unknown> => ({
+		version: 1,
+		bookPath: 'Books/a.txt',
+		title: '甲',
+		model,
+		dims: 2,
+		createdAt: 1,
+		updatedAt: 1,
+		chunks: chunks.map((chunk, i) => ({
+			label: `第 ${i + 1} 段`,
+			start: i,
+			cfi: '',
+			pct: 0,
+			preview: '',
+			...chunk,
+		})),
+	})
+	const doc = makeDoc([{ hash: 'h1', vector }, { hash: 'h2', vector }])
+	const plan = planVectorReuse(doc as never, ['h1', 'h3'], 'local:hash-256')
+	assert.equal(plan.reused, 1, '只有 h1 能复用')
+	assert.equal(plan.vectors[0], vector)
+	assert.equal(plan.vectors[1], null, '改动的块要重新嵌入')
+	assert.equal(planVectorReuse(doc as never, ['h1'], 'local:hash-256:other').reused, 0, '换模型不应复用')
+	assert.equal(planVectorReuse(null, ['h1'], 'local:hash-256').reused, 0, '没有旧索引时全部重嵌')
+	const noHash = makeDoc([{ vector }])
+	assert.equal(planVectorReuse(noHash as never, ['h1'], 'local:hash-256').reused, 0, '旧索引没有指纹时整本重建')
+}
+
+// 53. 跨书问答 prompt：书名/章节/摘录/问题都在，空摘要不出现「要点：（无）」
+{
+	const prompt = buildMultiBookPrompt('习惯怎么养成？', [
+		{ book: '甲', chapter: '第一章', summary: '', preview: '把目标拆小' },
+		{ book: '乙', chapter: '第二章', summary: '环境比自律可靠' },
+	])
+	assert.ok(prompt.includes('《甲》· 第一章'), prompt)
+	assert.ok(prompt.includes('摘录：把目标拆小'))
+	assert.ok(prompt.includes('要点：环境比自律可靠'))
+	assert.ok(!prompt.includes('要点：（无）'), '语义材料没有摘要时不应输出空要点')
+	assert.ok(prompt.includes('问题：习惯怎么养成？'))
+	assert.ok(prompt.includes('不要编造'))
+	assert.ok(buildMultiBookPrompt('问', []).includes('没有检索到相关材料'))
+}
+
+// 54. AI 元数据解析：纯 JSON、代码块、前后闲聊、坏输出
+{
+	assert.deepEqual(
+		parseMetaSuggestion('{"author":"张三","category":"习惯","intro":"一本小书"}'),
+		{ author: '张三', category: '习惯', intro: '一本小书' },
+	)
+	assert.deepEqual(
+		parseMetaSuggestion('```json\n{"author":"李四","category":"心理","intro":"简介"}\n```'),
+		{ author: '李四', category: '心理', intro: '简介' },
+	)
+	const chatty = parseMetaSuggestion('好的：\n{"author":"王五"}\n希望有帮助')
+	assert.equal(chatty.author, '王五')
+	assert.equal(chatty.category, '')
+	assert.deepEqual(parseMetaSuggestion('not json'), { author: '', category: '', intro: '' })
+	const badTypes = parseMetaSuggestion('{"author":123,"category":null,"intro":"有效"}')
+	assert.equal(badTypes.author, '', '非字符串字段应忽略')
+	assert.equal(badTypes.category, '')
+	assert.equal(badTypes.intro, '有效')
+}
+
+// 55. EPUB 高亮色带：横排下半段 + 底线、竖排右半段、整行色块
+{
+	const rect = { left: 10, top: 20, width: 100, height: 16 }
+	const wash = highlightBands(rect, 'wash')
+	assert.equal(wash.length, 2, '马克笔样式应有一条色带和一条底线')
+	assert.equal(wash[0].y, 28, '色带从下半段开始')
+	assert.equal(wash[0].height, 8)
+	assert.equal(wash[0].opacity, 0.28)
+	assert.equal(wash[1].y, 35, '底线贴住文字底部')
+	assert.equal(wash[1].height, 1)
+	assert.equal(wash[1].width, 100)
+	const vertical = highlightBands({ left: 10, top: 20, width: 16, height: 100 }, 'wash', true)
+	assert.equal(vertical[0].x, 18, '竖排色带在右半段')
+	assert.equal(vertical[0].width, 8)
+	assert.equal(vertical[1].x, 25, '竖排底线贴右边缘')
+	const block = highlightBands(rect, 'block')
+	assert.equal(block.length, 1)
+	assert.equal(block[0].height, 16)
+	assert.equal(block[0].opacity, 0.3)
+}
+
+/** PDF++ 链接：页码必须有，归一化 rect 与点坐标 selection 分流 */
+function testPdfPlusLinks() {
+	const a = parsePdfPlusHref('Books/书.pdf#page=12&selection=34,56,78,90&color=yellow|别名')
+	assert.ok(a)
+	assert.equal(a.bookPath, 'Books/书.pdf')
+	assert.equal(a.page, 12)
+	assert.equal(a.rects, undefined)
+	assert.deepEqual(a.pointRects, [{ l: 34, t: 56, r: 78, b: 90 }])
+
+	const b = parsePdfPlusHref('Books/书.pdf#page=3&rect=0.1,0.2,0.3,0.05&color=red')
+	assert.ok(b)
+	assert.deepEqual(b.rects, [{ l: 0.1, t: 0.2, w: 0.3, h: 0.05 }])
+	assert.equal(b.pointRects, undefined)
+
+	// 百分号编码（markdown 链接里的空格与中文）
+	const c = parsePdfPlusHref('Books/%E4%B9%A6%20A.pdf#page=7')
+	assert.ok(c)
+	assert.equal(c.bookPath, 'Books/书 A.pdf')
+	assert.equal(c.page, 7)
+
+	// 不是 PDF、没有 page、非 PDF++ 形态 → 放行给 Obsidian
+	assert.equal(parsePdfPlusHref('Books/书.epub#page=3'), null)
+	assert.equal(parsePdfPlusHref('Books/书.pdf#chapter=3'), null)
+	assert.equal(parsePdfPlusHref('Books/书.pdf'), null)
+	assert.equal(parsePdfPlusHref('https://example.com/a.pdf#page=1'), null)
+}
+
+testPdfPlusLinks()
 console.log('SMOKE OK')
 }
 

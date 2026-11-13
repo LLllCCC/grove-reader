@@ -1,10 +1,12 @@
 import { App, Notice, Platform, PluginSettingTab, Setting, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import { FolderPromptModal, FolderSuggest, ConfirmModal, OpLogModal, TemplateEditModal } from './modals'
-import { APP_NAME, BACKUP_FOLDER_NAME, DEFAULT_SHELF_DISPLAY } from './types'
+import { APP_NAME, BACKUP_FOLDER_NAME, DEFAULT_SHELF_DISPLAY, HIGHLIGHT_COLORS, normalizeToolbarOrder } from './types'
 import type { GroveSettings } from './types'
 import { basenameOf, isAbsolutePath } from './util'
 import { LOGO_OPTIONS } from './logos'
+import { embeddingProviderLabel, type EmbeddingProvider } from './embedding'
+import { VectorIndexModal } from './vectorIndexModal'
 
 type SettingsTab = 'appearance' | 'shelf' | 'reading' | 'data'
 
@@ -212,6 +214,113 @@ export class GroveSettingTab extends PluginSettingTab {
 				}))
 
 		new Setting(containerEl)
+			.setName('手机上点正文上下区域翻页')
+			.setDesc('开启后，手机点正文上方 1/4 翻到上一页、下方 1/4 翻到下一页；中间区域仍是展开工具栏。默认关闭，避免误触')
+			.addToggle(toggle =>
+				toggle.setValue(this.plugin.settings.mobileTapZones ?? false).onChange(async value => {
+					this.plugin.settings.mobileTapZones = value
+					await this.plugin.saveSettings()
+				}))
+
+		new Setting(containerEl)
+			.setName('手机上双指轻按切换沉浸阅读')
+			.setDesc('开启后，双指同时轻点正文会隐藏/显示工具栏与侧栏，适合手机全屏阅读。默认开启')
+			.addToggle(toggle =>
+				toggle.setValue(this.plugin.settings.mobileTwoFingerImmersive ?? true).onChange(async value => {
+					this.plugin.settings.mobileTwoFingerImmersive = value
+					await this.plugin.saveSettings()
+				}))
+
+		new Setting(containerEl)
+			.setName('工具栏样式')
+			.setDesc('图标更省空间；文字按钮更好认，适合不熟悉图标的场景')
+			.addDropdown(dropdown =>
+				dropdown
+					.addOptions({ icon: '图标', text: '文字' })
+					.setValue(this.plugin.settings.toolbarStyle ?? 'icon')
+					.onChange(async value => {
+						this.plugin.settings.toolbarStyle = value === 'text' ? 'text' : 'icon'
+						await this.plugin.saveSettings()
+						new Notice('Grove Reader：工具栏样式已保存，重开书本后生效')
+					}))
+
+		new Setting(containerEl)
+			.setName('默认高亮颜色')
+			.setDesc('手机工具栏颜色菜单里的「默认色」按钮使用这个颜色；桌面 5 个色点不变')
+			.addDropdown(dropdown => {
+				for (const c of HIGHLIGHT_COLORS) dropdown.addOption(c.key, c.name)
+				dropdown
+					.setValue(this.plugin.settings.defaultHighlightColor ?? 'yellow')
+					.onChange(async value => {
+						this.plugin.settings.defaultHighlightColor = value
+						await this.plugin.saveSettings()
+					})
+			})
+
+		new Setting(containerEl)
+			.setName('EPUB 高亮样式')
+			.setDesc('马克笔＝下半段色带 + 底部细线；整行色块＝整行半透明填充。重开书本后生效')
+			.addDropdown(dropdown =>
+				dropdown
+					.addOptions({ wash: '马克笔（下划色带）', block: '整行色块' })
+					.setValue(this.plugin.settings.epubHighlightStyle ?? 'wash')
+					.onChange(async value => {
+						this.plugin.settings.epubHighlightStyle = value === 'block' ? 'block' : 'wash'
+						await this.plugin.saveSettings()
+						new Notice('Grove Reader：高亮样式已保存，重开书本后生效')
+					}))
+
+		new Setting(containerEl)
+			.setName('隐藏的工具栏按钮')
+			.setDesc('用逗号分隔：评论 / 外观 / AI 问答 / 导读 / 笔记 / 书签 / 批注；重开书本后生效')
+			.addText(text =>
+				text
+					.setPlaceholder('例如：外观, 笔记')
+					.setValue((this.plugin.settings.hiddenToolbarActions ?? []).join(', '))
+					.onChange(async value => {
+						this.plugin.settings.hiddenToolbarActions = value
+							.split(/[,，]/)
+							.map(s => s.trim())
+							.filter(Boolean)
+						await this.plugin.saveSettings()
+					}))
+
+		// 动作顺序：用上下箭头调整，保存后重开书本生效
+		const orderSetting = new Setting(containerEl)
+			.setName('工具栏按钮顺序')
+			.setDesc('颜色与「评论」固定在左侧；其余按钮按这里从上到下排列，重开书本后生效')
+		orderSetting.addButton(button =>
+			button.setButtonText('恢复默认').onClick(async () => {
+				this.plugin.settings.toolbarOrder = []
+				await this.plugin.saveSettings()
+				this.display()
+			}))
+		const orderBox = containerEl.createDiv('grove-order-editor')
+		const order = normalizeToolbarOrder(this.plugin.settings.toolbarOrder)
+		const move = async (index: number, delta: number): Promise<void> => {
+			const next = order.slice()
+			const target = index + delta
+			if (target < 0 || target >= next.length) return
+			;[next[index], next[target]] = [next[target], next[index]]
+			this.plugin.settings.toolbarOrder = next
+			await this.plugin.saveSettings()
+			this.display()
+		}
+		order.forEach((name, index) => {
+			const row = orderBox.createDiv('grove-order-row')
+			row.createSpan('grove-order-index').setText(String(index + 1))
+			row.createSpan('grove-order-name').setText(name)
+			const up = row.createEl('button', { cls: 'clickable-icon', attr: { 'aria-label': '上移', title: '上移' } })
+			setIcon(up, 'chevron-up')
+			up.disabled = index === 0
+			up.addEventListener('click', () => void move(index, -1))
+			const down = row.createEl('button', { cls: 'clickable-icon', attr: { 'aria-label': '下移', title: '下移' } })
+			setIcon(down, 'chevron-down')
+			down.disabled = index === order.length - 1
+			down.addEventListener('click', () => void move(index, 1))
+		})
+
+		new Setting(containerEl)
 			.setName('每日阅读目标')
 			.setDesc('分钟；0 = 不设目标。用于阅读统计页的今日进度和热力图深浅')
 			.addText(text =>
@@ -246,6 +355,31 @@ export class GroveSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.txtTurnAxis ?? 'horizontal')
 					.onChange(async value => {
 						this.plugin.settings.txtTurnAxis = value as GroveSettings['txtTurnAxis']
+						await this.plugin.saveSettings()
+					}))
+
+		// —— PDF 链接 ——
+		containerEl.createEl('h3', { text: 'PDF 链接' })
+		new Setting(containerEl)
+			.setName('复制链接的格式')
+			.setDesc('Grove 双链：[[书.pdf#grove-cfi=page:12&r=…]]，点击回到原句并标出框选；PDF++ 兼容：[[书.pdf#page=12&rect=…]]，供安装了 PDF++ 的库使用')
+			.addDropdown(dropdown =>
+				dropdown
+					.addOptions({ grove: 'Grove 双链（默认）', pdfplus: 'PDF++ 兼容' })
+					.setValue(this.plugin.settings.pdfLinkStyle ?? 'grove')
+					.onChange(async value => {
+						this.plugin.settings.pdfLinkStyle = value === 'pdfplus' ? 'pdfplus' : 'grove'
+						await this.plugin.saveSettings()
+					}))
+		new Setting(containerEl)
+			.setName('PDF 链接别名')
+			.setDesc('复制页链接 / 批注链接时写在竖线后的文字')
+			.addDropdown(dropdown =>
+				dropdown
+					.addOptions({ 'title-page': '书名 · 页码', page: '仅页码', snippet: '原文开头' })
+					.setValue(this.plugin.settings.pdfLinkAlias ?? 'title-page')
+					.onChange(async value => {
+						this.plugin.settings.pdfLinkAlias = value as GroveSettings['pdfLinkAlias']
 						await this.plugin.saveSettings()
 					}))
 
@@ -301,6 +435,74 @@ export class GroveSettingTab extends PluginSettingTab {
 					})
 				text.inputEl.rows = 3
 			})
+		// —— 语义检索（向量） ——
+		containerEl.createEl('h3', { text: '语义检索（向量）' })
+		const provider = (this.plugin.settings.aiEmbeddingProvider ?? 'local') as EmbeddingProvider
+		new Setting(containerEl)
+			.setName('向量服务')
+			.setDesc('本地＝离线词法向量，不联网不花钱（同义说法未必命中）；智谱 embedding-3 需要资源包；硅基流动 bge-m3 有免费额度但需要单独填 Key。换服务后旧索引会失效，需重建')
+			.addDropdown(dropdown => {
+				for (const key of ['local', 'zhipu', 'siliconflow', 'custom'] as EmbeddingProvider[]) {
+					dropdown.addOption(key, embeddingProviderLabel(key))
+				}
+				dropdown.setValue(provider).onChange(async value => {
+					this.plugin.settings.aiEmbeddingProvider = value as EmbeddingProvider
+					await this.plugin.saveSettings()
+					this.display()
+				})
+			})
+		if (provider !== 'local') {
+			new Setting(containerEl)
+				.setName('嵌入接口地址')
+				.setDesc('OpenAI 兼容 /embeddings；留空则用上面的聊天接口地址（硅基流动默认 https://api.siliconflow.cn/v1）')
+				.addText(text =>
+					text
+						.setPlaceholder(provider === 'siliconflow' ? 'https://api.siliconflow.cn/v1' : '留空用聊天接口地址')
+						.setValue(this.plugin.settings.aiEmbeddingBaseUrl ?? '')
+						.onChange(async value => {
+							this.plugin.settings.aiEmbeddingBaseUrl = value.trim()
+							await this.plugin.saveSettings()
+						}))
+			new Setting(containerEl)
+				.setName('嵌入 API Key')
+				.setDesc('留空则用上面的聊天 Key；硅基流动等第三方必须单独填')
+				.addText(text => {
+					text.inputEl.type = 'password'
+					text.setPlaceholder('sk-…')
+						.setValue(this.plugin.settings.aiEmbeddingApiKey ?? '')
+						.onChange(async value => {
+							this.plugin.settings.aiEmbeddingApiKey = value.trim()
+							await this.plugin.saveSettings()
+						})
+				})
+			new Setting(containerEl)
+				.setName('向量模型')
+				.setDesc('智谱填 embedding-3；硅基流动填 BAAI/bge-m3；OpenAI 填 text-embedding-3-small')
+				.addText(text =>
+					text
+						.setPlaceholder(provider === 'siliconflow' ? 'BAAI/bge-m3' : 'embedding-3')
+						.setValue(this.plugin.settings.aiEmbeddingModel ?? '')
+						.onChange(async value => {
+							this.plugin.settings.aiEmbeddingModel = value.trim()
+							await this.plugin.saveSettings()
+						}))
+			if (provider !== 'siliconflow') {
+				new Setting(containerEl)
+					.setName('向量维度')
+					.setDesc('默认 1024；服务不支持时会自动退回默认维度。维度越大索引越精确也越占空间')
+					.addText(text =>
+						text
+							.setPlaceholder('1024')
+							.setValue(String(this.plugin.settings.aiEmbeddingDimensions ?? 1024))
+							.onChange(async value => {
+								const n = Number.parseInt(value, 10)
+								if (Number.isFinite(n) && n >= 0) {
+									this.plugin.settings.aiEmbeddingDimensions = Math.min(3072, n)
+									await this.plugin.saveSettings()
+								}
+							}))
+			}
+		}
 
 		// —— 笔记 ——
 		containerEl.createEl('h3', { text: '笔记' })
@@ -512,6 +714,11 @@ export class GroveSettingTab extends PluginSettingTab {
 			.setDesc('跨书搜索划线与评论；结果可跳回原文，导出 Markdown / CSV 到笔记文件夹')
 			.addButton(button =>
 				button.setButtonText('搜索').setCta().onClick(() => this.plugin.showSearch()))
+		new Setting(containerEl)
+			.setName('语义索引管理')
+			.setDesc('查看每本书的向量索引状态（可用 / 未建立 / 原书已改 / 模型已换），可单独重建、删除或清理失效索引')
+			.addButton(button =>
+				button.setButtonText('管理').onClick(() => new VectorIndexModal(this.app, this.plugin).open()))
 
 		// —— 回收站（走 PlatformIO，手机端同样可用）——
 		const trash = this.plugin.trash
