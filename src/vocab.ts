@@ -40,6 +40,12 @@ function oneLine(value: string): string {
 	return value.replace(/\s*\n+\s*/g, '；').trim()
 }
 
+/** 书名已经带《》时不再重复包一层 */
+function bookLabel(title: string): string {
+	const value = (title || '').trim() || '未命名'
+	return /^《.*》$/.test(value) ? value : `《${value}》`
+}
+
 /** 把 AI 的三行输出拆成独立条目；用户自由输入的释义保持一行一项 */
 function meaningLines(meaning: string): string[] {
 	const lines = (meaning ?? '').split(/\r?\n/).map(l => l.trim()).filter(Boolean)
@@ -58,7 +64,7 @@ function meaningLines(meaning: string): string[] {
 export function vocabEntryMarkdown(entry: VocabEntry): string {
 	const lines = [`## ${entry.word.trim()}`, '', ...meaningLines(entry.meaning)]
 	if (entry.context?.trim()) lines.push(`- **原文**：${oneLine(entry.context)}`)
-	const where = [`《${entry.bookTitle}》`]
+	const where = [bookLabel(entry.bookTitle)]
 	if (entry.chapter?.trim()) where.push(entry.chapter.trim())
 	if (entry.cfi) where.push(jumpLink(bookIdFor(entry.bookPath), entry.cfi))
 	lines.push(`- **位置**：${where.join(' · ')}`)
@@ -69,7 +75,7 @@ export function vocabEntryMarkdown(entry: VocabEntry): string {
 /** 追加一条；同名词已存在时不重复写 */
 export function appendVocabEntry(existing: string | null, entry: VocabEntry): { markdown: string; added: boolean } {
 	const word = entry.word.trim()
-	const markdown = existing ?? `# 《${entry.bookTitle}》生词本\n`
+	const markdown = existing ?? `# ${bookLabel(entry.bookTitle)}生词本\n`
 	if (!word) return { markdown, added: false }
 	const has = new RegExp(`^##\\s+${escapeRegExp(word)}\\s*$`, 'm').test(markdown)
 	if (has) return { markdown, added: false }

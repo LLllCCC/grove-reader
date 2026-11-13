@@ -1554,6 +1554,9 @@ assert.equal(await storeDedupe.reloadFromDisk(bookIdFor('Books/x.epub')), true, 
 	assert.ok(csv.includes('原文：An ephemeral moment.'))
 	assert.equal(vocabFilePath('阅读笔记', 'A/B:C'), '阅读笔记/生词本/A B C 生词本.md', '书名里的路径字符要清洗')
 	assert.equal(appendVocabEntry(null, { ...entry, word: '   ' }).added, false, '空词不写')
+	const bracketed = appendVocabEntry(null, { ...entry, word: 'brief', bookTitle: '《测试书》' })
+	assert.ok(bracketed.markdown.startsWith('# 《测试书》生词本'), '书名已带《》时不再重复包一层')
+	assert.ok(!bracketed.markdown.includes('《《'), '不能出现双书名号')
 }
 
 // 60. 外部标注导入：Kindle / Readwise / 微信读书解析、格式识别、书名匹配与去重
