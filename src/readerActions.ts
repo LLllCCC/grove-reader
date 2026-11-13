@@ -59,6 +59,8 @@ export function createReaderActions(
 	const refs: ReaderActionRefs = { colorMenuClose: null, bookmarkBtn: null, ttsBtn: null }
 	const textMode = options.style === 'text'
 	const hidden = new Set(options.hidden ?? [])
+	// Android WebView 没有 Web Speech API，手机上不显示一个点了没反应的朗读按钮
+	const ttsSupported = typeof window !== 'undefined' && typeof window.speechSynthesis !== 'undefined'
 	const actionBtn = (
 		label: string,
 		icon: string,
@@ -115,7 +117,7 @@ export function createReaderActions(
 			render: () => actionBtn('AI 按章导读', 'list-tree', '导读', () => handlers.onGuide(), 'clickable-icon grove-icon-btn grove-text-action', '导读'),
 		},
 		朗读: {
-			enabled: options.text && !!handlers.onTts,
+			enabled: options.text && !!handlers.onTts && ttsSupported,
 			render: () => {
 				refs.ttsBtn = actionBtn('朗读当前页（系统语音）', 'volume-2', '朗读', () => handlers.onTts?.(), 'clickable-icon grove-icon-btn grove-text-action', '朗读')
 			},

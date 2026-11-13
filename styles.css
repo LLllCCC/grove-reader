@@ -2276,6 +2276,11 @@ body.is-mobile .grove-stats-heatmap {
 	font-size: var(--font-ui-small);
 }
 
+.grove-stats-table-wrap {
+	max-width: 100%;
+	overflow-x: auto;
+}
+
 .grove-stats-table th {
 	text-align: left;
 	color: var(--text-muted);

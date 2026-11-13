@@ -688,7 +688,9 @@ export class ReadingStatsModal extends Modal {
 			col.createSpan('grove-stats-col-date').setText(`${i * 4}–${i * 4 + 4}`)
 		})
 
-		const table = this.contentEl.createEl('table', { cls: 'grove-stats-table' })
+		// 手机窄屏下表格比弹窗宽，用单独的滚动容器，别把整个弹窗撑出横向滚动
+		const tableWrap = this.contentEl.createDiv('grove-stats-table-wrap')
+		const table = tableWrap.createEl('table', { cls: 'grove-stats-table' })
 		const head = table.createEl('tr')
 		for (const h of ['书名', '累计阅读', '天数', '今日', '最近阅读']) head.createEl('th', { text: h })
 		if (!books.length) {
