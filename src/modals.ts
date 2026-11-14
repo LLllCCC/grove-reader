@@ -547,6 +547,12 @@ export class ReadingStatsModal extends Modal {
 		card('连续阅读', `${streak.current} 天`, `最长 ${streak.longest} 天`)
 		card('活跃天数', `${streak.activeDays} 天`, '有阅读记录的天数')
 		card('累计阅读', formatDuration(totalSec), `${books.length} 本书`)
+		const review = this.plugin.reviewOverview()
+		card(
+			'今日复习',
+			review.cap ? `${review.today} / ${review.cap} 条` : '已关闭',
+			review.cap ? `到期 ${review.due} 条${this.plugin.settings.reviewIncludeNew !== false ? ` · 旧划线 ${review.fresh} 条` : ''}` : '设置 → 每日复习条数',
+		)
 
 		// 年度目标方格 + 读完预测：状态直接读每本书的数据，预测按近 7 天速度
 		const goalBooks = Math.max(0, this.plugin.settings.yearlyGoalBooks || 0)
@@ -864,7 +870,7 @@ export class HealthReportModal extends Modal {
 		this.contentEl.createEl('h3', { text: '数据体检' })
 		const issueCount = report.missingBooks.length + report.missingNotes.length + report.duplicates.length
 			+ report.staleShelf.length + report.staleLists.length + report.staleStats.length + report.brokenNoteIds.length
-			+ report.orphanPortraits.length + report.vectorIssues.length
+			+ report.orphanPortraits.length + report.vectorIssues.length + report.reviewIssues.length
 		this.contentEl.createEl('p', {
 			text: `批注数据 ${report.jsonCount} 份 / ${report.annotationCount} 条；发现 ${issueCount} 项需要关注。`,
 		})
@@ -893,6 +899,14 @@ export class HealthReportModal extends Modal {
 				v.reason === 'broken'
 					? `${v.file} · 文件损坏或缺少字段`
 					: `《${v.title || '未命名'}》 · ${v.bookPath || '无路径'}`))
+			section('复习排期异常', report.reviewIssues.map(r =>
+				`《${r.title || '未命名'}》 · ${r.annotationId.slice(0, 10) || r.file} · ${r.reason}`))
+			if (report.reviewIssues.length) {
+				this.contentEl.createEl('p', {
+					cls: 'setting-item-description',
+					text: '复习排期异常不会影响阅读与笔记；这条划线下次评分时会被正常覆盖，也可用命令「清空全部复习排期」重来。',
+				})
+			}
 			if (report.missingBooks.length) {
 				this.contentEl.createEl('p', {
 					cls: 'setting-item-description',
@@ -939,6 +953,8 @@ export class HealthReportModal extends Modal {
 		add('语义索引失效', report.vectorIssues.map(v => v.reason === 'broken'
 			? `${v.file} 损坏`
 			: `《${v.title || '未命名'}》 ${v.bookPath}`))
+		add('复习排期异常', report.reviewIssues.map(r =>
+			`《${r.title || '未命名'}》 ${r.annotationId || r.file} ${r.reason}`))
 		return lines.join('\n')
 	}
 

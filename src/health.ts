@@ -31,6 +31,15 @@ export interface VectorIssue {
 	reason: 'broken' | 'orphan'
 }
 
+/** 间隔重复排期里的坏值（手改 JSON、旧版本写坏、跨端合并异常都可能出现） */
+export interface ReviewIssue {
+	file: string
+	bookPath: string
+	title: string
+	annotationId: string
+	reason: string
+}
+
 export interface HealthReport {
 	jsonCount: number
 	annotationCount: number
@@ -45,6 +54,22 @@ export interface HealthReport {
 	orphanPortraits: OrphanPortrait[]
 	/** 语义索引损坏，或对应的书已不存在 */
 	vectorIssues: VectorIssue[]
+	/** 复习排期坏值：下次复习时会自动覆盖，也可用命令重置 */
+	reviewIssues: ReviewIssue[]
+}
+
+/** 检查一条批注的 review 字段，返回问题描述；没问题或没有该字段时返回 null */
+function reviewProblem(raw: unknown): string | null {
+	if (raw === undefined) return null
+	if (!raw || typeof raw !== 'object') return 'review 字段不是对象'
+	const rev = raw as Record<string, unknown>
+	const due = rev.due
+	const interval = rev.interval
+	const ease = rev.ease
+	if (typeof due !== 'number' || !Number.isFinite(due) || due <= 0) return '到期时间无效'
+	if (typeof interval !== 'number' || !Number.isFinite(interval) || interval <= 0 || interval > 3650) return '间隔无效'
+	if (typeof ease !== 'number' || !Number.isFinite(ease) || ease < 1.29 || ease > 3.01) return '难度系数越界'
+	return null
 }
 
 /** 只读体检：检查批注 JSON、笔记、书架缓存、书单、统计之间的引用是否还对得上。
@@ -68,6 +93,7 @@ export async function buildHealthReport(
 		brokenNoteIds: [],
 		orphanPortraits: [],
 		vectorIssues: [],
+		reviewIssues: [],
 	}
 
 	const resolve = (p: string): string => (vaultPath && !isAbsolutePath(p) ? joinPath(vaultPath, p) : p)
@@ -101,6 +127,20 @@ export async function buildHealthReport(
 		const title = typeof data.title === 'string' ? stripTitleAuthor(cleanBookTitle(data.title), author) : ''
 		const annotations = Array.isArray(data.annotations) ? data.annotations.length : 0
 		report.annotationCount += annotations
+		if (Array.isArray(data.annotations)) {
+			for (const raw of data.annotations) {
+				const item = (raw ?? {}) as Record<string, unknown>
+				const problem = reviewProblem(item.review)
+				if (!problem) continue
+				report.reviewIssues.push({
+					file,
+					bookPath,
+					title,
+					annotationId: typeof item.id === 'string' ? item.id : '',
+					reason: problem,
+				})
+			}
+		}
 		if (bookPath) {
 			const list = paths.get(bookPath) ?? []
 			list.push(file)

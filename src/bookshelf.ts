@@ -421,6 +421,8 @@ export class BookshelfView extends ItemView {
 	private coverWaiters = new Map<string, Set<HTMLElement>>()
 	/** 当前筛选后的完整路径列表（虚拟化窗口从里面切片） */
 	private allPaths: string[] = []
+	/** 书架右上角的复习按钮：到期数会随复习进度变化，需要单独刷新 */
+	private reviewBtn: HTMLButtonElement | null = null
 	private filteredPaths: string[] = []
 	private statsMap = new Map<string, ShelfBookInfo>()
 	private dupesMap = new Map<string, string[]>()
@@ -550,17 +552,30 @@ export class BookshelfView extends ItemView {
 
 		// 书架右上角三个动作：添加文件夹 / 重新扫描 / 阅读统计
 		const actions = this.listsRowEl.createDiv('grove-shelf-tools-actions')
-		const action = (icon: string, label: string, onClick: () => void): void => {
+		const action = (icon: string, label: string, onClick: () => void): HTMLButtonElement => {
 			const btn = actions.createEl('button', { cls: 'clickable-icon grove-icon-btn', attr: { 'aria-label': label, title: label } })
 			setIcon(btn, icon)
 			btn.addEventListener('click', onClick)
+			return btn
 		}
 		action('folder-plus', '添加扫描文件夹', () => void this.#addFolder())
 		action('upload', '导入书籍…', () => this.#importBooks())
 		action('refresh-cw', '重新扫描', () => void this.refresh({ rescan: true }))
 		action('bar-chart-2', '阅读统计', () => new ReadingStatsModal(this.app, this.plugin).open())
+		this.reviewBtn = action('repeat', '今日复习', () => this.plugin.openReview())
+		this.updateReviewEntry()
+	}
+
+	/** 刷新复习按钮的到期数（徽标 + 标题）：复习结束 / 清空排期 / 书架刷新后调用 */
+	updateReviewEntry(): void {
+		const btn = this.reviewBtn
+		if (!btn) return
 		const due = this.plugin.reviewDueCount()
-		action('repeat', due ? `今日复习（${due} 条到期）` : '今日复习', () => this.plugin.openReview())
+		const label = due ? `今日复习（${due} 条到期）` : '今日复习'
+		btn.setAttribute('aria-label', label)
+		btn.setAttribute('title', label)
+		btn.querySelector('.grove-review-badge')?.remove()
+		if (due > 0) btn.createSpan({ cls: 'grove-review-badge', text: due > 99 ? '99+' : String(due) })
 	}
 
 	async onClose(): Promise<void> {
@@ -585,6 +600,7 @@ export class BookshelfView extends ItemView {
 	async refresh(opts: { rescan?: boolean } = {}): Promise<void> {
 		const { plugin } = this
 		if (!this.gridEl) return
+		this.updateReviewEntry()
 		await plugin.shelfCache.ensureCoversLoaded()
 		this.#hideTooltip()
 		if (opts.rescan) this.scanToken++

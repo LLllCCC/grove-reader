@@ -4980,6 +4980,28 @@ body.is-mobile.grove-eink .grove-toolbar [data-grove-action='AI 划词'] {
 	width: min(680px, 94vw);
 }
 
+/* 书架复习按钮右上角的到期数徽标 */
+.grove-shelf-tools-actions .grove-icon-btn {
+	position: relative;
+}
+
+.grove-shelf-tools-actions .grove-review-badge {
+	position: absolute;
+	top: -3px;
+	right: -3px;
+	min-width: 14px;
+	height: 14px;
+	padding: 0 3px;
+	border-radius: 7px;
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	font-size: 9px;
+	font-weight: 600;
+	line-height: 14px;
+	text-align: center;
+	pointer-events: none;
+}
+
 .grove-review .grove-review-title {
 	margin: 0 0 4px;
 }

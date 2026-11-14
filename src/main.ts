@@ -543,6 +543,12 @@ export default class GroveReaderPlugin extends Plugin {
 		return reviewStats(this.reviewCandidates(), now).due
 	}
 
+	/** 复习概览：今日已复习 / 到期 / 旧划线 / 每日上限（统计页用） */
+	reviewOverview(now = Date.now()): { today: number; due: number; fresh: number; cap: number } {
+		const stats = reviewStats(this.reviewCandidates(), now)
+		return { ...stats, cap: Math.max(0, Math.floor(this.settings.reviewDailyCap ?? 0)) }
+	}
+
 	/** 今日复习：按每日上限挑一批到期的 / 旧划线，弹窗逐条评分 */
 	openReview(): void {
 		const cap = Math.max(0, Math.floor(this.settings.reviewDailyCap ?? 0))
@@ -574,7 +580,15 @@ export default class GroveReaderPlugin extends Plugin {
 			onGrade: (item, grade) => this.gradeReviewItem(item, grade),
 			onJump: item => void this.openBookByPath(item.bookPath, item.annotation.cfi),
 			getNext: nextBatch,
+			onClose: () => this.refreshShelfReviewBadges(),
 		}).open()
+	}
+
+	/** 复习进度变化后，刷新已打开书架上的到期数徽标 */
+	refreshShelfReviewBadges(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_BOOKSHELF)) {
+			if (leaf.view instanceof BookshelfView) leaf.view.updateReviewEntry()
+		}
 	}
 
 	/** 评分落库：排期写在批注对象里，随批注一起合并 / 备份，不新增文件 */
@@ -589,6 +603,44 @@ export default class GroveReaderPlugin extends Plugin {
 		item.annotation.review = review
 		this.store.save(data)
 		this.debug('review', 'grade', { book: item.bookPath, id: annotation.id, grade, due: review.due, interval: review.interval })
+	}
+
+	/** 清空全部复习排期（不动划线、评论与笔记）；清完这些划线会重新按「旧划线」进队列 */
+	resetReviewSchedule(): void {
+		let scheduled = 0
+		for (const path of this.store.listBookPaths()) {
+			const data = this.store.load(path)
+			for (const a of data.annotations ?? []) if (a.review) scheduled++
+		}
+		if (!scheduled) {
+			new Notice(`${APP_NAME}：还没有任何复习排期`)
+			return
+		}
+		new DangerConfirmModal(
+			this.app,
+			'清空全部复习排期',
+			`将清除 ${scheduled} 条划线的复习进度（到期日、间隔、难度）。划线、评论和笔记都不动；清完它们会重新按「旧划线」进入队列。`,
+			'清空',
+			() => {
+				const now = Date.now()
+				let cleared = 0
+				for (const path of this.store.listBookPaths()) {
+					const data = this.store.load(path)
+					let changed = false
+					for (const a of data.annotations ?? []) {
+						if (!a.review) continue
+						delete a.review
+						a.updatedAt = now
+						changed = true
+						cleared++
+					}
+					if (changed) this.store.save(data)
+				}
+				this.oplog.add('清空复习排期', `${cleared} 条`)
+				this.refreshShelfReviewBadges()
+				new Notice(`${APP_NAME}：已清空 ${cleared} 条复习排期`)
+			},
+		).open()
 	}
 
 	deleteGlobalBookmark(row: GlobalBookmarkRow): void {
@@ -1705,6 +1757,11 @@ export default class GroveReaderPlugin extends Plugin {
 			id: 'review-queue',
 			name: '今日复习（间隔重复）',
 			callback: () => this.openReview(),
+		})
+		this.addCommand({
+			id: 'reset-review',
+			name: '清空全部复习排期',
+			callback: () => this.resetReviewSchedule(),
 		})
 		this.addCommand({
 			id: 'reading-stats',

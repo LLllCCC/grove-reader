@@ -14,6 +14,8 @@ export interface ReviewModalHandlers {
 	onJump: (item: ReviewQueueItem) => void
 	/** 「再来一批」：返回下一批；空数组表示今天没有更多了 */
 	getNext: () => ReviewQueueItem[]
+	/** 关闭后通知外部刷新到期数徽标 */
+	onClose?: () => void
 }
 
 export interface ReviewModalData {
@@ -65,6 +67,7 @@ export class ReviewModal extends Modal {
 
 	onClose(): void {
 		this.contentEl.empty()
+		this.handlers.onClose?.()
 	}
 
 	#gradeKey(ev: KeyboardEvent, grade: ReviewGrade): false {

@@ -542,7 +542,13 @@ fs.mkdirSync(path.join(hRoot, 'data', 'books'), { recursive: true })
 fs.mkdirSync(path.join(hRoot, '书籍'), { recursive: true })
 fs.writeFileSync(path.join(hRoot, '书籍', 'ok.epub'), 'x')
 fs.writeFileSync(path.join(hRoot, 'data', 'books', 'ok.json'), JSON.stringify({
-	version: 1, bookPath: 'Grove Reader/书籍/ok.epub', title: '正常', annotations: [{ id: '1' }],
+	version: 1, bookPath: 'Grove Reader/书籍/ok.epub', title: '正常', annotations: [
+		{ id: 'ok1', review: { due: Date.now(), interval: 3, ease: 2.5, reps: 1, lapses: 0 } },
+		{ id: 'bad-due', review: { due: 'x', interval: 3, ease: 2.5 } },
+		{ id: 'bad-interval', review: { due: 1760000000000, interval: 0, ease: 2.5 } },
+		{ id: 'bad-ease', review: { due: 1760000000000, interval: 3, ease: 9 } },
+		{ id: 'no-review' },
+	],
 }))
 fs.writeFileSync(path.join(hRoot, 'data', 'books', 'gone.json'), JSON.stringify({
 	version: 1, bookPath: 'Grove Reader/书籍/gone.epub', title: '丢了',
@@ -570,7 +576,12 @@ fs.writeFileSync(path.join(hRoot, 'vectors', 'gone.json'), JSON.stringify({
 fs.writeFileSync(path.join(hRoot, 'vectors', 'broken.json'), '{"version":1,"chunks":')
 const hr = await buildHealthReport(new DesktopIO(), hv, hRoot, '')
 assert.equal(hr.jsonCount, 2)
-assert.equal(hr.annotationCount, 1)
+assert.equal(hr.annotationCount, 5)
+assert.equal(hr.reviewIssues.length, 3, '到期/间隔/难度各算一项坏值')
+assert.deepEqual(hr.reviewIssues.map(r => r.annotationId).sort(), ['bad-due', 'bad-ease', 'bad-interval'])
+assert.equal(hr.reviewIssues.find(r => r.annotationId === 'bad-due')?.reason, '到期时间无效')
+assert.equal(hr.reviewIssues.find(r => r.annotationId === 'bad-interval')?.reason, '间隔无效')
+assert.equal(hr.reviewIssues.find(r => r.annotationId === 'bad-ease')?.reason, '难度系数越界')
 assert.equal(hr.missingBooks.length, 1)
 assert.equal(hr.staleShelf.length, 1)
 assert.equal(hr.orphanPortraits.length, 2, '缺书与无批注数据的索引都算孤儿')
