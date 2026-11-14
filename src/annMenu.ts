@@ -16,6 +16,10 @@ export interface AnnMenuActions {
 	onSendToCanvas?: () => void
 	/** 有值时才显示「生成书摘卡」 */
 	onMakeCard?: () => void
+	/** 有值时才显示「加入今日复习」 */
+	onReviewToday?: () => void
+	/** 已经排在今天：菜单项显示「已在今日复习」并禁用 */
+	reviewScheduled?: boolean
 }
 
 export function showAnnMenu(
@@ -47,6 +51,13 @@ export function showAnnMenu(
 	}
 	if (actions.onSendToCanvas) {
 		menu.addItem(item => item.setTitle('发送到 Canvas').setIcon('layout-dashboard').onClick(actions.onSendToCanvas!))
+	}
+	if (actions.onReviewToday) {
+		menu.addItem(item => {
+			item.setTitle(actions.reviewScheduled ? '已在今日复习' : '加入今日复习').setIcon('repeat')
+			if (actions.reviewScheduled) item.setDisabled(true)
+			else item.onClick(actions.onReviewToday!)
+		})
 	}
 	menu.addItem(item => item.setTitle('复制原文').setIcon('copy').onClick(actions.onCopyText))
 	menu.addItem(item => item.setTitle('删除批注').setIcon('trash-2').onClick(actions.onDelete))

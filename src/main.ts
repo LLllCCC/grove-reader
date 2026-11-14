@@ -42,7 +42,7 @@ import { MultiBookAskModal } from './multiBookAskModal'
 import { GuideModal } from './guideModal'
 import { ImportHighlightsModal } from './importHighlightsModal'
 import { ReviewModal } from './reviewModal'
-import { nextReview, pickReviewQueue, reviewStats, reviewedToday } from './review'
+import { DEFAULT_EASE, isDue, nextReview, normalizeReview, pickReviewQueue, reviewStats, reviewedToday, startOfDay } from './review'
 import type { ReviewGrade, ReviewQueueItem } from './review'
 import { LibrarySearchModal } from './librarySearch'
 import { movePortrait } from './portrait'
@@ -632,6 +632,30 @@ export default class GroveReaderPlugin extends Plugin {
 		item.annotation.review = review
 		this.store.save(data)
 		this.debug('review', 'grade', { book: item.bookPath, id: annotation.id, grade, due: review.due, interval: review.interval })
+	}
+
+	/** 把一条划线立刻排进今天的复习（不用等明天）；已有排期只改到期日，不动 ease 与复习次数 */
+	scheduleReviewToday(bookPath: string, id: string): void {
+		const data = this.store.load(bookPath)
+		const a = data.annotations.find(x => x.id === id)
+		if (!a) return
+		const now = Date.now()
+		if (isDue(a, now)) {
+			new Notice(`${APP_NAME}：这条已经在今天的复习里`)
+			return
+		}
+		const base = normalizeReview(a.review)
+		a.review = {
+			due: startOfDay(now),
+			interval: base?.interval || 1,
+			ease: base?.ease ?? DEFAULT_EASE,
+			reps: base?.reps ?? 0,
+			lapses: base?.lapses ?? 0,
+		}
+		a.updatedAt = now
+		this.store.save(data)
+		this.refreshShelfReviewBadges()
+		new Notice(`${APP_NAME}：已加入今日复习`)
 	}
 
 	/** 清空全部复习排期（不动划线、评论与笔记）；清完这些划线会重新按「旧划线」进队列 */

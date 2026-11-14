@@ -3,6 +3,7 @@ import { ItemView, Menu, Notice, TFile, ViewStateResult, WorkspaceLeaf, setIcon 
 import { showAnnMenu } from './annMenu'
 import * as pdfjsLib from 'pdfjs-dist'
 import type { PDFDocumentProxy, PDFWorker } from 'pdfjs-dist'
+import { isDue } from './review'
 import type GroveReaderPlugin from './main'
 import type { ReaderCaps, ReaderEngine, ReaderKind } from './engine/types'
 import { createReaderSidebar, type ReaderSidebar } from './engine/readerChrome'
@@ -1625,6 +1626,8 @@ export class PdfView extends ItemView implements ReaderEngine {
 						onDelete: () => this.#confirmDelete(a),
 						onMakeCard: () => void this.plugin.exportQuoteCard(this, a.id),
 						onSendToCanvas: () => void this.plugin.exportToCanvas(this, [a.id]),
+			onReviewToday: () => this.plugin.scheduleReviewToday(this.bookPath, a.id),
+			reviewScheduled: isDue(a, Date.now()),
 					})
 					return
 				}

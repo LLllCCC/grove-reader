@@ -1,4 +1,5 @@
 import { Platform, ItemView, Menu, Notice, TFile, ViewStateResult, WorkspaceLeaf, setIcon } from 'obsidian'
+import { isDue } from './review'
 import type GroveReaderPlugin from './main'
 import type { ReaderCaps, ReaderEngine, ReaderKind } from './engine/types'
 import { createReaderSidebar, type ReaderSidebar } from './engine/readerChrome'
@@ -1082,6 +1083,8 @@ export class ReaderView extends ItemView implements ReaderEngine {
 			onDelete: () => this.#confirmDelete(a),
 			onMakeCard: () => void this.plugin.exportQuoteCard(this, a.id),
 			onSendToCanvas: () => void this.plugin.exportToCanvas(this, [a.id]),
+			onReviewToday: () => this.plugin.scheduleReviewToday(this.bookPath, a.id),
+			reviewScheduled: isDue(a, Date.now()),
 		})
 	}
 
