@@ -26,6 +26,8 @@ export interface ReviewModalData {
 	dailyCap: number
 	/** 打开弹窗时今天已复习的条数 */
 	reviewedToday: number
+	/** 有值时是「只复习本书」模式：不显示每日目标，进度按本书队列算 */
+	scopeTitle?: string
 }
 
 const GRADES: ReviewGrade[] = ['again', 'hard', 'good', 'easy']
@@ -127,12 +129,18 @@ export class ReviewModal extends Modal {
 		if (!item) this.#finished = true
 		const capText = this.data.dailyCap ? ` / 目标 ${this.data.dailyCap} 条` : ''
 		const doneToday = this.data.reviewedToday + this.#graded
-		contentEl.createEl('h3', { text: '今日复习', cls: 'grove-review-title' })
+		const scope = this.data.scopeTitle
+		const scopeLabel = scope ? (scope.startsWith('《') ? scope : `《${scope}》`) : ''
+		contentEl.createEl('h3', { text: scope ? '复习本书' : '今日复习', cls: 'grove-review-title' })
 		contentEl.createEl('p', {
 			cls: 'grove-review-meta',
-			text: this.#finished
-				? `今天已复习 ${doneToday} 条${capText}`
-				: `第 ${Math.min(this.#index + 1, this.#items.length)} / ${this.#items.length} 条 · 今天已复习 ${doneToday} 条${capText}`,
+			text: scope
+				? (this.#finished
+					? `${scopeLabel} · 本轮复习 ${this.#graded} 条`
+					: `${scopeLabel} · 第 ${Math.min(this.#index + 1, this.#items.length)} / ${this.#items.length} 条`)
+				: (this.#finished
+					? `今天已复习 ${doneToday} 条${capText}`
+					: `第 ${Math.min(this.#index + 1, this.#items.length)} / ${this.#items.length} 条 · 今天已复习 ${doneToday} 条${capText}`),
 		})
 
 		if (!item) {
@@ -214,7 +222,9 @@ export class ReviewModal extends Modal {
 				this.#render()
 			})
 		} else {
-			box.createEl('p', { cls: 'grove-review-empty', text: '今天没有更多到期的划线和旧摘录了，明天再来。' })
+			box.createEl('p', { cls: 'grove-review-empty', text: this.data.scopeTitle
+				? '这本书今天没有更多可复习的划线了。'
+				: '今天没有更多到期的划线和旧摘录了，明天再来。' })
 		}
 		const close = actions.createEl('button', { text: '关闭', attr: { type: 'button' } })
 		close.addEventListener('click', () => this.close())

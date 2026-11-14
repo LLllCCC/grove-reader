@@ -561,34 +561,52 @@ export default class GroveReaderPlugin extends Plugin {
 		return { ...stats, cap: Math.max(0, Math.floor(this.settings.reviewDailyCap ?? 0)) }
 	}
 
-	/** 今日复习：按每日上限挑一批到期的 / 旧划线，弹窗逐条评分 */
-	openReview(): void {
+	/** 今日复习：按每日上限挑一批到期的 / 旧划线，弹窗逐条评分；传 scope 时只复习这本书 */
+	openReview(scope?: { bookPath: string; title?: string }): void {
 		const cap = Math.max(0, Math.floor(this.settings.reviewDailyCap ?? 0))
 		if (!cap) {
 			new Notice(`${APP_NAME}：复习功能已关闭（设置 → 每日复习条数）`)
 			return
 		}
 		const now = Date.now()
-		const candidates = this.reviewCandidates()
+		const bookLabel = scope ? (scope.title ? (scope.title.startsWith('《') ? scope.title : `《${scope.title}》`) : '本书') : ''
+		const all = this.reviewCandidates()
+		const candidates = scope ? all.filter(i => i.bookPath === scope.bookPath) : all
+		if (scope && !candidates.length) {
+			new Notice(`${APP_NAME}：${bookLabel}还没有可复习的划线`)
+			return
+		}
 		const stats = reviewStats(candidates, now)
-		const remaining = Math.max(0, cap - stats.today)
-		if (!remaining) {
+		// 本书模式是主动深挖：不受每日上限拦截，一次最多 20 条；全局模式的额度照旧
+		const limit = scope ? 20 : Math.max(0, cap - stats.today)
+		if (!scope && !limit) {
 			new Notice(`${APP_NAME}：今天的复习目标已完成（${stats.today}/${cap} 条），明天再来`)
 			return
 		}
-		const queue = pickReviewQueue(candidates, now, remaining, { includeNew: this.settings.reviewIncludeNew !== false })
+		const includeNew = this.settings.reviewIncludeNew !== false
+		const queue = pickReviewQueue(candidates, now, limit, { includeNew })
 		if (!queue.length) {
-			new Notice(stats.fresh
-				? `${APP_NAME}：今天没有到期的划线；另有 ${stats.fresh} 条新划线，明天起进入复习`
-				: `${APP_NAME}：还没有可复习的划线`)
+			new Notice(scope
+				? `${APP_NAME}：这本书今天没有可复习的划线`
+				: (stats.fresh
+					? `${APP_NAME}：今天没有到期的划线；另有 ${stats.fresh} 条新划线，明天起进入复习`
+					: `${APP_NAME}：还没有可复习的划线`))
 			return
 		}
 		const nextBatch = (): ReviewQueueItem[] => {
-			const fresh = this.reviewCandidates()
-			const left = Math.max(0, cap - reviewedToday(fresh, Date.now()))
-			return left ? pickReviewQueue(fresh, Date.now(), left, { includeNew: this.settings.reviewIncludeNew !== false }) : []
+			const freshAll = this.reviewCandidates()
+			if (scope) {
+				return pickReviewQueue(freshAll.filter(i => i.bookPath === scope.bookPath), Date.now(), 20, { includeNew })
+			}
+			const left = Math.max(0, cap - reviewedToday(freshAll, Date.now()))
+			return left ? pickReviewQueue(freshAll, Date.now(), left, { includeNew }) : []
 		}
-		new ReviewModal(this.app, { queue, dailyCap: cap, reviewedToday: stats.today }, {
+		new ReviewModal(this.app, {
+			queue,
+			dailyCap: scope ? 0 : cap,
+			reviewedToday: scope ? 0 : stats.today,
+			scopeTitle: scope ? (scope.title || '本书') : undefined,
+		}, {
 			onGrade: (item, grade) => this.gradeReviewItem(item, grade),
 			onJump: item => void this.openBookByPath(item.bookPath, item.annotation.cfi),
 			onComment: (item, done) => this.editReviewComment(item, done),
@@ -1810,6 +1828,11 @@ export default class GroveReaderPlugin extends Plugin {
 			id: 'review-queue',
 			name: '今日复习（间隔重复）',
 			callback: () => this.openReview(),
+		})
+		this.addCommand({
+			id: 'review-this-book',
+			name: '复习本书（间隔重复）',
+			checkCallback: checking => this.withAnyReader(checking, v => this.openReview({ bookPath: v.bookPath, title: v.bookTitle })),
 		})
 		this.addCommand({
 			id: 'reset-review',
