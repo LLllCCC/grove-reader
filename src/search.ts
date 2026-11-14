@@ -1,5 +1,6 @@
 import { Annotation, BookData, HIGHLIGHT_COLORS, colorName } from './types'
 import { todayKey } from './stats'
+import { normalizeReview } from './review'
 import { basenameOf, bookIdFor, cleanBookTitle, stripTitleAuthor } from './util'
 
 export interface SearchDoc {
@@ -242,9 +243,13 @@ export function exportMarkdown(docs: SearchDoc[], query: string, options: Partia
 }
 
 export function exportCsv(docs: SearchDoc[]): string {
-	const rows = [['书名', '作者', '章节', '位置', '颜色', '划线', '评论', '原文件', '回跳链接']]
+	const rows = [[
+		'书名', '作者', '章节', '位置', '颜色', '划线', '评论', '原文件', '回跳链接',
+		'复习到期', '间隔(天)', '难度', '复习次数', '忘记次数', '上次复习',
+	]]
 	for (const doc of docs) {
 		const a = doc.annotation
+		const review = normalizeReview(a.review)
 		rows.push([
 			doc.bookTitle,
 			doc.author,
@@ -255,9 +260,22 @@ export function exportCsv(docs: SearchDoc[]): string {
 			a.note ?? '',
 			doc.bookExists ? '在' : '缺失',
 			doc.bookExists && doc.bookId ? jumpUrl(doc.bookId, a.cfi) : '',
+			review ? isoDate(review.due) : '',
+			review ? String(review.interval) : '',
+			review ? review.ease.toFixed(2) : '',
+			review ? String(review.reps) : '',
+			review ? String(review.lapses) : '',
+			review?.last ? isoDate(review.last) : '',
 		])
 	}
 	return rows.map(row => row.map(csvField).join(',')).join('\r\n')
+}
+
+/** 本地时区的 YYYY-MM-DD（CSV 里给人看，不用 UTC 免得跨天） */
+function isoDate(ts: number): string {
+	const d = new Date(ts)
+	const p = (n: number): string => String(n).padStart(2, '0')
+	return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
 export function colorDot(color: string): string {

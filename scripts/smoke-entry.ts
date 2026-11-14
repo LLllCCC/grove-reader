@@ -1519,8 +1519,20 @@ assert.equal(await storeDedupe.reloadFromDisk(bookIdFor('Books/x.epub')), true, 
 	assert.ok(!md.includes('回原文'), '关闭回跳后不写链接')
 	assert.ok(exportMarkdown(docs, '测试', { groupBy: 'chapter' }).includes('## 《甲书》 · 第一章'))
 
+	docs[0].annotation.review = {
+		due: new Date(2026, 8, 30).getTime(),
+		interval: 3,
+		ease: 2.5,
+		reps: 1,
+		lapses: 0,
+		last: new Date(2026, 8, 27, 10).getTime(),
+	}
 	const csv = exportCsv(docs)
 	assert.equal(csv.split('\r\n').length, 4, 'CSV 表头 + 3 行数据')
+	assert.ok(csv.includes('复习到期') && csv.includes('间隔(天)'), 'CSV 应带复习列')
+	assert.ok(csv.includes('2026-09-30'), '到期日按本地日期写')
+	assert.ok(csv.includes('2026-09-27'), '上次复习日期')
+	assert.ok(csv.includes('2.50'), '难度保留两位')
 }
 
 // 57. 笔记增量追加 + 书架 Base：只补新批注、保留手写行、模板结构不匹配时退回
