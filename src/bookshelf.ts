@@ -1058,6 +1058,8 @@ export class BookshelfView extends ItemView {
 			publisher: entry.publisher ?? '',
 			category: entry.category ?? data.category ?? '',
 			intro: entry.intro ?? data.intro ?? '',
+			rating: data.rating ?? 0,
+			isbn: data.isbn ?? '',
 			aiMeta: data.aiMeta,
 		}
 		new BookInfoModal(this.app, current, values => {
@@ -1078,6 +1080,8 @@ export class BookshelfView extends ItemView {
 			if (values.intro !== (next.intro ?? '')) delete aiMeta.intro
 			next.category = values.category || undefined
 			next.intro = values.intro || undefined
+			next.rating = values.rating > 0 ? values.rating : undefined
+			next.isbn = values.isbn || undefined
 			if (values.author) next.author = values.author
 			if (Object.keys(aiMeta).length) next.aiMeta = aiMeta
 			else delete next.aiMeta

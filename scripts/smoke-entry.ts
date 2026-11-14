@@ -179,6 +179,18 @@ assert.ok(!fresh.includes('obsidian://grove?'), '默认不应再写协议链接'
 const freshProtocol = buildNote(data, 'id123', null, null, undefined, { style: 'protocol' })
 assert.ok(freshProtocol.includes('obsidian://grove?book=id123&cfi=epubcfi%28'), 'protocol 样式应保留旧链接')
 assert.ok(!freshProtocol.includes('#grove-cfi='), 'protocol 样式不应出现双链')
+const withMeta = buildNote(
+	{ ...data, rating: 4, isbn: '978-7-111-12345-6' },
+	'id123',
+	null,
+	null,
+	{ publisher: '测试出版社', rating: 4, isbn: '978-7-111-12345-6' },
+)
+assert.ok(withMeta.includes('grove_rating: 4'), '评分应写进 frontmatter')
+assert.ok(withMeta.includes('grove_isbn:'), 'ISBN 应写进 frontmatter')
+assert.ok(withMeta.includes('grove_publisher:'), '出版社仍应在')
+const noMeta = buildNote({ ...data, rating: 0 }, 'id123', null, null, { rating: 0 })
+assert.ok(!noMeta.includes('grove_rating'), '0 分不写字段')
 assert.ok(fresh.includes('%%\n评论一\n%%'))
 assert.ok(fresh.includes('GROVE:BEGIN'))
 

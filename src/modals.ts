@@ -169,6 +169,9 @@ export interface BookInfoValues {
 	publisher: string
 	category: string
 	intro: string
+	/** 1–5；0 = 未评分 */
+	rating: number
+	isbn: string
 	/** 哪些字段是 AI 补全的，用来在编辑框旁标一下 */
 	aiMeta?: { author?: boolean; category?: boolean; intro?: boolean }
 }
@@ -201,6 +204,12 @@ export class BookInfoModal extends Modal {
 		const author = mk('作者', 'author', this.values.aiMeta?.author)
 		const publisher = mk('出版社', 'publisher')
 		const category = mk('分类', 'category', this.values.aiMeta?.category)
+		label('评分')
+		const rating = this.contentEl.createEl('select', { cls: 'dropdown' })
+		rating.createEl('option', { value: '0', text: '未评分' })
+		for (let i = 1; i <= 5; i++) rating.createEl('option', { value: String(i), text: '★'.repeat(i) })
+		rating.value = String(this.values.rating || 0)
+		const isbn = mk('ISBN', 'isbn')
 		label('一句话简介', this.values.aiMeta?.intro)
 		const intro = this.contentEl.createEl('textarea', {
 			cls: 'grove-comment-input',
@@ -216,6 +225,8 @@ export class BookInfoModal extends Modal {
 				publisher: publisher.value.trim(),
 				category: category.value.trim(),
 				intro: intro.value.trim(),
+				rating: Number(rating.value) || 0,
+				isbn: isbn.value.trim(),
 			})
 			this.close()
 		})

@@ -2273,6 +2273,8 @@ export default class GroveReaderPlugin extends Plugin {
 			seconds: stat.seconds,
 			lastRead: stat.lastRead || data.lastLocation?.updatedAt || 0,
 			publisher: this.shelfCache.get(data.bookPath)?.publisher ?? '',
+			rating: data.rating,
+			isbn: data.isbn,
 			cover,
 		}
 	}

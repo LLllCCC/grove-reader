@@ -368,6 +368,9 @@ export interface NoteExtraFields {
 	started?: string
 	finished?: string
 	publisher?: string
+	/** 个人评分 1–5 */
+	rating?: number
+	isbn?: string
 	/** 封面图的双链写法；供 Bases 卡片视图取图 */
 	cover?: string
 }
@@ -394,6 +397,10 @@ function metaEntries(data: BookData, bookId: string, extra?: NoteExtraFields): A
 		entries.push(['grove_last_read', new Date(extra.lastRead).toISOString().slice(0, 10)])
 	}
 	if (extra.publisher) entries.push(['grove_publisher', yamlSafe(extra.publisher)])
+	if (typeof extra.rating === 'number' && extra.rating > 0) {
+		entries.push(['grove_rating', String(Math.min(5, Math.max(1, Math.round(extra.rating))))])
+	}
+	if (extra.isbn) entries.push(['grove_isbn', yamlSafe(extra.isbn)])
 	if (extra.cover) entries.push(['grove_cover', yamlSafe(extra.cover)])
 	return entries
 }
@@ -420,6 +427,8 @@ const MANAGED_META_KEYS = [
 	'grove_seconds',
 	'grove_last_read',
 	'grove_publisher',
+	'grove_rating',
+	'grove_isbn',
 	'grove_cover',
 ]
 

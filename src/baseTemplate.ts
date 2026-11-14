@@ -49,6 +49,10 @@ properties:
     displayName: 最近阅读
   grove_publisher:
     displayName: 出版社
+  grove_rating:
+    displayName: 评分
+  grove_isbn:
+    displayName: ISBN
   grove_cover:
     displayName: 封面
   formula.grove_meta:

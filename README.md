@@ -25,7 +25,7 @@ Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / c
 | 目录 | 工具栏下拉框 |
 | 生成笔记 | 工具栏笔记按钮或命令「生成 / 更新阅读笔记」，保存到设置中的笔记文件夹 |
 | 发送到 Canvas | 命令「把批注发送到 Canvas…」：勾选批注导出成画布卡片，可新建画布或追加到已有画布；EPUB 批注菜单与 TXT 划词菜单也有「发送到 Canvas」；卡片色跟随高亮色，按 3 列排布；导出前可选「按章分组 / 按颜色分组」（生成带标题的分组框）与「组内按顺序连线」，追加时新内容接在已有内容下方；卡片含摘录、评论、回笔记与回原文链接 |
-| Dataview 字段 | 每份笔记的 frontmatter 会写 `grove_annotations` / `grove_format` / `grove_progress` / `grove_status` / `grove_seconds` / `grove_last_read` / `grove_publisher`，可直接用 Dataview 或 Bases 查询 |
+| Dataview 字段 | 每份笔记的 frontmatter 会写 `grove_annotations` / `grove_format` / `grove_progress` / `grove_status` / `grove_seconds` / `grove_last_read` / `grove_publisher` / `grove_rating` / `grove_isbn`，可直接用 Dataview 或 Bases 查询 |
 | 从笔记回写批注 | 命令「从笔记同步批注…」：把笔记里改过的摘录 / 评论写回批注数据，先列差异、逐项勾选；笔记里删掉的条目不会删批注；笔记文件夹改过导致路径失效时按书名与 frontmatter 自动找回 |
 | 全文搜索 | 侧栏「全文搜索」输入关键词回车（EPUB / PDF / TXT 同一入口）；TXT 八百万字实测约 60ms，结果带页码，点击跳转并把命中处标黄 |
 | 阅读目标与热力图 | 阅读统计查看今日阅读（分钟 + 页数）、连续/活跃/累计、最近 12 周热力图、年度目标方格与「读完预测」（按近 7 天速度）；设置 → 阅读与笔记 → 每日阅读目标 / 每日页数目标 / 年度阅读目标 |
@@ -108,6 +108,10 @@ Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / c
 | `grove_finished` | 读完日期（标记或进度到 100% 时写） |
 | `grove_last_read` | 最近阅读日期 `YYYY-MM-DD` |
 | `grove_publisher` | 出版社（书架里有才写） |
+| `grove_rating` | 个人评分 1–5（在「编辑书籍信息」里选，未评分不写） |
+| `grove_isbn` | ISBN（手动填写，留空不写） |
+| `grove_rating` | 个人评分 1–5（在「编辑书籍信息」里选，未评分不写） |
+| `grove_isbn` | ISBN（手动填写，留空不写） |
 | `grove_cover` | 封面双链（Bases 卡片视图取图） |
 
 命令「生成书架 Base（.base 卡片墙）」会在笔记文件夹生成 `书架.base`：封面画廊 + 在读 / 想读 / 今年读完 / 全部五个视图，字段直接读上面的 frontmatter；重新运行会覆盖该文件。

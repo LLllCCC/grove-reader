@@ -172,6 +172,10 @@ export interface BookData {
 	category?: string
 	/** 一句话简介 */
 	intro?: string
+	/** 个人评分 1–5；缺省 = 未评分 */
+	rating?: number
+	/** ISBN（手动填写；随笔记录进笔记 frontmatter） */
+	isbn?: string
 	/** AI 补全标记；手动改过对应字段后清掉 */
 	aiMeta?: { author?: boolean; category?: boolean; intro?: boolean; at?: number }
 	/** 书架手动标记的阅读状态；缺省按进度自动判断 */
