@@ -1487,6 +1487,10 @@ export interface CanvasExportPayload {
 	target: string
 	/** 新建画布的文件名（不含 .canvas） */
 	name: string
+	/** 分组方式：不分组 / 按章 / 按颜色 */
+	groupBy: 'none' | 'chapter' | 'color'
+	/** 组内按顺序连线 */
+	connect: boolean
 }
 
 /** 选批注 + 选目标画布；导出逻辑留给 main，弹窗只负责收集意图 */
@@ -1546,6 +1550,17 @@ export class CanvasExportModal extends Modal {
 			nameInput.toggleClass('grove-hidden', select.value !== '__new__')
 		})
 
+		const options = this.contentEl.createDiv('grove-canvas-options')
+		const groupWrap = options.createDiv('grove-canvas-option')
+		groupWrap.createSpan('grove-canvas-option-label').setText('分组')
+		const groupSelect = groupWrap.createEl('select', { cls: 'dropdown' })
+		groupSelect.createEl('option', { value: 'none', text: '不分组' })
+		groupSelect.createEl('option', { value: 'chapter', text: '按章分组' })
+		groupSelect.createEl('option', { value: 'color', text: '按颜色分组' })
+		const connectWrap = options.createDiv('grove-canvas-option')
+		const connectBox = connectWrap.createEl('input', { type: 'checkbox' })
+		connectWrap.createSpan('grove-canvas-option-label').setText('组内按顺序连线')
+
 		allBtn.addEventListener('click', () => {
 			for (const b of boxes) b.checked = true
 			for (const a of this.annotations) selected.add(a.id)
@@ -1577,6 +1592,8 @@ export class CanvasExportModal extends Modal {
 				ids: [...selected],
 				target: select.value === '__new__' ? '' : select.value,
 				name,
+				groupBy: (groupSelect.value as 'none' | 'chapter' | 'color') || 'none',
+				connect: connectBox.checked,
 			})
 			this.close()
 		})

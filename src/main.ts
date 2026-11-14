@@ -19,6 +19,7 @@ import {
 	FORMAT_LABELS,
 	READING_STATUS_LABELS,
 	VIEW_TYPE_GROVE_PDF,
+	colorName,
 } from './types'
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
@@ -28,7 +29,8 @@ import type { CanvasExportPayload } from './modals'
 import { applySync, planSync } from './noteSync'
 import { collectGlobalBookmarks } from './globalBookmarks'
 import type { GlobalBookmarkRow } from './globalBookmarks'
-import { appendCards, buildCardText, canvasColor, emptyCanvas, parseCanvas, serializeCanvas } from './canvas'
+import { appendCardWall, buildCardText, canvasColor, emptyCanvas, parseCanvas, serializeCanvas } from './canvas'
+import type { CardGroup, CardSpec } from './canvas'
 import { quoteCardFileName, renderQuoteCard } from './cardImage'
 import { buildShelfBase, SHELF_BASE_NAME } from './baseTemplate'
 import { GroveSettingTab } from './settings'
@@ -1878,14 +1880,32 @@ export default class GroveReaderPlugin extends Plugin {
 		const picked = annotations.filter(a => payload.ids.includes(a.id))
 		if (!picked.length) return
 		const noteFile = this.#noteFileFor(data)
-		const cards = picked.map(a => ({
+		const specOf = (a: (typeof picked)[number]): CardSpec => ({
 			text: buildCardText(
 				a as never,
 				data.title || '未命名',
 				noteFile ? `[[${noteFile.path}#^grove-${a.id}|打开笔记]]` : undefined,
 			),
 			color: canvasColor(a.color),
-		}))
+		})
+		const groupBy = payload.groupBy ?? 'none'
+		let groups: CardGroup[]
+		if (groupBy === 'chapter' || groupBy === 'color') {
+			const map = new Map<string, CardSpec[]>()
+			for (const a of picked) {
+				const key = groupBy === 'chapter'
+					? ((a.chapter ?? '').trim() || '未分章')
+					: colorName(a.color)
+				const list = map.get(key) ?? []
+				list.push(specOf(a))
+				map.set(key, list)
+			}
+			groups = [...map.entries()].map(([label, cards]) => ({ label, cards }))
+		} else {
+			groups = [{ cards: picked.map(specOf) }]
+		}
+		const wall = { columns: 3, connect: payload.connect }
+		let written = 0
 
 		let target = payload.target
 		if (target) {
@@ -1902,7 +1922,7 @@ export default class GroveReaderPlugin extends Plugin {
 				new Notice('Grove Reader：目标不是有效的 Canvas 文件，未做修改')
 				return
 			}
-			appendCards(doc, cards)
+			written = appendCardWall(doc, groups, wall).cards
 			await this.app.vault.modify(file, serializeCanvas(doc))
 		} else {
 			const folder = normalizePath(`${LIBRARY_ROOT}/画布`)
@@ -1913,10 +1933,10 @@ export default class GroveReaderPlugin extends Plugin {
 				return
 			}
 			const doc = emptyCanvas()
-			appendCards(doc, cards)
+			written = appendCardWall(doc, groups, wall).cards
 			await this.app.vault.create(target, serializeCanvas(doc))
 		}
-		new Notice(`Grove Reader：已把 ${cards.length} 条批注写入画布`)
+		new Notice(`Grove Reader：已把 ${written} 条批注写入画布`)
 		const file = this.app.vault.getAbstractFileByPath(target)
 		if (file instanceof TFile) await this.app.workspace.getLeaf('split').openFile(file)
 	}

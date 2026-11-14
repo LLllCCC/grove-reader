@@ -90,45 +90,118 @@ export interface CardSpec {
 	color?: string
 }
 
-/** 在现有内容下方按 3 列网格追加卡片，返回新增的节点数 */
-export function appendCards(doc: CanvasDoc, cards: CardSpec[]): number {
-	if (!cards.length) return 0
-	const cols = 3
+/** 一组卡片：带 label 时会在卡片外画一个 Canvas 分组框（按章 / 按颜色） */
+export interface CardGroup {
+	label?: string
+	cards: CardSpec[]
+}
+
+export interface WallOptions {
+	/** 每行几张，默认 3，夹在 1–6 */
+	columns?: number
+	/** 组内按顺序连线 */
+	connect?: boolean
+}
+
+export interface WallResult {
+	cards: number
+	groups: number
+	edges: number
+}
+
+/** 在现有内容下方追加一组卡片墙（可带分组框），返回新增数量 */
+export function appendCardWall(doc: CanvasDoc, groups: CardGroup[], opts: WallOptions = {}): WallResult {
+	const cols = Math.min(6, Math.max(1, Math.floor(opts.columns ?? 3)))
 	const width = 340
 	const gapX = 40
 	const gapY = 30
-
+	const pad = 24
+	const labelH = 56
 	const nodes = doc.nodes
-	const startY = nodes.length
+	let y = nodes.length
 		? Math.max(...nodes.map(n => (Number(n.y) || 0) + (Number(n.height) || 0))) + 80
 		: 0
-	const startX = nodes.length ? Math.min(...nodes.map(n => Number(n.x) || 0)) : 0
+	const baseX = nodes.length ? Math.min(...nodes.map(n => Number(n.x) || 0)) : 0
+	const result: WallResult = { cards: 0, groups: 0, edges: 0 }
 
-	// 每行的高度取该行最高的一张，行与行之间不留空
-	const rowHeights: number[] = []
-	cards.forEach((c, i) => {
-		const row = Math.floor(i / cols)
-		rowHeights[row] = Math.max(rowHeights[row] ?? 0, estimateHeight(c.text, width))
-	})
-	const rowY: number[] = []
-	for (let r = 0; r < rowHeights.length; r++) rowY[r] = (rowY[r - 1] ?? startY - gapY) + (rowHeights[r - 1] ?? 0) + gapY
-	cards.forEach((c, i) => {
-		const col = i % cols
-		const row = Math.floor(i / cols)
-		const height = rowHeights[row] ?? 240
-		const node: CanvasNode = {
-			id: randomId(),
-			type: 'text',
-			text: c.text,
-			x: startX + col * (width + gapX),
-			y: rowY[row],
-			width,
-			height,
+	for (const group of groups) {
+		const cards = group.cards.filter(c => (c.text ?? '').trim())
+		if (!cards.length) continue
+		const label = (group.label ?? '').trim()
+		const labeled = label.length > 0
+		const top = y + (labeled ? labelH : 0)
+
+		// 每行高度取该行最高的一张，行与行之间不留空
+		const rowHeights: number[] = []
+		cards.forEach((c, i) => {
+			const row = Math.floor(i / cols)
+			rowHeights[row] = Math.max(rowHeights[row] ?? 0, estimateHeight(c.text, width))
+		})
+		const rowY: number[] = []
+		for (let r = 0; r < rowHeights.length; r++) {
+			rowY[r] = (rowY[r - 1] ?? top - gapY) + (rowHeights[r - 1] ?? 0) + gapY
 		}
-		if (c.color) node.color = c.color
-		nodes.push(node)
-	})
-	return cards.length
+
+		const cardNodes: CanvasNode[] = cards.map((c, i) => {
+			const row = Math.floor(i / cols)
+			const col = i % cols
+			const node: CanvasNode = {
+				id: randomId(),
+				type: 'text',
+				text: c.text,
+				x: baseX + col * (width + gapX),
+				y: rowY[row],
+				width,
+				height: rowHeights[row] ?? 240,
+			}
+			if (c.color) node.color = c.color
+			return node
+		})
+		const bottom = Math.max(...cardNodes.map(n => n.y + n.height))
+
+		if (labeled) {
+			const groupNode: CanvasNode = {
+				id: randomId(),
+				type: 'group',
+				label,
+				x: baseX - pad,
+				y,
+				width: cols * width + (cols - 1) * gapX + pad * 2,
+				height: bottom - y + pad,
+			}
+			// 分组框先入数组，卡片盖在上面
+			nodes.push(groupNode)
+			result.groups++
+			y = groupNode.y + groupNode.height + gapY * 2
+		} else {
+			y = bottom + gapY * 2
+		}
+		nodes.push(...cardNodes)
+		result.cards += cardNodes.length
+
+		if (opts.connect) {
+			for (let i = 0; i + 1 < cardNodes.length; i++) {
+				const a = cardNodes[i]
+				const b = cardNodes[i + 1]
+				// 同一行往右连；换行时从底部连到下一行顶部（否则会画出一条向左的怪箭头）
+				const sameRow = Math.abs(b.y - a.y) < 1
+				doc.edges.push({
+					id: randomId(),
+					fromNode: a.id,
+					fromSide: sameRow ? 'right' : 'bottom',
+					toNode: b.id,
+					toSide: sameRow ? 'left' : 'top',
+				})
+				result.edges++
+			}
+		}
+	}
+	return result
+}
+
+/** 老接口：单组、3 列、不连线 */
+export function appendCards(doc: CanvasDoc, cards: CardSpec[]): number {
+	return appendCardWall(doc, [{ cards }], { columns: 3 }).cards
 }
 
 export function serializeCanvas(doc: CanvasDoc): string {

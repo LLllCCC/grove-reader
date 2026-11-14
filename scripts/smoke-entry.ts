@@ -16,7 +16,7 @@ import type { SearchDoc } from '../src/search'
 import { TrashStore } from '../src/trash'
 import { buildHealthReport, healthCleanupCount } from '../src/health'
 import { checkMigrateTarget, exportDataBackup, migrateDataFolder } from '../src/backup'
-import { appendCards, buildCardText, emptyCanvas, parseCanvas, serializeCanvas, shortTitle } from '../src/canvas'
+import { appendCardWall, appendCards, buildCardText, emptyCanvas, parseCanvas, serializeCanvas, shortTitle } from '../src/canvas'
 import { buildSubpath, parseGroveHref, parseSubpath, pdfPageEmbed, snippetOf, wikilinkFor } from '../src/wikilink'
 import { parsePdfPlusHref } from '../src/pdfLink'
 import { filterBacklinkGroupsByCfi } from '../src/backlinkFilter'
@@ -453,6 +453,40 @@ assert.ok(n0.x + n0.width <= n1.x, '卡片左右不能重叠')
 assert.equal(n3.color, '3')
 const round = parseCanvas(serializeCanvas(canvasDoc))
 assert.equal(round.nodes.length, 4)
+
+// 分组卡片墙：按章分组生成 group 节点、卡片包在组内；connect 只连组内相邻卡片
+const wallDoc = emptyCanvas()
+const wall = appendCardWall(wallDoc, [
+	{ label: '第1章', cards: [{ text: 'a1' }, { text: 'a2' }, { text: 'a3' }, { text: 'a4' }] },
+	{ label: '第2章', cards: [{ text: 'b1' }] },
+], { columns: 3, connect: true })
+assert.equal(wall.cards, 5)
+assert.equal(wall.groups, 2)
+assert.equal(wall.edges, 3, '4 张卡 3 条连线，第二组只有 1 张')
+const wallGroups = wallDoc.nodes.filter(n => n.type === 'group')
+const wallTexts = wallDoc.nodes.filter(n => n.type === 'text')
+assert.equal(wallGroups.length, 2)
+assert.equal(wallTexts.length, 5)
+for (const g of wallGroups) {
+	const inside = wallTexts.filter(t => t.x >= g.x && t.y >= g.y
+		&& t.x + t.width <= g.x + g.width && t.y + t.height <= g.y + g.height)
+	assert.ok(inside.length > 0, '每个分组框都要包住自己的卡片')
+}
+const sortedGroups = [...wallGroups].sort((a, b) => a.y - b.y)
+assert.ok(sortedGroups[1].y > sortedGroups[0].y + sortedGroups[0].height - 1, '第二组在第一组下方')
+assert.equal(wallDoc.edges.length, 3)
+assert.ok(wallDoc.edges.every(e => typeof e.fromNode === 'string' && typeof e.toNode === 'string'))
+assert.deepEqual(wallDoc.edges.map(e => e.fromSide), ['right', 'right', 'bottom'], '同行往右，换行往下')
+assert.deepEqual(wallDoc.edges.map(e => e.toSide), ['left', 'left', 'top'])
+
+// 不分组 + 不连线：只加卡片，不加 group / edge
+const plainDoc = emptyCanvas()
+const plain = appendCardWall(plainDoc, [{ cards: [{ text: 'x' }, { text: 'y' }] }])
+assert.equal(plain.cards, 2)
+assert.equal(plain.groups, 0)
+assert.equal(plain.edges, 0)
+assert.equal(plainDoc.nodes.filter(n => n.type === 'group').length, 0)
+assert.equal(plainDoc.edges.length, 0)
 let threw = false
 try { parseCanvas('not json') } catch { threw = true }
 assert.ok(threw, '坏文件应抛错而不是清空')

@@ -3753,6 +3753,26 @@ body.is-mobile .grove-export-preview {
 	margin: 6px 0;
 }
 
+.grove-canvas-options {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 16px;
+	margin: 10px 0 4px;
+}
+
+.grove-canvas-option {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+
+.grove-canvas-option input[type='checkbox'] {
+	margin: 0;
+}
+
 .grove-canvas-count {
 	flex: 1;
 	color: var(--text-muted);
