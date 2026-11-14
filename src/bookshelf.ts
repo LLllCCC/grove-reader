@@ -559,6 +559,8 @@ export class BookshelfView extends ItemView {
 		action('upload', '导入书籍…', () => this.#importBooks())
 		action('refresh-cw', '重新扫描', () => void this.refresh({ rescan: true }))
 		action('bar-chart-2', '阅读统计', () => new ReadingStatsModal(this.app, this.plugin).open())
+		const due = this.plugin.reviewDueCount()
+		action('repeat', due ? `今日复习（${due} 条到期）` : '今日复习', () => this.plugin.openReview())
 	}
 
 	async onClose(): Promise<void> {

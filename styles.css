@@ -4974,3 +4974,190 @@ body.is-mobile.grove-eink .grove-toolbar [data-grove-action='朗读'],
 body.is-mobile.grove-eink .grove-toolbar [data-grove-action='AI 划词'] {
 	display: none !important;
 }
+
+/* ===== 今日复习（间隔重复）===== */
+.grove-review-modal {
+	width: min(680px, 94vw);
+}
+
+.grove-review .grove-review-title {
+	margin: 0 0 4px;
+}
+
+.grove-review .grove-review-meta {
+	margin: 0 0 10px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-review .grove-review-bar {
+	height: 4px;
+	margin-bottom: 12px;
+	border-radius: 2px;
+	background: var(--background-modifier-border);
+	overflow: hidden;
+}
+
+.grove-review .grove-review-bar-fill {
+	height: 100%;
+	background: var(--interactive-accent);
+	transition: width 0.18s ease;
+}
+
+.grove-review .grove-review-card {
+	margin-bottom: 14px;
+	padding: 16px 18px;
+	border-left: 4px solid var(--interactive-accent);
+	border-radius: 8px;
+	background: var(--background-secondary);
+}
+
+.grove-review .grove-review-src {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: baseline;
+	margin-bottom: 10px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-review .grove-review-book {
+	color: var(--text-normal);
+	font-weight: 600;
+}
+
+.grove-review .grove-review-source {
+	padding: 0 6px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+}
+
+.grove-review .grove-review-text {
+	max-height: 42vh;
+	overflow-y: auto;
+	white-space: pre-wrap;
+	line-height: 1.75;
+	font-size: 1.05em;
+}
+
+.grove-review .grove-review-note {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-top: 12px;
+	padding-top: 10px;
+	border-top: 1px dashed var(--background-modifier-border);
+}
+
+.grove-review .grove-review-note-label {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-review .grove-review-note-text {
+	white-space: pre-wrap;
+	line-height: 1.6;
+}
+
+.grove-review .grove-review-actions {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 8px;
+}
+
+.grove-review .grove-review-btn {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	justify-content: center;
+	padding: 10px 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	cursor: pointer;
+}
+
+.grove-review .grove-review-btn:hover {
+	border-color: var(--interactive-accent);
+}
+
+.grove-review .grove-review-btn kbd {
+	padding: 0 4px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	font-size: 10px;
+	opacity: 0.6;
+}
+
+.grove-review .grove-review-again {
+	border-color: rgba(255, 107, 107, 0.55);
+}
+
+.grove-review .grove-review-hard {
+	border-color: rgba(255, 169, 77, 0.55);
+}
+
+.grove-review .grove-review-good {
+	border-color: rgba(81, 207, 102, 0.55);
+}
+
+.grove-review .grove-review-easy {
+	border-color: rgba(77, 171, 247, 0.55);
+}
+
+.grove-review .grove-review-foot {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	align-items: center;
+	margin-top: 12px;
+}
+
+.grove-review .grove-review-link {
+	padding: 2px 0;
+	border: none;
+	background: none;
+	color: var(--text-muted);
+	box-shadow: none;
+	cursor: pointer;
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-review .grove-review-link:hover {
+	color: var(--interactive-accent);
+	text-decoration: underline;
+}
+
+.grove-review .grove-review-hint {
+	margin-left: auto;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+.grove-review .grove-review-summary h4 {
+	margin: 4px 0 8px;
+}
+
+.grove-review .grove-review-summary-actions {
+	display: flex;
+	gap: 8px;
+	justify-content: flex-end;
+	margin-top: 14px;
+}
+
+.grove-review .grove-review-empty {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+@media (max-width: 480px) {
+	.grove-review .grove-review-actions {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.grove-review .grove-review-hint {
+		margin-left: 0;
+	}
+}

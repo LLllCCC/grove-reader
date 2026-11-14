@@ -84,8 +84,29 @@ export interface Annotation {
 	source?: 'kindle' | 'readwise' | 'weread'
 	/** 外部来源里的位置串（如 Kindle 的「位置 1234-1236」） */
 	location?: string
+	/** 间隔重复复习状态；没有该字段表示还没复习过 */
+	review?: ReviewState
 	createdAt: number
 	updatedAt: number
+}
+
+/**
+ * 一条划线的复习排期（SM-2 简化版）。
+ * 存在批注对象里，随批注一起跨设备合并与备份，不新增文件。
+ */
+export interface ReviewState {
+	/** 下次到期日（当天 0 点的时间戳） */
+	due: number
+	/** 当前间隔（天） */
+	interval: number
+	/** 难度系数（1.3–3.0，越小越难） */
+	ease: number
+	/** 复习次数 */
+	reps: number
+	/** 忘记次数 */
+	lapses: number
+	/** 上次复习时间戳 */
+	last?: number
 }
 
 /** 外部标注来源的显示名 */
@@ -317,6 +338,10 @@ export interface GroveSettings {
 	dailyGoalMinutes: number
 	/** 年度阅读目标（本），0 = 不设目标 */
 	yearlyGoalBooks: number
+	/** 每日复习条数（间隔重复）；0 = 关闭复习 */
+	reviewDailyCap: number
+	/** 复习队列是否纳入「昨天及更早、从没复习过」的划线 */
+	reviewIncludeNew: boolean
 	/** 朗读语速：0.6–1.6 */
 	ttsRate: number
 	/** e-ink / 极简模式：去动画与阴影、手机工具栏精简、点按翻页 */
@@ -423,6 +448,8 @@ export const DEFAULT_SETTINGS: GroveSettings = {
 	lastAutoBackupAt: 0,
 	dailyGoalMinutes: 30,
 	yearlyGoalBooks: 24,
+	reviewDailyCap: 5,
+	reviewIncludeNew: true,
 	ttsRate: 1,
 	einkMode: false,
 	noteTemplates: [],

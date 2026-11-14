@@ -38,6 +38,8 @@ import {
 	tokenizeQuery,
 } from '../src/portrait'
 import { computeShelfWindow, estimateRowHeight, spacerHeight } from '../src/shelfWindow'
+import { addDays, dueLabel, isDue, isFreshCandidate, nextReview, normalizeReview, pickReviewQueue, reviewStats, reviewedToday, startOfDay } from '../src/review'
+import type { ReviewQueueItem } from '../src/review'
 import { excerptFileName, excerptMarkdown } from '../src/excerptStore'
 import { buildMultiBookPrompt } from '../src/multiBookPrompt'
 import { parseMetaSuggestion } from '../src/bookMeta'
@@ -1693,6 +1695,7 @@ function testPdfPlusLinks() {
 }
 
 testPdfPlusLinks()
+testReview()
 console.log('SMOKE OK')
 }
 
@@ -1700,3 +1703,121 @@ main().catch(e => {
 	console.error(e)
 	process.exit(1)
 })
+
+function testReview(): void {
+	const now = new Date(2026, 10, 14, 12, 0, 0).getTime() // 2026-11-14 12:00 本地
+	const today = startOfDay(now)
+
+	// 日期工具：归零、跨月、相对说法
+	const tomorrow = addDays(now, 1)
+	assert.equal(new Date(tomorrow).getDate(), 15)
+	assert.equal(new Date(tomorrow).getHours(), 0)
+	const in20 = addDays(now, 20)
+	assert.equal(new Date(in20).getMonth(), 11)
+	assert.equal(new Date(in20).getDate(), 4)
+	assert.equal(dueLabel(today, now), '今天')
+	assert.equal(dueLabel(addDays(now, 1), now), '明天')
+	assert.equal(dueLabel(addDays(now, 5), now), '5 天后')
+	assert.equal(dueLabel(addDays(now, -3), now), '今天')
+
+	// 新卡（没有排期）：忘记 / 模糊 1 天，记住 3 天，简单 7 天
+	const againNew = nextReview(undefined, 'again', now)
+	assert.equal(againNew.interval, 1)
+	assert.equal(againNew.ease, 2.3)
+	assert.equal(againNew.lapses, 1)
+	assert.equal(againNew.due, addDays(now, 1))
+	const hardNew = nextReview(undefined, 'hard', now)
+	assert.equal(hardNew.interval, 1)
+	assert.equal(hardNew.ease, 2.35)
+	const goodNew = nextReview(undefined, 'good', now)
+	assert.equal(goodNew.interval, 3)
+	assert.equal(goodNew.ease, 2.5)
+	assert.equal(goodNew.due, addDays(now, 3))
+	const easyNew = nextReview(undefined, 'easy', now)
+	assert.equal(easyNew.interval, 7)
+	assert.equal(easyNew.ease, 2.65)
+	assert.equal(easyNew.reps, 1)
+
+	// 老卡（间隔 3 天）：记住 ×ease，简单 ×ease×1.3，模糊 ×1.2，忘记回到 1 天
+	const mature = { due: addDays(now, -1), interval: 3, ease: 2.5, reps: 2, lapses: 0 }
+	const goodMature = nextReview(mature, 'good', now)
+	assert.equal(goodMature.interval, 8)
+	assert.equal(goodMature.ease, 2.5)
+	assert.equal(goodMature.reps, 3)
+	assert.equal(nextReview(mature, 'easy', now).interval, 10)
+	assert.equal(nextReview(mature, 'easy', now).ease, 2.65)
+	assert.equal(nextReview(mature, 'hard', now).interval, 4)
+	assert.equal(nextReview(mature, 'hard', now).ease, 2.35)
+	const againMature = nextReview(mature, 'again', now)
+	assert.equal(againMature.interval, 1)
+	assert.equal(againMature.lapses, 1)
+	assert.equal(againMature.ease, 2.3)
+
+	// ease 上下限
+	assert.equal(nextReview({ ...mature, ease: 1.35 }, 'again', now).ease, 1.3)
+	assert.equal(nextReview({ ...mature, ease: 2.95 }, 'easy', now).ease, 3)
+
+	// 坏数据：缺字段 / NaN 当作没排期；超范围 ease 收拢
+	assert.equal(normalizeReview(undefined), null)
+	assert.equal(normalizeReview({ due: Number.NaN, interval: Number.NaN } as never), null)
+	assert.equal(normalizeReview({ due: today, interval: 5, ease: 99, reps: 1, lapses: 0 })?.ease, 3)
+	const broken = nextReview({ due: Number.NaN, interval: Number.NaN, ease: Number.NaN } as never, 'good', now)
+	assert.equal(broken.interval, 3)
+	assert.equal(broken.ease, 2.5)
+
+	// 到期判断：今天到期算到期，明天不算，没排期不算
+	const make = (id: string, createdAt: number, extra: Partial<Annotation> = {}): Annotation => ({
+		id,
+		cfi: `cfi-${id}`,
+		text: `摘录 ${id}`,
+		color: 'yellow',
+		createdAt,
+		updatedAt: createdAt,
+		...extra,
+	})
+	const reviewOf = (due: number, last?: number) => ({ due, interval: 3, ease: 2.5, reps: 1, lapses: 0, last })
+	assert.equal(isDue(make('a', now, { review: reviewOf(today) }), now), true)
+	assert.equal(isDue(make('b', now, { review: reviewOf(addDays(now, 1)) }), now), false)
+	assert.equal(isDue(make('c', now), now), false)
+	assert.equal(isDue(make('d', now, { review: reviewOf(addDays(now, -30)) }), now), true)
+
+	// 新卡资格：今天刚划的不进队列，昨天及更早的才进
+	assert.equal(isFreshCandidate(make('e', now), now), false)
+	assert.equal(isFreshCandidate(make('f', addDays(now, -1) + 3600_000), now), true)
+	assert.equal(isFreshCandidate(make('g', addDays(now, -10)), now), true)
+	assert.equal(isFreshCandidate(make('h', 0), now), false)
+	assert.equal(isFreshCandidate(make('i', addDays(now, -3), { review: reviewOf(today) }), now), false)
+
+	// 队列：到期优先（到期最久的在前），再补旧划线；当天新划的不进
+	const item = (a: Annotation, book = '书'): ReviewQueueItem => ({
+		bookPath: `Grove Reader/书籍/${book}.epub`,
+		bookTitle: book,
+		annotation: a,
+	})
+	const items: ReviewQueueItem[] = [
+		item(make('dueOld', now, { review: reviewOf(addDays(now, -3)) }), 'A'),
+		item(make('future', now, { review: reviewOf(addDays(now, 2)) }), 'B'),
+		item(make('dueNew', now, { review: reviewOf(today) }), 'C'),
+		item(make('freshOld', addDays(now, -10)), 'D'),
+		item(make('freshNew', addDays(now, -2)), 'E'),
+		item(make('freshToday', now), 'F'),
+		item(make('blank', addDays(now, -5), { text: '   ' }), 'G'),
+		item(make('dueMid', now, { review: reviewOf(addDays(now, -1)) }), 'H'),
+	]
+	const q4 = pickReviewQueue(items, now, 4).map(x => x.annotation.id)
+	assert.deepEqual(q4, ['dueOld', 'dueMid', 'dueNew', 'freshOld'])
+	const q2 = pickReviewQueue(items, now, 2).map(x => x.annotation.id)
+	assert.deepEqual(q2, ['dueOld', 'dueMid'])
+	assert.deepEqual(pickReviewQueue(items, now, 10, { includeNew: false }).map(x => x.annotation.id), ['dueOld', 'dueMid', 'dueNew'])
+	assert.deepEqual(pickReviewQueue(items, now, 0), [])
+	assert.deepEqual(pickReviewQueue(items, now, 2.9).map(x => x.annotation.id), ['dueOld', 'dueMid'])
+
+	// 今天已复习：按 review.last 落在今天算；统计分开记到期 / 新卡 / 今日
+	const withToday = [...items, item(make('reviewed', now, { review: reviewOf(addDays(now, 4), now) }), 'I')]
+	assert.equal(reviewedToday(withToday, now), 1)
+	const stats = reviewStats(withToday, now)
+	assert.equal(stats.due, 3)
+	assert.equal(stats.fresh, 2)
+	assert.equal(stats.today, 1)
+	assert.equal(reviewStats([], now).due, 0)
+}

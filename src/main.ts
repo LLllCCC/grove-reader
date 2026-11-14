@@ -39,6 +39,9 @@ import { BookAskModal } from './bookAskModal'
 import { MultiBookAskModal } from './multiBookAskModal'
 import { GuideModal } from './guideModal'
 import { ImportHighlightsModal } from './importHighlightsModal'
+import { ReviewModal } from './reviewModal'
+import { nextReview, pickReviewQueue, reviewStats, reviewedToday } from './review'
+import type { ReviewGrade, ReviewQueueItem } from './review'
 import { LibrarySearchModal } from './librarySearch'
 import { movePortrait } from './portrait'
 import { moveGuide } from './guide'
@@ -518,6 +521,74 @@ export default class GroveReaderPlugin extends Plugin {
 				onDelete: row => this.deleteGlobalBookmark(row),
 			},
 		).open()
+	}
+
+	/** 汇总所有书的划线，供复习队列挑选（排除已删除的墓碑条目与空摘录） */
+	reviewCandidates(): ReviewQueueItem[] {
+		const out: ReviewQueueItem[] = []
+		for (const path of this.store.listBookPaths()) {
+			const data = this.store.load(path)
+			const title = (data.title || '').trim() || basenameOf(path).replace(/\.[^.]+$/, '') || path
+			for (const annotation of data.annotations ?? []) {
+				if (data.deletedAnnotations?.[annotation.id]) continue
+				if (!annotation.text?.trim()) continue
+				out.push({ bookPath: path, bookTitle: title, annotation })
+			}
+		}
+		return out
+	}
+
+	/** 今天到期的条数（书架按钮与提示用） */
+	reviewDueCount(now = Date.now()): number {
+		return reviewStats(this.reviewCandidates(), now).due
+	}
+
+	/** 今日复习：按每日上限挑一批到期的 / 旧划线，弹窗逐条评分 */
+	openReview(): void {
+		const cap = Math.max(0, Math.floor(this.settings.reviewDailyCap ?? 0))
+		if (!cap) {
+			new Notice(`${APP_NAME}：复习功能已关闭（设置 → 每日复习条数）`)
+			return
+		}
+		const now = Date.now()
+		const candidates = this.reviewCandidates()
+		const stats = reviewStats(candidates, now)
+		const remaining = Math.max(0, cap - stats.today)
+		if (!remaining) {
+			new Notice(`${APP_NAME}：今天的复习目标已完成（${stats.today}/${cap} 条），明天再来`)
+			return
+		}
+		const queue = pickReviewQueue(candidates, now, remaining, { includeNew: this.settings.reviewIncludeNew !== false })
+		if (!queue.length) {
+			new Notice(stats.fresh
+				? `${APP_NAME}：今天没有到期的划线；另有 ${stats.fresh} 条新划线，明天起进入复习`
+				: `${APP_NAME}：还没有可复习的划线`)
+			return
+		}
+		const nextBatch = (): ReviewQueueItem[] => {
+			const fresh = this.reviewCandidates()
+			const left = Math.max(0, cap - reviewedToday(fresh, Date.now()))
+			return left ? pickReviewQueue(fresh, Date.now(), left, { includeNew: this.settings.reviewIncludeNew !== false }) : []
+		}
+		new ReviewModal(this.app, { queue, dailyCap: cap, reviewedToday: stats.today }, {
+			onGrade: (item, grade) => this.gradeReviewItem(item, grade),
+			onJump: item => void this.openBookByPath(item.bookPath, item.annotation.cfi),
+			getNext: nextBatch,
+		}).open()
+	}
+
+	/** 评分落库：排期写在批注对象里，随批注一起合并 / 备份，不新增文件 */
+	gradeReviewItem(item: ReviewQueueItem, grade: ReviewGrade): void {
+		const data = this.store.load(item.bookPath)
+		const annotation = data.annotations.find(a => a.id === item.annotation.id)
+		if (!annotation) return
+		const now = Date.now()
+		const review = nextReview(annotation.review, grade, now)
+		annotation.review = review
+		annotation.updatedAt = now
+		item.annotation.review = review
+		this.store.save(data)
+		this.debug('review', 'grade', { book: item.bookPath, id: annotation.id, grade, due: review.due, interval: review.interval })
 	}
 
 	deleteGlobalBookmark(row: GlobalBookmarkRow): void {
@@ -1629,6 +1700,11 @@ export default class GroveReaderPlugin extends Plugin {
 			id: 'global-bookmarks',
 			name: '全局书签',
 			callback: () => this.openGlobalBookmarks(),
+		})
+		this.addCommand({
+			id: 'review-queue',
+			name: '今日复习（间隔重复）',
+			callback: () => this.openReview(),
 		})
 		this.addCommand({
 			id: 'reading-stats',

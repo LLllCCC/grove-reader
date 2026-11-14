@@ -346,6 +346,27 @@ export class GroveSettingTab extends PluginSettingTab {
 				}))
 
 		new Setting(containerEl)
+			.setName('每日复习条数')
+			.setDesc('间隔重复复习每天最多看几条；0 = 关闭复习。命令「今日复习」和书架右上角的复习按钮都按它出题')
+			.addText(text =>
+				text.setValue(String(this.plugin.settings.reviewDailyCap ?? 5)).onChange(async value => {
+					const n = Number.parseInt(value, 10)
+					if (Number.isFinite(n) && n >= 0) {
+						this.plugin.settings.reviewDailyCap = Math.min(100, n)
+						await this.plugin.saveSettings()
+					}
+				}))
+
+		new Setting(containerEl)
+			.setName('复习队列包含旧划线')
+			.setDesc('开启时，昨天及更早、还没复习过的划线也会排进复习；关闭后只考到期的')
+			.addToggle(toggle =>
+				toggle.setValue(this.plugin.settings.reviewIncludeNew !== false).onChange(async value => {
+					this.plugin.settings.reviewIncludeNew = value
+					await this.plugin.saveSettings()
+				}))
+
+		new Setting(containerEl)
 			.setName('朗读语速')
 			.setDesc('系统语音的朗读速度；1.0 为正常')
 			.addSlider(slider =>
