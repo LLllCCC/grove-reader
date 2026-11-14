@@ -2803,6 +2803,11 @@ body.is-mobile .grove-export-preview {
 	margin: 10px 0 16px;
 }
 
+/* 奇数张卡时（当前 5 张：4 项阅读 + 今日复习）最后一张整行铺开，避免孤零零半行 */
+.grove-stats-summary .grove-stats-card:last-child:nth-child(odd) {
+	grid-column: 1 / -1;
+}
+
 .grove-stats-card {
 	padding: 10px 12px;
 	border: 1px solid var(--background-modifier-border);
