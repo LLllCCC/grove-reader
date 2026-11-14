@@ -1596,6 +1596,7 @@ export default class GroveReaderPlugin extends Plugin {
 			const stats = this.stats.peek(data.bookPath)
 			map.set(data.bookPath, {
 				annotations: data.annotations.length,
+				thoughts: data.annotations.filter(a => (a.note ?? '').trim()).length,
 				fraction: data.lastLocation?.fraction,
 				// 笔记被删/改名后不再显示标记
 				notePath: notePath && this.app.vault.getAbstractFileByPath(notePath) instanceof TFile ? notePath : undefined,

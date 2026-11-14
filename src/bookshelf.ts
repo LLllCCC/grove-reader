@@ -1309,6 +1309,11 @@ export class BookshelfView extends ItemView {
 		}
 		if (display.showAnnotationCount && info && info.annotations > 0) {
 			meta.createSpan('grove-shelf-badge').setText(`批注 ${info.annotations}`)
+			if ((info.thoughts ?? 0) > 0) {
+				const thoughts = meta.createSpan('grove-shelf-badge grove-thought-badge')
+				thoughts.setText(`想法 ${info.thoughts}`)
+				thoughts.title = `${info.thoughts} 条批注写了想法`
+			}
 		}
 		if (display.showLastRead && info?.lastRead) {
 			const time = meta.createSpan('grove-shelf-time')

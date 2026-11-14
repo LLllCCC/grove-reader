@@ -1607,6 +1607,10 @@ body.is-mobile .grove-appear-panel {
 	white-space: nowrap;
 }
 
+.grove-thought-badge {
+	color: var(--text-muted);
+}
+
 /* 格式徽章：颜色只是加速扫读，语义由文字承担 */
 .grove-fmt-epub,
 .grove-fmt-fb2,

@@ -270,6 +270,8 @@ export const DEFAULT_APPEARANCE: ReaderAppearance = {
 export interface ShelfBookInfo {
 	/** 批注条数 */
 	annotations: number
+	/** 写了想法的批注条数 */
+	thoughts?: number
 	/** 阅读位置占比 0–1 */
 	fraction?: number
 	/** 最近一次阅读时间戳 */
