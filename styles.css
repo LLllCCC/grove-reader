@@ -5161,3 +5161,13 @@ body.is-mobile.grove-eink .grove-toolbar [data-grove-action='AI 划词'] {
 		margin-left: 0;
 	}
 }
+
+/* 手机：没有实体键盘，键盘提示只会把底部挤成两行；链接加大点按面积 */
+body.is-mobile .grove-review .grove-review-hint {
+	display: none;
+}
+
+body.is-mobile .grove-review .grove-review-link {
+	padding: 8px 4px;
+	font-size: var(--font-ui-small);
+}
