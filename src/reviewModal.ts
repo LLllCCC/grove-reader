@@ -12,6 +12,8 @@ export interface ReviewModalHandlers {
 	onGrade: (item: ReviewQueueItem, grade: ReviewGrade) => void
 	/** 回原文（打开书并跳到这条划线的位置） */
 	onJump: (item: ReviewQueueItem) => void
+	/** 复习时补写 / 修改评论；保存后调用 done 重绘卡片 */
+	onComment: (item: ReviewQueueItem, done: () => void) => void
 	/** 「再来一批」：返回下一批；空数组表示今天没有更多了 */
 	getNext: () => ReviewQueueItem[]
 	/** 关闭后通知外部刷新到期数徽标 */
@@ -62,6 +64,11 @@ export class ReviewModal extends Modal {
 			this.#jump()
 			return false
 		})
+		this.scope.register([], 'e', ev => {
+			ev.preventDefault()
+			this.#comment()
+			return false
+		})
 		this.#render()
 	}
 
@@ -104,6 +111,12 @@ export class ReviewModal extends Modal {
 		if (!item) return
 		this.handlers.onJump(item)
 		this.close()
+	}
+
+	#comment(): void {
+		const item = this.#current()
+		if (!item) return
+		this.handlers.onComment(item, () => this.#render())
 	}
 
 	#render(): void {
@@ -163,10 +176,13 @@ export class ReviewModal extends Modal {
 		const jump = foot.createEl('button', { cls: 'grove-review-link', attr: { type: 'button' } })
 		jump.setText('回原文')
 		jump.addEventListener('click', () => this.#jump())
+		const comment = foot.createEl('button', { cls: 'grove-review-link', attr: { type: 'button' } })
+		comment.setText(a.note ? '改想法' : '写想法')
+		comment.addEventListener('click', () => this.#comment())
 		const skip = foot.createEl('button', { cls: 'grove-review-link', attr: { type: 'button' } })
 		skip.setText('跳过这条')
 		skip.addEventListener('click', () => this.#skip())
-		foot.createSpan({ cls: 'grove-review-hint', text: '键盘：1–4 评分 · N 跳过 · O 回原文' })
+		foot.createSpan({ cls: 'grove-review-hint', text: '键盘：1–4 评分 · E 写想法 · N 跳过 · O 回原文' })
 	}
 
 	#renderSummary(contentEl: HTMLElement): void {

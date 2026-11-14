@@ -23,7 +23,7 @@ import {
 import { ReaderView, VIEW_TYPE_GROVE_READER } from './readerView'
 import { BookshelfView, VIEW_TYPE_GROVE_BOOKSHELF } from './bookshelf'
 import { TextView, VIEW_TYPE_GROVE_TEXT } from './textView'
-import { BookPickerModal, CanvasExportModal, ConfirmModal, DangerConfirmModal, FolderPromptModal, GlobalBookmarksModal, HealthReportModal, NoteSyncModal, OpLogModal, ReadingStatsModal, PromptModal, SearchModal, TemplatePickerModal, TrashModal } from './modals'
+import { BookPickerModal, CanvasExportModal, CommentModal, ConfirmModal, DangerConfirmModal, FolderPromptModal, GlobalBookmarksModal, HealthReportModal, NoteSyncModal, OpLogModal, ReadingStatsModal, PromptModal, SearchModal, TemplatePickerModal, TrashModal } from './modals'
 import type { CanvasExportPayload } from './modals'
 import { applySync, planSync } from './noteSync'
 import { collectGlobalBookmarks } from './globalBookmarks'
@@ -543,6 +543,16 @@ export default class GroveReaderPlugin extends Plugin {
 		return reviewStats(this.reviewCandidates(), now).due
 	}
 
+	/** 现在点「复习」实际会出几张：到期 + 旧划线，且不超过今天剩余额度 */
+	reviewPendingCount(now = Date.now()): number {
+		const cap = Math.max(0, Math.floor(this.settings.reviewDailyCap ?? 0))
+		if (!cap) return 0
+		const items = this.reviewCandidates()
+		const left = Math.max(0, cap - reviewedToday(items, now))
+		if (!left) return 0
+		return pickReviewQueue(items, now, left, { includeNew: this.settings.reviewIncludeNew !== false }).length
+	}
+
 	/** 复习概览：今日已复习 / 到期 / 旧划线 / 每日上限（统计页用） */
 	reviewOverview(now = Date.now()): { today: number; due: number; fresh: number; cap: number } {
 		const stats = reviewStats(this.reviewCandidates(), now)
@@ -579,8 +589,25 @@ export default class GroveReaderPlugin extends Plugin {
 		new ReviewModal(this.app, { queue, dailyCap: cap, reviewedToday: stats.today }, {
 			onGrade: (item, grade) => this.gradeReviewItem(item, grade),
 			onJump: item => void this.openBookByPath(item.bookPath, item.annotation.cfi),
+			onComment: (item, done) => this.editReviewComment(item, done),
 			getNext: nextBatch,
 			onClose: () => this.refreshShelfReviewBadges(),
+		}).open()
+	}
+
+	/** 复习时补写评论：保存后写回批注、刷新笔记，并重绘当前卡片 */
+	editReviewComment(item: ReviewQueueItem, done: () => void): void {
+		new CommentModal(this.app, item.annotation.note ?? '', note => {
+			const data = this.store.load(item.bookPath)
+			const annotation = data.annotations.find(a => a.id === item.annotation.id)
+			if (!annotation) return
+			const text = note.trim()
+			annotation.note = text || undefined
+			annotation.updatedAt = Date.now()
+			item.annotation.note = annotation.note
+			this.store.save(data)
+			this.refreshNoteForBook(item.bookPath)
+			done()
 		}).open()
 	}
 

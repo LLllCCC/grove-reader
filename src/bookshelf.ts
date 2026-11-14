@@ -566,16 +566,16 @@ export class BookshelfView extends ItemView {
 		this.updateReviewEntry()
 	}
 
-	/** 刷新复习按钮的到期数（徽标 + 标题）：复习结束 / 清空排期 / 书架刷新后调用 */
+	/** 刷新复习按钮的待复习数（徽标 + 标题）：复习结束 / 清空排期 / 书架刷新后调用 */
 	updateReviewEntry(): void {
 		const btn = this.reviewBtn
 		if (!btn) return
-		const due = this.plugin.reviewDueCount()
-		const label = due ? `今日复习（${due} 条到期）` : '今日复习'
+		const pending = this.plugin.reviewPendingCount()
+		const label = pending ? `今日复习（${pending} 条可复习）` : '今日复习'
 		btn.setAttribute('aria-label', label)
 		btn.setAttribute('title', label)
 		btn.querySelector('.grove-review-badge')?.remove()
-		if (due > 0) btn.createSpan({ cls: 'grove-review-badge', text: due > 99 ? '99+' : String(due) })
+		if (pending > 0) btn.createSpan({ cls: 'grove-review-badge', text: pending > 99 ? '99+' : String(pending) })
 	}
 
 	async onClose(): Promise<void> {
