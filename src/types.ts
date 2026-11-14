@@ -336,6 +336,8 @@ export interface GroveSettings {
 	lastAutoBackupAt: number
 	/** 每日阅读目标（分钟），0 = 不设目标 */
 	dailyGoalMinutes: number
+	/** 每日页数目标（翻页/换节计数），0 = 不设目标 */
+	dailyPageGoal: number
 	/** 年度阅读目标（本），0 = 不设目标 */
 	yearlyGoalBooks: number
 	/** 每日复习条数（间隔重复）；0 = 关闭复习 */
@@ -447,6 +449,7 @@ export const DEFAULT_SETTINGS: GroveSettings = {
 	autoBackup: 'off',
 	lastAutoBackupAt: 0,
 	dailyGoalMinutes: 30,
+	dailyPageGoal: 0,
 	yearlyGoalBooks: 24,
 	reviewDailyCap: 5,
 	reviewIncludeNew: true,

@@ -334,6 +334,18 @@ export class GroveSettingTab extends PluginSettingTab {
 				}))
 
 		new Setting(containerEl)
+			.setName('每日页数目标')
+			.setDesc('页/天；0 = 不设目标。按翻页 / 换节计数（PDF 按页，EPUB 与 TXT 按屏），统计页显示今日进度')
+			.addText(text =>
+				text.setValue(String(this.plugin.settings.dailyPageGoal ?? 0)).onChange(async value => {
+					const n = Number.parseInt(value, 10)
+					if (Number.isFinite(n) && n >= 0) {
+						this.plugin.settings.dailyPageGoal = Math.min(2000, n)
+						await this.plugin.saveSettings()
+					}
+				}))
+
+		new Setting(containerEl)
 			.setName('年度阅读目标')
 			.setDesc('本/年；0 = 不设目标。阅读统计页用方格显示今年读完进度')
 			.addText(text =>

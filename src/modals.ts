@@ -544,6 +544,14 @@ export class ReadingStatsModal extends Modal {
 			const fill = goal.createDiv('grove-stats-goal-fill')
 			fill.style.width = `${Math.min(100, Math.round((todaySec / goalSec) * 100))}%`
 		}
+		const todayPages = stats.dailyTotals().get(today)?.pages ?? 0
+		const pageGoal = Math.max(0, this.plugin.settings.dailyPageGoal || 0)
+		const pagesCard = card('今日页数', `${todayPages} 页`, pageGoal ? `目标 ${pageGoal} 页` : '未设目标')
+		if (pageGoal > 0) {
+			const goal = pagesCard.createDiv('grove-stats-goal')
+			const fill = goal.createDiv('grove-stats-goal-fill')
+			fill.style.width = `${Math.min(100, Math.round((todayPages / pageGoal) * 100))}%`
+		}
 		card('连续阅读', `${streak.current} 天`, `最长 ${streak.longest} 天`)
 		card('活跃天数', `${streak.activeDays} 天`, '有阅读记录的天数')
 		card('累计阅读', formatDuration(totalSec), `${books.length} 本书`)
