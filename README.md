@@ -1,14 +1,39 @@
 # Grove Reader
 
-Obsidian 个人自用电子书阅读插件（支持 epub / mobi / azw3 / fb2 / cbz、PDF 与 TXT）。目标：在 Obsidian 内完成「阅读 → 划线批注 → 生成 Markdown 笔记 → 一键回跳原文」的闭环。插件在设置里提供一组字标（彩叶 / 森林 / 灰绿 / 印章），可切换标签页与功能区图标。
+在 Obsidian 里读书、划线和写笔记：支持 epub / mobi / azw3 / fb2 / cbz、PDF 与 TXT，完成「阅读 → 划线批注 → 生成 Markdown 笔记 → 一键回跳原文」的闭环。插件在设置里提供一组字标（彩叶 / 森林 / 灰绿 / 印章），可切换标签页与功能区图标。
+
+> **English** — Grove Reader turns Obsidian into an e-book reader. It opens EPUB / MOBI / AZW3 / FB2 / CBZ, PDF and TXT files stored in your vault, lets you highlight and comment on the text, and generates one Markdown note per book whose backlinks jump straight back to the annotated passage. Reading progress, rating, ISBN and highlight counts are written to that note's frontmatter, so Dataview and Bases can query your library.
+>
+> Install it from the community directory (search "Grove Reader"), or copy `main.js`, `manifest.json` and `styles.css` into `<vault>/.obsidian/plugins/grove-reader/`. PDF support additionally needs the `pdfjs` asset pack from the release page. The interface is currently Chinese-only.
 
 电子书渲染引擎为 [foliate-js](https://github.com/johnfactotum/foliate-js)（MIT，已内置于 `lib/foliate-js`）；PDF 阅读与批注基于 pdfjs-dist 独立实现（划选高亮按页存储）。
 
 ## 安装
 
 1. 把 `main.js`、`manifest.json`、`styles.css` 复制到 `<库>/.obsidian/plugins/grove-reader/`。
-2. Obsidian 设置 → 第三方插件 → 启用 **Grove Reader**。
-3. 把 EPUB（也支持 mobi / azw3 / fb2 / cbz / txt）放进库里任意位置，点左侧栏书本图标或执行命令「打开书籍…」。
+2. 需要 PDF 时，再把 Release 页的 `grove-reader-pdfjs-assets.zip` 解压到同一目录，得到 `pdfjs/`（含 `wasm/`、`cmaps/`、`standard_fonts/`、`pdf.worker.mjs`）。不做这一步 EPUB 等格式照常可用，只是打开 PDF 会提示缺少解码资源。
+3. Obsidian 设置 → 第三方插件 → 启用 **Grove Reader**。
+4. 把 EPUB（也支持 mobi / azw3 / fb2 / cbz / txt）放进库里任意位置，点左侧栏书本图标或执行命令「打开书籍…」。
+
+## 网络与隐私
+
+插件**默认不联网**，所有阅读数据、批注、笔记都只写进当前库。只有你主动使用下面两项功能时才会发起外部请求：
+
+| 功能 | 请求目标 | 用途 |
+| --- | --- | --- |
+| 封面下载 / 书籍信息补全 | 你填写的图片或豆瓣书籍页地址 | 只在点「下载封面」时请求一次，结果缓存进库内 |
+| 划词解释、查词、全书问答 | 你在设置里自己填的 OpenAI 兼容接口（`baseUrl` + `apiKey` + `model`） | 把选中的文字或检索片段发给你指定的服务商 |
+
+没有内置任何遥测、统计或远程配置。API Key 只存在本库的插件配置里，不会发往上述接口以外的地址。
+
+## 第三方代码与许可
+
+本插件以 **MIT** 许可发布，见 [LICENSE](./LICENSE)。内置的第三方代码：
+
+| 组件 | 许可 | 位置 | 说明 |
+| --- | --- | --- | --- |
+| [foliate-js](https://github.com/johnfactotum/foliate-js) | MIT | `lib/foliate-js` | EPUB / MOBI / AZW3 / FB2 / CBZ 渲染引擎，有本地修改 |
+| [pdf.js](https://github.com/mozilla/pdf.js)（pdfjs-dist） | Apache-2.0 | `pdfjs/`、打包进 `main.js` | PDF 解析与渲染；`pdfjs/` 下的 wasm 与字体资源随 Release 单独分发 |
 
 ## 使用
 
