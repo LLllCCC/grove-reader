@@ -163,6 +163,11 @@ export function formatBytes(n: number): string {
 	return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
+/** PDF 页码标签：既是界面文案，也会写进批注数据与笔记章节名 */
+export function pageLabel(n: number): string {
+	return t('第 {n} 页', { n })
+}
+
 /** 阅读时长友好显示 */
 export function formatDuration(seconds: number): string {
 	if (!Number.isFinite(seconds) || seconds <= 0) return ''

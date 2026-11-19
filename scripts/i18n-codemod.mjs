@@ -61,7 +61,7 @@ function isInsideT(node) {
 	for (let p = node.parent; p; p = p.parent) {
 		if (ts.isCallExpression(p)) {
 			const callee = p.expression.getText(sf)
-			if (callee === 't') return true
+			if (callee === 't' || callee === 'tr') return true
 		}
 		if (ts.isFunctionLike(p)) return false
 	}

@@ -14,7 +14,7 @@ import { JumpReturnBar } from './navReturn'
 import { findBookmarkIndex, makeBookmark, type BookmarkSectionHandle } from './bookmarks'
 import { createColorControls } from './colorMenu'
 import { filterBacklinkGroupsByCfi, type CitationSectionHandle, type ExcerptBacklinkGroup } from './backlinks'
-import { basenameOf, encodeParam, isAbsolutePath, normalizeSelectionText, pageFromFraction, randomId, setHighlightedText, truncate } from './util'
+import { basenameOf, encodeParam, isAbsolutePath, normalizeSelectionText, pageFromFraction, pageLabel, randomId, setHighlightedText, truncate } from './util'
 import { joinPath } from './platformIO'
 import { canLinkBook, pdfPageEmbed, snippetOf, wikilinkFor } from './wikilink'
 import { appendExcerpt } from './excerptNote'
@@ -1576,7 +1576,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 				const page = await this.pdfDoc.getPage(n)
 				const content = await page.getTextContent()
 				const text = pdfItemsToText(content.items ?? [])
-				if (text) out.push({ label: `第 ${n} 页`, text })
+				if (text) out.push({ label: pageLabel(n), text })
 			} catch {
 				// 单页取文失败就跳过
 			}
@@ -1718,7 +1718,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 		if (this.plugin.isMobile) this.sidebarEl.classList.add('grove-hidden')
 		if (from === page) return
 		this.jumpReturn.show({
-			label: `第 ${from} 页`,
+			label: pageLabel(from),
 			back: () => this.#scrollToPage(from),
 		})
 	}
@@ -1744,7 +1744,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 			list.splice(idx, 1)
 			new Notice(tr('Grove Reader：已移除当前位置的书签'))
 		} else {
-			list.push(makeBookmark(cfi, `第 ${this.currentPage} 页`))
+			list.push(makeBookmark(cfi, pageLabel(this.currentPage)))
 			new Notice(tr('Grove Reader：已加书签'))
 		}
 		this.#afterBookmarksChanged()
@@ -1839,7 +1839,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 	// ------------------------------------------------------------------
 
 	#pageLabel(page: number): string {
-		return `第 ${page} 页`
+		return pageLabel(page)
 	}
 
 	#pageLink(page: number): string {
@@ -2097,7 +2097,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 			text: pending.text,
 			color,
 			note: '',
-			chapter: `第 ${pending.page} 页`,
+			chapter: pageLabel(pending.page),
 			sectionIndex: pending.page,
 			createdAt: now,
 			updatedAt: now,
@@ -2151,7 +2151,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 			text: pending.text,
 			color: 'yellow',
 			note: '',
-			chapter: `第 ${pending.page} 页`,
+			chapter: pageLabel(pending.page),
 			sectionIndex: pending.page,
 			createdAt: now,
 			updatedAt: now,
@@ -2304,7 +2304,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 		if (!total) return
 		for (const n of pages) {
 			const group = this.searchResultsEl.createDiv('grove-search-group')
-			group.createDiv('grove-search-page').setText(`第 ${n} 页 · ${this.pageMatches.get(n)!.length} 处`)
+			group.createDiv('grove-search-page').setText(tr('第 {n} 页 · {count} 处', { n, count: this.pageMatches.get(n)!.length }))
 			for (const m of this.pageMatches.get(n)!) {
 				const item = group.createDiv('grove-search-item')
 				item.createSpan('grove-search-frag').setText(m.before)

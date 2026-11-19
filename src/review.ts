@@ -5,6 +5,7 @@
  * 纯函数，不依赖 Obsidian，便于 smoke 覆盖。
  */
 import type { Annotation, ReviewState } from './types'
+import { t } from './i18n'
 
 export type ReviewGrade = 'again' | 'hard' | 'good' | 'easy'
 
@@ -201,7 +202,7 @@ export function pickReviewQueue(
 /** 到期日的说法：今天 / 明天 / N 天后 */
 export function dueLabel(due: number, now: number): string {
 	const diff = Math.round((startOfDay(due) - startOfDay(now)) / DAY_MS)
-	if (diff <= 0) return '今天'
-	if (diff === 1) return '明天'
+	if (diff <= 0) return t('今天')
+	if (diff === 1) return t('明天')
 	return `${diff} 天后`
 }

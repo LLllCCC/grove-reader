@@ -6,9 +6,9 @@ import { App, Modal, Notice, TFile, normalizePath } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import { hintFor, isAiConfigured, lookupWord, type AiConfig } from './ai'
 import { appendVocabEntry, vocabAnkiCsv, vocabFilePath, type VocabEntry } from './vocab'
+import { t } from './i18n'
 
-const NOT_CONFIGURED =
-	'还没有配置 AI。请到 设置 → 阅读与笔记 → AI 解释 填入接口地址、模型与 API Key（推荐智谱 GLM-4-Flash，免费）'
+const NOT_CONFIGURED = '还没有配置 AI。请到 设置 → 阅读与笔记 → AI 解释 填入接口地址、模型与 API Key（推荐智谱 GLM-4-Flash，免费）'
 
 export interface WordLookupContext {
 	bookTitle: string
@@ -44,18 +44,18 @@ export class WordLookupModal extends Modal {
 	onOpen(): void {
 		this.contentEl.empty()
 		this.modalEl.addClass('grove-vocab-modal')
-		this.contentEl.createEl('h3', { text: '查词' })
+		this.contentEl.createEl('h3', { text: t('查词') })
 		this.contentEl.createEl('p', {
 			cls: 'setting-item-description',
 			text: `结合《${this.ctx.bookTitle}》里的原文语境查词；释义可以直接修改，再存入这本书的生词本。`,
 		})
 
 		const row = this.contentEl.createDiv('grove-vocab-word-row')
-		row.createSpan('grove-vocab-label').setText('单词 / 短语')
+		row.createSpan('grove-vocab-label').setText(t('单词 / 短语'))
 		this.inputEl = row.createEl('input', {
 			type: 'text',
 			cls: 'grove-vocab-input',
-			attr: { placeholder: '输入要查的词' },
+			attr: { placeholder: t('输入要查的词') },
 		})
 		this.inputEl.value = this.word
 		this.inputEl.addEventListener('keydown', e => {
@@ -68,21 +68,21 @@ export class WordLookupModal extends Modal {
 		this.statusEl = this.contentEl.createDiv('grove-vocab-status')
 		this.resultEl = this.contentEl.createEl('textarea', {
 			cls: 'grove-vocab-result',
-			attr: { placeholder: '释义会显示在这里，可直接修改', rows: '6' },
+			attr: { placeholder: t('释义会显示在这里，可直接修改'), rows: '6' },
 		})
 
 		const buttons = this.contentEl.createDiv('modal-button-container')
-		this.lookupBtn = buttons.createEl('button', { text: '查询', cls: 'mod-cta' })
+		this.lookupBtn = buttons.createEl('button', { text: t('查询'), cls: 'mod-cta' })
 		this.lookupBtn.addEventListener('click', () => void this.#lookup())
-		this.saveBtn = buttons.createEl('button', { text: '加入生词本' })
+		this.saveBtn = buttons.createEl('button', { text: t('加入生词本') })
 		this.saveBtn.addEventListener('click', () => void this.#save())
-		const csvBtn = buttons.createEl('button', { text: '复制 Anki CSV' })
+		const csvBtn = buttons.createEl('button', { text: t('复制 Anki CSV') })
 		csvBtn.addEventListener('click', () => void this.#copyCsv())
-		const close = buttons.createEl('button', { text: '关闭' })
+		const close = buttons.createEl('button', { text: t('关闭') })
 		close.addEventListener('click', () => this.close())
 
 		if (isAiConfigured(this.#cfg)) void this.#lookup()
-		else this.#status(NOT_CONFIGURED)
+		else this.#status(t(NOT_CONFIGURED))
 	}
 
 	get #cfg(): AiConfig {
@@ -98,22 +98,22 @@ export class WordLookupModal extends Modal {
 		if (this.busy) return
 		const word = this.inputEl.value.trim()
 		if (!word) {
-			this.#status('先输入要查的词')
+			this.#status(t('先输入要查的词'))
 			return
 		}
 		this.word = word
 		if (!isAiConfigured(this.#cfg)) {
-			this.#status(NOT_CONFIGURED)
+			this.#status(t(NOT_CONFIGURED))
 			return
 		}
 		this.busy = true
 		this.lookupBtn.disabled = true
 		this.saveBtn.disabled = true
-		this.#status('查询中…')
+		this.#status(t('查询中…'))
 		try {
 			this.meaning = await lookupWord(this.#cfg, word, this.ctx.context ?? '')
 			this.resultEl.value = this.meaning
-			this.#status('已生成，可修改后加入生词本')
+			this.#status(t('已生成，可修改后加入生词本'))
 		} catch (e) {
 			const message = e instanceof Error ? e.message : String(e)
 			this.#status(`查询失败：${message}${hintFor(message)}`)
@@ -140,7 +140,7 @@ export class WordLookupModal extends Modal {
 	async #save(): Promise<void> {
 		const word = this.inputEl.value.trim()
 		if (!word) {
-			this.#status('先输入要查的词')
+			this.#status(t('先输入要查的词'))
 			return
 		}
 		this.word = word
@@ -154,7 +154,7 @@ export class WordLookupModal extends Modal {
 			const existing = file instanceof TFile ? await this.app.vault.read(file) : null
 			const result = appendVocabEntry(existing, entry)
 			if (!result.added) {
-				new Notice('Grove Reader：生词本里已经有这个词了')
+				new Notice(t('Grove Reader：生词本里已经有这个词了'))
 				return
 			}
 			if (file instanceof TFile) await this.app.vault.modify(file, result.markdown)
@@ -169,14 +169,14 @@ export class WordLookupModal extends Modal {
 	async #copyCsv(): Promise<void> {
 		const entry = this.#entry()
 		if (!entry.word) {
-			this.#status('先输入要查的词')
+			this.#status(t('先输入要查的词'))
 			return
 		}
 		try {
 			await navigator.clipboard.writeText(vocabAnkiCsv(entry))
-			new Notice('Grove Reader：已复制 Anki CSV')
+			new Notice(t('Grove Reader：已复制 Anki CSV'))
 		} catch {
-			this.#status('复制失败：剪贴板不可用')
+			this.#status(t('复制失败：剪贴板不可用'))
 		}
 	}
 

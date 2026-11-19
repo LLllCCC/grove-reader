@@ -141,7 +141,7 @@ export class ReviewModal extends Modal {
 					: `${scopeLabel} · 第 ${Math.min(this.#index + 1, this.#items.length)} / ${this.#items.length} 条`)
 				: (this.#finished
 					? `今天已复习 ${doneToday} 条${capText}`
-					: `第 ${Math.min(this.#index + 1, this.#items.length)} / ${this.#items.length} 条 · 今天已复习 ${doneToday} 条${capText}`),
+					: t('第 {i} / {total} 条 · 今天已复习 {done} 条{cap}', { i: Math.min(this.#index + 1, this.#items.length), total: this.#items.length, done: doneToday, cap: capText })),
 		})
 
 		if (!item) {
@@ -176,7 +176,7 @@ export class ReviewModal extends Modal {
 				cls: `grove-review-btn grove-review-${grade}`,
 				attr: { type: 'button', 'data-grade': grade },
 			})
-			btn.createSpan({ text: REVIEW_GRADE_LABELS[grade] })
+			btn.createSpan({ text: t(REVIEW_GRADE_LABELS[grade]) })
 			btn.createEl('kbd', { text: REVIEW_GRADE_KEYS[grade] })
 			btn.addEventListener('click', () => this.#grade(grade))
 		}
@@ -200,7 +200,7 @@ export class ReviewModal extends Modal {
 		box.createEl('h4', { text: `本轮复习完成：${this.#graded} 条` })
 		const parts: string[] = []
 		for (const grade of GRADES) {
-			if (this.#tally[grade]) parts.push(`${REVIEW_GRADE_LABELS[grade]} ${this.#tally[grade]}`)
+			if (this.#tally[grade]) parts.push(`${t(REVIEW_GRADE_LABELS[grade])} ${this.#tally[grade]}`)
 		}
 		if (this.#skipped) parts.push(`跳过 ${this.#skipped}`)
 		if (parts.length) box.createEl('p', { cls: 'grove-review-tally', text: parts.join(' · ') })

@@ -23,6 +23,7 @@ import {
 	vectorDocIsStale,
 	type VectorDoc,
 } from './vectorIndex'
+import { t } from './i18n'
 
 /** 相似度低于这个值就不进结果，避免「什么都沾一点」 */
 const MIN_SCORE = 0.22
@@ -68,7 +69,7 @@ export async function buildVectorIndex(
 	const stat = await plugin.statBook(bookPath)
 	const extracted = await extractBookText(plugin, bookPath)
 	const planned = planVectorChunks(extracted.sections, extracted.kind)
-	if (!planned.length) throw new Error('没有提取到正文文字（扫描版 PDF 可能没有文字层）')
+	if (!planned.length) throw new Error(t('没有提取到正文文字（扫描版 PDF 可能没有文字层）'))
 	const hashes = planned.map(piece => chunkHash(piece.text))
 	const bookId = plugin.store.bookId(bookPath)
 	const existing = await loadVectorDoc(plugin.io, plugin.getDataRoot(), bookId)
@@ -87,19 +88,19 @@ export async function buildVectorIndex(
 	const batchSize = 16
 	let embedded = 0
 	for (let i = 0; i < todo.length; i += batchSize) {
-		if (options.shouldStop?.()) throw new Error('已停止')
+		if (options.shouldStop?.()) throw new Error(t('已停止'))
 		const batch = todo.slice(i, i + batchSize)
 		const got = await embedForSearch(embed, batch.map(index => planned[index].text), batch.length)
-		if (got.length !== batch.length) throw new Error('嵌入返回条数不一致')
+		if (got.length !== batch.length) throw new Error(t('嵌入返回条数不一致'))
 		batch.forEach((index, k) => {
 			vectors[index] = got[k]
 		})
 		embedded += batch.length
-		options.onProgress?.(embedded, todo.length, '正在生成向量')
+		options.onProgress?.(embedded, todo.length, t('正在生成向量'))
 	}
 	const filled = vectors.map(vector => vector ?? [])
 	const dims = filled[0]?.length ?? 0
-	if (!dims) throw new Error('嵌入返回空向量')
+	if (!dims) throw new Error(t('嵌入返回空向量'))
 	const title = plugin.shelfCache.get(bookPath)?.title || cleanBookTitle(basenameOf(bookPath))
 	const now = Date.now()
 	const doc: VectorDoc = {
@@ -137,7 +138,7 @@ export async function semanticSearchLibrary(
 	const q = query.trim()
 	if (!q) return []
 	const [queryVector] = await embedForSearch(embed, [q], 1)
-	if (!queryVector?.length) throw new Error('查询向量为空')
+	if (!queryVector?.length) throw new Error(t('查询向量为空'))
 	const unit = unitVector(queryVector)
 	const books = shelfBooks(plugin)
 	// 离线词法向量的余弦整体偏低，阈值单独放低；远端语义模型仍用 0.22

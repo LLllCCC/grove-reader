@@ -126,8 +126,8 @@ export class GroveSettingTab extends PluginSettingTab {
 				const icon = preview.createSpan('grove-logo-original')
 				setIcon(icon, 'library')
 			}
-			card.createDiv('grove-logo-name').setText(option.name)
-			if (option.desc) card.createDiv('grove-logo-desc').setText(option.desc)
+			card.createDiv('grove-logo-name').setText(t(option.name))
+			if (option.desc) card.createDiv('grove-logo-desc').setText(t(option.desc))
 			card.addEventListener('click', () => {
 				this.plugin.settings.logoStyle = option.id
 				void this.plugin.saveSettings()

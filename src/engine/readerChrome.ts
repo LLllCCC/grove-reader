@@ -9,6 +9,7 @@ import { setIcon } from 'obsidian'
 import { createCitationSection, type CitationSectionHandle } from '../backlinks'
 import { createBookmarkSection, type BookmarkSectionHandle } from '../bookmarks'
 import { HIGHLIGHT_COLORS } from '../types'
+import { t } from '../i18n'
 
 export interface ReaderSidebarHooks {
 	onAddBookmark: () => void
@@ -87,11 +88,11 @@ export function createReaderSidebar(parent: HTMLElement, options: ReaderSidebarO
 
 	// 全文搜索：三视图同一套 DOM/CSS，收起时不占空间
 	const fullTextSearchEl = el.createEl('details', { cls: 'grove-fulltext-search' })
-	fullTextSearchEl.createEl('summary', { text: '全文搜索' })
+	fullTextSearchEl.createEl('summary', { text: t('全文搜索') })
 	const fullTextControls = fullTextSearchEl.createDiv('grove-fulltext-search-controls')
 	const fullTextInput = fullTextControls.createEl('input', {
 		cls: 'grove-ann-search',
-		attr: { type: 'search', placeholder: '输入关键词，按 Enter 搜索全书…' },
+		attr: { type: 'search', placeholder: t('输入关键词，按 Enter 搜索全书…') },
 	})
 	fullTextInput.addEventListener('keydown', e => {
 		if (e.key === 'Enter') {
@@ -103,11 +104,11 @@ export function createReaderSidebar(parent: HTMLElement, options: ReaderSidebarO
 	})
 	const fullTextMeta = fullTextSearchEl.createDiv('grove-fulltext-search-meta')
 	const fullTextStatus = fullTextMeta.createSpan('grove-fulltext-search-status')
-	fullTextStatus.setText('输入关键词后按 Enter 搜索全书')
+	fullTextStatus.setText(t('输入关键词后按 Enter 搜索全书'))
 	const clearFullText = fullTextMeta.createEl('button', {
 		cls: 'grove-manage-btn',
-		text: '清除',
-		attr: { 'aria-label': '清除全文搜索' },
+		text: t('清除'),
+		attr: { 'aria-label': t('清除全文搜索') },
 	})
 	clearFullText.addEventListener('click', () => hooks.onClearFullTextSearch())
 	const fullTextResults = fullTextSearchEl.createDiv(
@@ -136,7 +137,7 @@ export function createReaderSidebar(parent: HTMLElement, options: ReaderSidebarO
 			dot.addEventListener('click', () => hooks.onColorFilter?.(c.key))
 			filterDots.set(c.key, dot)
 		}
-		clearFilterBtn = filterRow.createEl('button', { cls: 'grove-filter-clear grove-hidden', text: '清除筛选' })
+		clearFilterBtn = filterRow.createEl('button', { cls: 'grove-filter-clear grove-hidden', text: t('清除筛选') })
 		clearFilterBtn.addEventListener('click', () => {
 			searchInput.value = ''
 			hooks.onClearFilters?.()
@@ -147,18 +148,18 @@ export function createReaderSidebar(parent: HTMLElement, options: ReaderSidebarO
 	const sortBtn = manageRow.createEl('button', { cls: 'grove-manage-btn', text: options.sortLabels.position })
 	sortBtn.addEventListener('click', () => hooks.onToggleSort())
 	const collapseAllBtn = options.collapseAll
-		? manageRow.createEl('button', { cls: 'grove-manage-btn', text: '折叠全部' })
+		? manageRow.createEl('button', { cls: 'grove-manage-btn', text: t('折叠全部') })
 		: null
 	collapseAllBtn?.addEventListener('click', () => hooks.onToggleCollapseAll?.())
-	const multiBtn = manageRow.createEl('button', { cls: 'grove-manage-btn', text: '多选' })
+	const multiBtn = manageRow.createEl('button', { cls: 'grove-manage-btn', text: t('多选') })
 	multiBtn.addEventListener('click', () => hooks.onToggleMultiSelect())
 
 	const selectBarEl = (options.selectBarInControls === false ? el : controls).createDiv('grove-select-bar grove-hidden')
 	const selectCountEl = selectBarEl.createSpan('grove-select-count')
-	selectCountEl.setText('已选 0 条')
-	const delBtn = selectBarEl.createEl('button', { text: '删除所选', cls: 'grove-select-delete' })
+	selectCountEl.setText(t('已选 0 条'))
+	const delBtn = selectBarEl.createEl('button', { text: t('删除所选'), cls: 'grove-select-delete' })
 	delBtn.addEventListener('click', () => hooks.onDeleteSelected())
-	const cancelBtn = selectBarEl.createEl('button', { text: '取消', cls: 'grove-select-cancel' })
+	const cancelBtn = selectBarEl.createEl('button', { text: t('取消'), cls: 'grove-select-cancel' })
 	cancelBtn.addEventListener('click', () => hooks.onCancelSelect())
 
 	const listEl = el.createDiv('grove-ann-list')
@@ -191,10 +192,10 @@ export function createReaderSidebar(parent: HTMLElement, options: ReaderSidebarO
 	const tabsEl = el.createDiv('grove-sidebar-tabs')
 	const tabButtons = new Map<SidebarTab, HTMLButtonElement>()
 	const tabDefs: Array<[SidebarTab, string]> = [
-		['bookmarks', '书签'],
-		['citations', '引用'],
-		['search', '全文搜索'],
-		['annotations', '批注'],
+		['bookmarks', t('书签')],
+		['citations', t('引用')],
+		['search', t('全文搜索')],
+		['annotations', t('批注')],
 	]
 	for (const [key, label] of tabDefs) {
 		const btn = tabsEl.createEl('button', {
@@ -211,7 +212,7 @@ export function createReaderSidebar(parent: HTMLElement, options: ReaderSidebarO
 	}
 	const closeSidebar = tabsEl.createEl('button', {
 		cls: 'clickable-icon grove-sidebar-close',
-		attr: { 'aria-label': '关闭批注栏', title: '关闭批注栏' },
+		attr: { 'aria-label': t('关闭批注栏'), title: t('关闭批注栏') },
 	})
 	setIcon(closeSidebar, 'x')
 	closeSidebar.addEventListener('click', () => el.addClass('grove-hidden'))

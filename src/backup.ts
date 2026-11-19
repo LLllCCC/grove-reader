@@ -1,4 +1,5 @@
 import { baseName, joinPath, PlatformIO, readJsonFile, writeJsonFile } from './platformIO'
+import { t } from './i18n'
 
 /**
  * 备份导出与数据迁移（跨平台版）。
@@ -106,14 +107,14 @@ export async function exportDataBackup(input: BackupInput): Promise<BackupResult
 		const entries = await listNames(io, root)
 		let legacy = false
 		try {
-			legacy = (await io.read(joinPath(root, '说明.md'))).includes('由 Grove Reader')
+			legacy = (await io.read(joinPath(root, t('说明.md')))).includes('由 Grove Reader')
 		} catch {
 			legacy = false
 		}
 		const clash = entries.some(n => CLASH_NAMES.includes(n))
 		if (clash && !legacy) return { status: 'blocked', bookCount: 0, extra: '' }
 		await io.mkdir(root)
-		await io.write(joinPath(root, MARKER), 'Grove Reader 备份目录标记：存在此文件时才会覆盖写入。\n')
+		await io.write(joinPath(root, MARKER), t('Grove Reader 备份目录标记：存在此文件时才会覆盖写入。\n'))
 	}
 
 	// 只清我们自己的文件，不动用户可能放进该文件夹的其他内容
@@ -193,21 +194,21 @@ export async function exportDataBackup(input: BackupInput): Promise<BackupResult
 	}
 
 	const guide = [
-		'本文件夹由 Grove Reader 的「备份批注数据到库内」命令生成，是批注数据的保险副本。',
-		'它是普通库内文件：随库同步、随笔记一起备份，删除/重装插件都不受影响。',
+		t('本文件夹由 Grove Reader 的「备份批注数据到库内」命令生成，是批注数据的保险副本。'),
+		t('它是普通库内文件：随库同步、随笔记一起备份，删除/重装插件都不受影响。'),
 		'',
-		'恢复方法：',
-		'1. 关闭 Obsidian；',
-		'2. 把 books/、portraits/、shelf.json、lists.json、covers/ 放回 <数据目录>/（默认是 <库>/Grove Reader/）；',
-		'3. 把 data.json 放回 <库>/.obsidian/plugins/grove-reader/（插件根目录）；',
-		'4. 重新打开 Obsidian。',
+		t('恢复方法：'),
+		t('1. 关闭 Obsidian；'),
+		t('2. 把 books/、portraits/、shelf.json、lists.json、covers/ 放回 <数据目录>/（默认是 <库>/Grove Reader/）；'),
+		t('3. 把 data.json 放回 <库>/.obsidian/plugins/grove-reader/（插件根目录）；'),
+		t('4. 重新打开 Obsidian。'),
 		'',
-		'注意：data.json 里的 AI Key（aiApiKey / aiEmbeddingApiKey）已在备份时剔除，恢复后需要在',
-		'设置 → 阅读与笔记 → AI 解释 里重新填一次。这样备份文件夹可以放心同步、外发。',
+		t('注意：data.json 里的 AI Key（aiApiKey / aiEmbeddingApiKey）已在备份时剔除，恢复后需要在'),
+		t('设置 → 阅读与笔记 → AI 解释 里重新填一次。这样备份文件夹可以放心同步、外发。'),
 		'',
 		`最近备份时间：${new Date().toLocaleString('zh-CN', { hour12: false })}`,
 	].join('\n')
-	await io.write(joinPath(root, '说明.md'), guide)
+	await io.write(joinPath(root, t('说明.md')), guide)
 
 	let extra = ''
 	if (target) {
@@ -215,7 +216,7 @@ export async function exportDataBackup(input: BackupInput): Promise<BackupResult
 			await copyDir(io, root, joinPath(target, baseName(root)))
 			extra = `，并已复制一份到 ${target}`
 		} catch (e) {
-			console.error('[Grove Reader] 复制备份到额外位置失败', e)
+			console.error(t('[Grove Reader] 复制备份到额外位置失败'), e)
 			extra = `（额外位置 ${target} 复制失败，库内备份已完成；请检查路径/磁盘是否可用）`
 		}
 	}
@@ -233,14 +234,14 @@ export interface MigrateCheck {
 export async function checkMigrateTarget(io: PlatformIO, sourceRoot: string, targetRoot: string): Promise<MigrateCheck> {
 	const source = joinPath(sourceRoot, 'data')
 	const target = joinPath(targetRoot, 'data')
-	if (norm(sourceRoot) === norm(targetRoot)) return { ok: false, message: '目标就是当前数据文件夹' }
-	if (!(await io.exists(source))) return { ok: false, message: '当前数据文件夹里没有 data/，无法迁移' }
+	if (norm(sourceRoot) === norm(targetRoot)) return { ok: false, message: t('目标就是当前数据文件夹') }
+	if (!(await io.exists(source))) return { ok: false, message: t('当前数据文件夹里没有 data/，无法迁移') }
 	const src = norm(source)
 	const dst = norm(target)
-	if (dst.startsWith(`${src}/`) || src.startsWith(`${dst}/`)) return { ok: false, message: '不能迁移到自身或子目录' }
+	if (dst.startsWith(`${src}/`) || src.startsWith(`${dst}/`)) return { ok: false, message: t('不能迁移到自身或子目录') }
 	if (await io.exists(target)) {
 		const names = await listNames(io, target)
-		if (names.length > 0) return { ok: false, message: '目标已有数据，请换一个空文件夹' }
+		if (names.length > 0) return { ok: false, message: t('目标已有数据，请换一个空文件夹') }
 	}
 	return { ok: true, source, target }
 }

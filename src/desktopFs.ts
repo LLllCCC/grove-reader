@@ -10,6 +10,7 @@ import fsp from 'node:fs/promises'
 import pathModule from 'node:path'
 import { LEGACY_LIBRARY_ROOT, LIBRARY_ROOT, isShelfExt } from './types'
 import { isAbsolutePath } from './util'
+import { t } from './i18n'
 
 /** 库外（或库内但没进 Obsidian 索引）的绝对路径：同步判断存在性 */
 export function pathExists(absPath: string): boolean {
@@ -44,7 +45,7 @@ export function adoptMigratedFolders({ vaultBase, settings }: AdoptInput): boole
 	if (!vaultBase) return false
 	const root = pathModule.join(vaultBase, LIBRARY_ROOT)
 	const dataOk = fs.existsSync(pathModule.join(root, 'data', 'shelf.json'))
-	const booksDir = pathModule.join(root, '书籍')
+	const booksDir = pathModule.join(root, t('书籍'))
 	const notesDir = pathModule.join(root, '阅读笔记')
 	const hasBooks = (dir: string): boolean => {
 		try {
@@ -133,14 +134,14 @@ export async function exportDataBackup(input: BackupInput): Promise<BackupResult
 		}
 		let legacy = false
 		try {
-			legacy = (await fsp.readFile(pathModule.join(root, '说明.md'), 'utf-8')).includes('由 Grove Reader')
+			legacy = (await fsp.readFile(pathModule.join(root, t('说明.md')), 'utf-8')).includes('由 Grove Reader')
 		} catch {
 			legacy = false
 		}
 		const clash = entries.some(n => ['books', 'covers', 'shelf.json', 'lists.json', 'data.json', 'oplog.json'].includes(n))
 		if (clash && !legacy) return { status: 'blocked' }
 		await fsp.mkdir(root, { recursive: true })
-		await fsp.writeFile(marker, 'Grove Reader 备份目录标记：存在此文件时才会覆盖写入。\n', 'utf-8')
+		await fsp.writeFile(marker, t('Grove Reader 备份目录标记：存在此文件时才会覆盖写入。\n'), 'utf-8')
 	}
 
 	// 只清我们自己的文件，不动用户可能放进该文件夹的其他内容
@@ -195,18 +196,18 @@ export async function exportDataBackup(input: BackupInput): Promise<BackupResult
 		// 尚无封面
 	}
 	const guide = [
-		'本文件夹由 Grove Reader 的「备份批注数据到库内」命令生成，是批注数据的保险副本。',
-		'它是普通库内文件：随库同步、随笔记一起备份，删除/重装插件都不受影响。',
+		t('本文件夹由 Grove Reader 的「备份批注数据到库内」命令生成，是批注数据的保险副本。'),
+		t('它是普通库内文件：随库同步、随笔记一起备份，删除/重装插件都不受影响。'),
 		'',
-		'恢复方法：',
-		'1. 关闭 Obsidian；',
-		'2. 把 books/、shelf.json、lists.json、covers/ 放回 <库>/.obsidian/plugins/grove-reader/data/；',
-		'3. 把 data.json 放回 <库>/.obsidian/plugins/grove-reader/（插件根目录）；',
-		'4. 重新打开 Obsidian。',
+		t('恢复方法：'),
+		t('1. 关闭 Obsidian；'),
+		t('2. 把 books/、shelf.json、lists.json、covers/ 放回 <库>/.obsidian/plugins/grove-reader/data/；'),
+		t('3. 把 data.json 放回 <库>/.obsidian/plugins/grove-reader/（插件根目录）；'),
+		t('4. 重新打开 Obsidian。'),
 		'',
 		`最近备份时间：${new Date().toLocaleString('zh-CN', { hour12: false })}`,
 	].join('\n')
-	await fsp.writeFile(pathModule.join(root, '说明.md'), guide, 'utf-8')
+	await fsp.writeFile(pathModule.join(root, t('说明.md')), guide, 'utf-8')
 
 	let extra = ''
 	if (target) {
@@ -214,7 +215,7 @@ export async function exportDataBackup(input: BackupInput): Promise<BackupResult
 			await copyDir(root, pathModule.join(target, rel))
 			extra = `，并已复制一份到 ${target}`
 		} catch (e) {
-			console.error('[Grove Reader] 复制备份到额外位置失败', e)
+			console.error(t('[Grove Reader] 复制备份到额外位置失败'), e)
 			extra = `（额外位置 ${target} 复制失败，库内备份已完成；请检查路径/磁盘是否可用）`
 		}
 	}
@@ -236,18 +237,18 @@ export function checkMigrateTarget({ vaultBase, sourceRoot, folder }: MigrateInp
 	const source = pathModule.join(sourceRoot, 'data')
 	const target = pathModule.join(targetRoot, 'data')
 	if (pathModule.resolve(sourceRoot) === pathModule.resolve(targetRoot)) {
-		return { ok: false, message: '目标就是当前数据文件夹' }
+		return { ok: false, message: t('目标就是当前数据文件夹') }
 	}
 	if (!fs.existsSync(source)) {
-		return { ok: false, message: '当前数据文件夹里没有 data/，无法迁移' }
+		return { ok: false, message: t('当前数据文件夹里没有 data/，无法迁移') }
 	}
 	const srcAbs = pathModule.resolve(source)
 	const dstAbs = pathModule.resolve(target)
 	if (dstAbs.startsWith(srcAbs + pathModule.sep) || srcAbs.startsWith(dstAbs + pathModule.sep)) {
-		return { ok: false, message: '不能迁移到自身或子目录' }
+		return { ok: false, message: t('不能迁移到自身或子目录') }
 	}
 	if (fs.existsSync(target) && fs.readdirSync(target).length > 0) {
-		return { ok: false, message: '目标已有数据，请换一个空文件夹' }
+		return { ok: false, message: t('目标已有数据，请换一个空文件夹') }
 	}
 	return { ok: true, source, target }
 }
@@ -298,7 +299,7 @@ export async function moveBackupFolder(input: { vaultBase: string; from: string;
 		await fsp.rmdir(src).catch(() => { }) // 只在旧文件夹已空时才删得掉
 		return { status: 'moved' }
 	} catch (e) {
-		console.error('[Grove Reader] 转移备份文件夹失败', e)
+		console.error(t('[Grove Reader] 转移备份文件夹失败'), e)
 		return { status: 'failed', error: e instanceof Error ? e.message : String(e) }
 	}
 }

@@ -1,3 +1,5 @@
+import { t } from './i18n'
+
 /** 阅读海报：把统计渲染成一张 1080×1440 的 PNG（不依赖 DOM，smoke 之外只在阅读统计弹窗调用）。 */
 
 export interface PosterDay {
@@ -70,7 +72,7 @@ export function renderReadingPoster(input: PosterInput): HTMLCanvasElement {
 	ctx.fillText('GROVE READER', pad, 128)
 	ctx.fillStyle = text
 	ctx.font = '700 64px "PingFang SC", "Microsoft YaHei", sans-serif'
-	ctx.fillText('阅读海报', pad, 208)
+	ctx.fillText(t('阅读海报'), pad, 208)
 	ctx.fillStyle = muted
 	ctx.font = '400 26px "PingFang SC", "Microsoft YaHei", sans-serif'
 	const dateLabel = input.date.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
@@ -83,15 +85,15 @@ export function renderReadingPoster(input: PosterInput): HTMLCanvasElement {
 	const streakWidth = ctx.measureText(String(input.streakCurrent)).width
 	ctx.fillStyle = muted
 	ctx.font = '500 36px "PingFang SC", "Microsoft YaHei", sans-serif'
-	ctx.fillText('天连续阅读', pad + streakWidth + 20, 456)
+	ctx.fillText(t('天连续阅读'), pad + streakWidth + 20, 456)
 	ctx.font = '400 24px "PingFang SC", "Microsoft YaHei", sans-serif'
 	ctx.fillText(`最长 ${input.streakLongest} 天 · 累计打卡 ${input.checkins} 天`, pad + streakWidth + 20, 500)
 
 	// 三块统计
 	const stats: Array<[string, string]> = [
-		['今日阅读', formatDuration(input.todaySeconds)],
-		['累计阅读', formatDuration(input.totalSeconds)],
-		['活跃天数', `${input.activeDays} 天`],
+		[t('今日阅读'), formatDuration(input.todaySeconds)],
+		[t('累计阅读'), formatDuration(input.totalSeconds)],
+		[t('活跃天数'), `${input.activeDays} 天`],
 	]
 	const boxY = 570
 	const boxW = (W - pad * 2 - 24 * 2) / 3
@@ -112,7 +114,7 @@ export function renderReadingPoster(input: PosterInput): HTMLCanvasElement {
 	const chartY = 820
 	ctx.fillStyle = muted
 	ctx.font = '500 28px "PingFang SC", "Microsoft YaHei", sans-serif'
-	ctx.fillText('最近 14 天', pad, chartY)
+	ctx.fillText(t('最近 14 天'), pad, chartY)
 	const days = input.days.slice(-14)
 	const max = Math.max(1, ...days.map(d => d.seconds))
 	const chartH = 220
@@ -130,7 +132,7 @@ export function renderReadingPoster(input: PosterInput): HTMLCanvasElement {
 	if (topBooks.length) {
 		ctx.fillStyle = muted
 		ctx.font = '500 28px "PingFang SC", "Microsoft YaHei", sans-serif'
-		ctx.fillText('读得最多', pad, 1160)
+		ctx.fillText(t('读得最多'), pad, 1160)
 		topBooks.forEach((book, i) => {
 			const y = 1210 + i * 62
 			ctx.fillStyle = 'rgba(255, 255, 255, 0.06)'
@@ -150,7 +152,7 @@ export function renderReadingPoster(input: PosterInput): HTMLCanvasElement {
 
 	ctx.fillStyle = 'rgba(224, 228, 240, 0.42)'
 	ctx.font = '400 22px "PingFang SC", "Microsoft YaHei", sans-serif'
-	ctx.fillText('由 Grove Reader 生成', pad, H - 64)
+	ctx.fillText(t('由 Grove Reader 生成'), pad, H - 64)
 	return canvas
 }
 
