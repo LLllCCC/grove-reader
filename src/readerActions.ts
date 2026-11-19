@@ -10,6 +10,7 @@
 import { setIcon } from 'obsidian'
 import { createColorControls } from './colorMenu'
 import { normalizeToolbarOrder } from './types'
+import { t } from './i18n'
 
 export interface ReaderActionHandlers {
 	onColor: (color: string) => void
@@ -82,16 +83,16 @@ export function createReaderActions(
 
 	if (options.text) {
 		const colorWrap = toolbar.createSpan('grove-text-action')
-		colorWrap.dataset.groveAction = '颜色'
+		colorWrap.dataset.groveAction = t('颜色')
 		refs.colorMenuClose = createColorControls(colorWrap, handlers.onColor, options.defaultColor)
-		if (!hidden.has('评论')) {
-			actionBtn('为划选文字添加评论', 'message-square-plus', '评论', () => handlers.onComment(), 'clickable-icon grove-icon-btn grove-text-action', '评论')
+		if (!hidden.has(t('评论'))) {
+			actionBtn(t('为划选文字添加评论'), 'message-square-plus', t('评论'), () => handlers.onComment(), 'clickable-icon grove-icon-btn grove-text-action', t('评论'))
 		}
 		if (options.selectionAi && handlers.onSelectionAi) {
-			actionBtn('AI 解释 / 翻译 / 摘要（先划选一段文字）', 'languages', 'AI', e => {
+			actionBtn(t('AI 解释 / 翻译 / 摘要（先划选一段文字）'), 'languages', 'AI', e => {
 				e.stopPropagation()
 				handlers.onSelectionAi?.(e.currentTarget as HTMLElement)
-			}, 'clickable-icon grove-icon-btn grove-text-action', 'AI 划词')
+			}, 'clickable-icon grove-icon-btn grove-text-action', t('AI 划词'))
 		}
 	}
 
@@ -101,47 +102,47 @@ export function createReaderActions(
 		外观: {
 			enabled: options.text && options.appearance,
 			render: () => {
-				const btn = actionBtn('阅读外观（字体 / 背景 / 行距）', 'type', '外观', e => {
+				const btn = actionBtn(t('阅读外观（字体 / 背景 / 行距）'), 'type', t('外观'), e => {
 					e.stopPropagation()
 					handlers.onAppearance()
-				}, 'clickable-icon grove-icon-btn grove-text-action', '外观')
+				}, 'clickable-icon grove-icon-btn grove-text-action', t('外观'))
 				btn.addClass('grove-appear-button')
 			},
 		},
 		'AI 问答': {
 			enabled: options.text,
-			render: () => actionBtn('AI 全书问答', 'sparkles', 'AI 问答', () => handlers.onAsk(), 'clickable-icon grove-icon-btn grove-text-action', 'AI 问答'),
+			render: () => actionBtn(t('AI 全书问答'), 'sparkles', t('AI 问答'), () => handlers.onAsk(), 'clickable-icon grove-icon-btn grove-text-action', t('AI 问答')),
 		},
 		导读: {
 			enabled: options.text,
-			render: () => actionBtn('AI 按章导读', 'list-tree', '导读', () => handlers.onGuide(), 'clickable-icon grove-icon-btn grove-text-action', '导读'),
+			render: () => actionBtn(t('AI 按章导读'), 'list-tree', t('导读'), () => handlers.onGuide(), 'clickable-icon grove-icon-btn grove-text-action', t('导读')),
 		},
 		朗读: {
 			enabled: options.text && !!handlers.onTts && ttsSupported,
 			render: () => {
-				refs.ttsBtn = actionBtn('朗读当前页（系统语音）', 'volume-2', '朗读', () => handlers.onTts?.(), 'clickable-icon grove-icon-btn grove-text-action', '朗读')
+				refs.ttsBtn = actionBtn(t('朗读当前页（系统语音）'), 'volume-2', t('朗读'), () => handlers.onTts?.(), 'clickable-icon grove-icon-btn grove-text-action', t('朗读'))
 			},
 		},
 		笔记: {
 			enabled: options.text,
-			render: () => actionBtn('生成 / 更新阅读笔记', 'file-text', '笔记', () => handlers.onNote(), 'clickable-icon grove-icon-btn grove-text-action', '笔记'),
+			render: () => actionBtn(t('生成 / 更新阅读笔记'), 'file-text', t('笔记'), () => handlers.onNote(), 'clickable-icon grove-icon-btn grove-text-action', t('笔记')),
 		},
 		书签: {
 			enabled: options.bookmark,
 			render: () => {
 				refs.bookmarkBtn = actionBtn(
-					'书签：标记 / 取消当前位置',
+					t('书签：标记 / 取消当前位置'),
 					'bookmark',
-					'书签',
+					t('书签'),
 					() => handlers.onBookmark(),
 					'clickable-icon grove-icon-btn grove-bookmark-btn',
-					'书签',
+					t('书签'),
 				)
 			},
 		},
 		批注: {
 			enabled: options.sidebar,
-			render: () => actionBtn('批注列表', 'list', '批注', () => handlers.onSidebar(), 'clickable-icon grove-icon-btn', '批注'),
+			render: () => actionBtn(t('批注列表'), 'list', t('批注'), () => handlers.onSidebar(), 'clickable-icon grove-icon-btn', t('批注')),
 		},
 	}
 

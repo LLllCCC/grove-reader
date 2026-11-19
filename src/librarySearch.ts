@@ -21,6 +21,7 @@ import {
 	buildVectorIndex,
 	semanticSearchLibrary,
 } from './semanticSearch'
+import { t } from './i18n'
 
 // pdf.worker 被 import 时会自注册 globalThis.pdfjsWorker，与 Obsidian 原生 PDF 视图冲突
 delete (globalThis as unknown as { pdfjsWorker?: unknown }).pdfjsWorker
@@ -115,8 +116,8 @@ function splitTxtSections(text: string): SectionText[] {
 		}
 		offset += line.length + 1
 	}
-	if (!starts.length) return [{ label: '正文', text, start: 0 }]
-	if (starts[0].offset > 0) starts.unshift({ label: '正文', offset: 0 })
+	if (!starts.length) return [{ label: t('正文'), text, start: 0 }]
+	if (starts[0].offset > 0) starts.unshift({ label: t('正文'), offset: 0 })
 	const out: SectionText[] = []
 	for (let i = 0; i < starts.length; i++) {
 		const from = starts[i].offset
@@ -345,20 +346,20 @@ export class LibrarySearchModal extends Modal {
 	onOpen(): void {
 		this.contentEl.empty()
 		this.modalEl.addClass('grove-library-search-modal')
-		this.contentEl.createEl('h3', { text: '全库搜索' })
+		this.contentEl.createEl('h3', { text: t('全库搜索') })
 		const row = this.contentEl.createDiv('grove-library-search-row')
 		this.inputEl = row.createEl('input', {
 			cls: 'grove-library-search-input',
-			attr: { type: 'search', placeholder: '在全部书的正文中搜索（含 PDF）…' },
+			attr: { type: 'search', placeholder: t('在全部书的正文中搜索（含 PDF）…') },
 		})
-		const searchBtn = row.createEl('button', { cls: 'mod-cta', text: '搜索' })
+		const searchBtn = row.createEl('button', { cls: 'mod-cta', text: t('搜索') })
 		searchBtn.addEventListener('click', () => void this.#run())
-		const stopBtn = row.createEl('button', { text: '停止' })
+		const stopBtn = row.createEl('button', { text: t('停止') })
 		stopBtn.addEventListener('click', () => {
 			if (!this.running) return
 			this.token++
 			this.running = false
-			this.statusEl.setText('已停止')
+			this.statusEl.setText(t('已停止'))
 		})
 		this.inputEl.addEventListener('keydown', e => {
 			if (e.key === 'Enter') {
@@ -377,7 +378,7 @@ export class LibrarySearchModal extends Modal {
 		if (!isLocalEmbedding(runtime) && (!runtime.baseUrl || !runtime.apiKey)) {
 			this.semanticEl.disabled = true
 			semantic.addClass('is-disabled')
-			semantic.setAttribute('title', '当前向量服务缺少接口地址或 Key，请到 设置 → AI 解释 配置，或切到「本地」')
+			semantic.setAttribute('title', t('当前向量服务缺少接口地址或 Key，请到 设置 → AI 解释 配置，或切到「本地」'))
 		}
 		this.resultsEl = this.contentEl.createDiv('grove-library-search-results')
 		window.setTimeout(() => this.inputEl.focus(), 50)
@@ -393,13 +394,13 @@ export class LibrarySearchModal extends Modal {
 		if (this.running) return
 		const query = this.inputEl.value.trim()
 		if (!query) {
-			new Notice('Grove Reader：请输入要搜索的文字')
+			new Notice(t('Grove Reader：请输入要搜索的文字'))
 			return
 		}
 		const token = ++this.token
 		this.running = true
 		this.resultsEl.empty()
-		this.statusEl.setText('正在准备…')
+		this.statusEl.setText(t('正在准备…'))
 		const semantic = !!this.semanticEl?.checked
 		let books: LibraryBookResult[] | null = null
 		if (semantic) {
@@ -411,7 +412,7 @@ export class LibrarySearchModal extends Modal {
 				const msg = e instanceof Error ? e.message : String(e)
 				const localHint = isLocalEmbedding(resolveEmbedding(this.plugin))
 					? ''
-					: '；可在 设置 → AI 解释 → 向量服务 切到「本地（离线）」直接使用'
+					: t('；可在 设置 → AI 解释 → 向量服务 切到「本地（离线）」直接使用')
 				this.statusEl.setText(`语义检索失败：${msg}${hintFor(msg)}${localHint}`)
 				new Notice(`Grove Reader：语义检索失败（${msg}${hintFor(msg)}${localHint}）`, 8000)
 				return
@@ -419,7 +420,7 @@ export class LibrarySearchModal extends Modal {
 			if (!books) {
 				if (token === this.token) {
 					this.running = false
-					this.statusEl.setText('已取消')
+					this.statusEl.setText(t('已取消'))
 				}
 				return
 			}
@@ -436,8 +437,8 @@ export class LibrarySearchModal extends Modal {
 		this.running = false
 		const hitCount = books.reduce((sum, b) => sum + b.hits.length, 0)
 		this.statusEl.setText(hitCount
-			? `${semantic ? '语义匹配' : '找到'} ${hitCount} 处，来自 ${books.length} 本书`
-			: semantic ? '没有语义相近的段落。可以换个说法，或先为书建立索引' : '没有找到匹配内容')
+			? `${semantic ? t('语义匹配') : t('找到')} ${hitCount} 处，来自 ${books.length} 本书`
+			: semantic ? t('没有语义相近的段落。可以换个说法，或先为书建立索引') : t('没有找到匹配内容'))
 		this.#renderResults(books, semantic, query)
 	}
 
@@ -446,8 +447,8 @@ export class LibrarySearchModal extends Modal {
 		const embed = resolveEmbedding(this.plugin)
 		// 远端服务先用一句话探一下：欠费/模型名写错时直接报错，别让用户白等整库提取
 		if (!isLocalEmbedding(embed)) {
-			this.statusEl.setText('正在检查嵌入接口…')
-			await embedForSearch(embed, ['索引测试'], 1)
+			this.statusEl.setText(t('正在检查嵌入接口…'))
+			await embedForSearch(embed, [t('索引测试')], 1)
 		}
 		const missing = await booksNeedingVectorIndex(this.plugin, embed)
 		if (token !== this.token) return null
@@ -459,7 +460,7 @@ export class LibrarySearchModal extends Modal {
 			const ok = await confirmAsync(
 				this.app,
 				`有 ${missing.length} 本书还没有可用的语义索引${detail}。建立索引会把正文按约 1600 字切块并调用嵌入接口（按书长度分多次请求，使用你自己的 API Key）。现在建立吗？`,
-				'建立并搜索',
+				t('建立并搜索'),
 			)
 			if (!ok || token !== this.token) return null
 			let done = 0
@@ -485,7 +486,7 @@ export class LibrarySearchModal extends Modal {
 					}
 				} catch (e) {
 					if (token !== this.token) return null
-					console.error('[Grove Reader] 建语义索引失败', book.path, e)
+					console.error(t('[Grove Reader] 建语义索引失败'), book.path, e)
 					failed.push(book.title)
 				}
 				done++
@@ -494,7 +495,7 @@ export class LibrarySearchModal extends Modal {
 				new Notice(`Grove Reader：${failed.length} 本书索引失败（${failed.slice(0, 3).join('、')}）`, 8000)
 			}
 			if (token !== this.token) return null
-			this.statusEl.setText('索引就绪，正在检索…')
+			this.statusEl.setText(t('索引就绪，正在检索…'))
 		}
 		return semanticSearchLibrary(this.plugin, query, embed, {
 			shouldStop: () => token !== this.token,
@@ -508,7 +509,7 @@ export class LibrarySearchModal extends Modal {
 	#renderResults(books: LibraryBookResult[], semantic = false, query = ''): void {
 		this.resultsEl.empty()
 		if (!books.length) {
-			this.resultsEl.createDiv('grove-ann-empty').setText('没有找到匹配内容。换一个更短的关键词试试。')
+			this.resultsEl.createDiv('grove-ann-empty').setText(t('没有找到匹配内容。换一个更短的关键词试试。'))
 			return
 		}
 		for (const book of books) {
@@ -552,13 +553,13 @@ export class LibrarySearchModal extends Modal {
 			const row = this.resultsEl.createDiv('grove-library-ask-row')
 			const s = this.plugin.settings
 			if (isAiConfigured({ baseUrl: s.aiBaseUrl ?? '', apiKey: s.aiApiKey ?? '', model: s.aiModel ?? '' })) {
-				const ask = row.createEl('button', { text: '就这些段落问 AI', cls: 'mod-cta' })
+				const ask = row.createEl('button', { text: t('就这些段落问 AI'), cls: 'mod-cta' })
 				ask.addEventListener('click', () => {
 					new SemanticAskModal(this.app, this.plugin, books, query).open()
 				})
 			} else {
 				row.createDiv('grove-library-ask-hint')
-					.setText('配置 AI 后可就这些段落提问（设置 → 阅读 → AI 解释）')
+					.setText(t('配置 AI 后可就这些段落提问（设置 → 阅读 → AI 解释）'))
 			}
 		}
 	}

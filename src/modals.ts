@@ -139,8 +139,8 @@ export function confirmAsync(app: App, message: string, okText = t('继续'), ok
 // 书单
 // ------------------------------------------------------------------
 
-const NEW_LIST_OPTION: BookList = { id: '__grove_new__', name: t('新建书单…') }
-const NO_LIST_OPTION: BookList = { id: '__grove_none__', name: t('移出书单（回到未分类）') }
+const NEW_LIST_OPTION: BookList = { id: '__grove_new__', name: '新建书单…' }
+const NO_LIST_OPTION: BookList = { id: '__grove_none__', name: '移出书单（回到未分类）' }
 
 /** 选择要把一本书移入哪个书单；回调参数 'new' 表示新建、null 表示移出 */
 export class ListPickerModal extends FuzzySuggestModal<BookList> {
@@ -154,7 +154,7 @@ export class ListPickerModal extends FuzzySuggestModal<BookList> {
 	}
 
 	getItemText(list: BookList): string {
-		return list.name
+		return t(list.name)
 	}
 
 	onChooseItem(list: BookList): void {

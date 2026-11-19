@@ -87,9 +87,9 @@ export function normalizeTerms(query: string): string[] {
 export type ExportGroupBy = 'book' | 'chapter' | 'color'
 
 export const EXPORT_GROUP_LABELS: Record<ExportGroupBy, string> = {
-	book: t('按书'),
-	chapter: t('按章'),
-	color: t('按颜色'),
+	book: '按书',
+	chapter: '按章',
+	color: '按颜色',
 }
 
 export interface ExportOptions {
@@ -203,7 +203,7 @@ export function exportMarkdown(docs: SearchDoc[], query: string, options: Partia
 		`created: ${JSON.stringify(stamp)}`,
 		`query: ${JSON.stringify(query.trim())}`,
 		`count: ${docs.length}`,
-		`group: ${JSON.stringify(EXPORT_GROUP_LABELS[opts.groupBy])}`,
+		`group: ${JSON.stringify(t(EXPORT_GROUP_LABELS[opts.groupBy]))}`,
 		'---',
 		'',
 		`# ${heading}`,

@@ -12,16 +12,16 @@ import { t } from './i18n'
 
 /** 字体预设：两个视图共用一份，避免再各写一套慢慢长歪 */
 const FONT_PRESETS: Array<{ label: string; value: string }> = [
-	{ label: t('跟随书籍'), value: '' },
-	{ label: t('系统衬线'), value: 'serif' },
-	{ label: t('系统无衬线'), value: 'sans-serif' },
-	{ label: t('宋体'), value: '"Songti SC", "SimSun", "Noto Serif CJK SC", serif' },
-	{ label: t('黑体'), value: '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif' },
-	{ label: t('楷体'), value: '"KaiTi", "STKaiti", "Kaiti SC", serif' },
-	{ label: t('仿宋'), value: '"FangSong", "STFangsong", "Fang Song", serif' },
-	{ label: t('霞鹜文楷'), value: '"LXGW WenKai", "LXGW WenKai GB", "LXGW WenKai Screen", KaiTi, serif' },
-	{ label: t('思源宋体'), value: '"Source Han Serif SC", "Noto Serif CJK SC", "SimSun", serif' },
-	{ label: t('思源黑体'), value: '"Source Han Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif' },
+	{ label: '跟随书籍', value: '' },
+	{ label: '系统衬线', value: 'serif' },
+	{ label: '系统无衬线', value: 'sans-serif' },
+	{ label: '宋体', value: '"Songti SC", "SimSun", "Noto Serif CJK SC", serif' },
+	{ label: '黑体', value: '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif' },
+	{ label: '楷体', value: '"KaiTi", "STKaiti", "Kaiti SC", serif' },
+	{ label: '仿宋', value: '"FangSong", "STFangsong", "Fang Song", serif' },
+	{ label: '霞鹜文楷', value: '"LXGW WenKai", "LXGW WenKai GB", "LXGW WenKai Screen", KaiTi, serif' },
+	{ label: '思源宋体', value: '"Source Han Serif SC", "Noto Serif CJK SC", "SimSun", serif' },
+	{ label: '思源黑体', value: '"Source Han Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif' },
 ]
 
 export interface AppearancePanelHost {
@@ -72,7 +72,7 @@ export function renderAppearancePanel(panel: HTMLElement, host: AppearancePanelH
 	const fontSelect = fontCol.createEl('select', { cls: 'dropdown' })
 	for (const font of FONT_PRESETS) {
 		// 第一项是「不指定字体」，两个视图的措辞不同：EPUB 跟随书籍内嵌样式，TXT 跟随主题
-		const label = font.value === '' && host.surface === 'txt' ? t('跟随主题') : font.label
+		const label = font.value === '' && host.surface === 'txt' ? t('跟随主题') : t(font.label)
 		fontSelect.createEl('option', { value: font.value, text: label })
 	}
 	const presetValue = FONT_PRESETS.some(f => f.value === a.fontFamily) ? a.fontFamily : ''

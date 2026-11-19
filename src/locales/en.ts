@@ -3,6 +3,7 @@ import { EN_BOOKSHELF } from './en.bookshelf'
 import { EN_MAIN } from './en.main'
 import { EN_MODALS } from './en.modals'
 import { EN_READER } from './en.reader'
+import { EN_EXTRA } from './en.extra'
 
 /**
  * English dictionary. Keys are the Chinese source strings used in `t()`.
@@ -16,4 +17,5 @@ export const EN: Record<string, string> = {
 	...EN_MAIN,
 	...EN_MODALS,
 	...EN_READER,
+	...EN_EXTRA,
 }

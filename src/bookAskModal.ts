@@ -29,8 +29,7 @@ interface AskExchange {
 	refs: PortraitChunk[]
 }
 
-const NOT_CONFIGURED =
-	t('还没有配置 AI。请到 设置 → 阅读 → AI 解释 填入接口地址、模型与 API Key（推荐智谱 GLM-4-Flash，免费）')
+const NOT_CONFIGURED = '还没有配置 AI。请到 设置 → 阅读 → AI 解释 填入接口地址、模型与 API Key（推荐智谱 GLM-4-Flash，免费）'
 
 /**
  * AI 全书问答（压缩要点版）：
@@ -132,7 +131,7 @@ export class BookAskModal extends Modal {
 		this.progressEl.setText(this.building ? this.progress || t('准备中…') : '')
 
 		if (!isAiConfigured(this.#cfg)) {
-			root.createDiv('grove-ask-hint').setText(NOT_CONFIGURED)
+			root.createDiv('grove-ask-hint').setText(t(NOT_CONFIGURED))
 		}
 
 		const askRow = root.createDiv('grove-ask-input-row')
@@ -206,7 +205,7 @@ export class BookAskModal extends Modal {
 	async #buildIndex(): Promise<void> {
 		const cfg = this.#cfg
 		if (!isAiConfigured(cfg)) {
-			new Notice(`Grove Reader：${NOT_CONFIGURED}`, 8000)
+			new Notice(t('Grove Reader：{hint}', { hint: t(NOT_CONFIGURED) }), 8000)
 			return
 		}
 		const token = ++this.buildToken
@@ -311,7 +310,7 @@ export class BookAskModal extends Modal {
 		}
 		const cfg = this.#cfg
 		if (!isAiConfigured(cfg)) {
-			new Notice(`Grove Reader：${NOT_CONFIGURED}`, 8000)
+			new Notice(t('Grove Reader：{hint}', { hint: t(NOT_CONFIGURED) }), 8000)
 			return
 		}
 		const token = ++this.askToken

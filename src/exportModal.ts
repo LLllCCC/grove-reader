@@ -10,6 +10,7 @@ import {
 	type SearchDoc,
 } from './search'
 import { HIGHLIGHT_COLORS } from './types'
+import { t } from './i18n'
 
 export interface AnnotationExportSource {
 	/** 全库批注索引 */
@@ -65,7 +66,7 @@ export class AnnotationExportModal extends Modal {
 		this.modalEl.addClass('grove-export-modal')
 		const { contentEl } = this
 		contentEl.empty()
-		contentEl.createEl('h3', { text: '导出批注' })
+		contentEl.createEl('h3', { text: t('导出批注') })
 
 		const total = this.src.all.length
 		contentEl.createEl('p', {
@@ -84,20 +85,20 @@ export class AnnotationExportModal extends Modal {
 		}
 
 		const grid = contentEl.createDiv('grove-export-grid')
-		this.bookSelect = this.#field(grid, '书籍')
+		this.bookSelect = this.#field(grid, t('书籍'))
 		this.bookSelect.addEventListener('change', () => {
 			this.bookPath = this.bookSelect.value
 			this.chapter = ''
 			this.#refresh(true)
 		})
-		this.chapterSelect = this.#field(grid, '章节')
+		this.chapterSelect = this.#field(grid, t('章节'))
 		this.chapterSelect.addEventListener('change', () => {
 			this.chapter = this.chapterSelect.value
 			this.#refresh()
 		})
 
 		const colorField = grid.createDiv('grove-export-field grove-export-colors')
-		colorField.createSpan('grove-export-label').setText('颜色')
+		colorField.createSpan('grove-export-label').setText(t('颜色'))
 		const chips = colorField.createDiv('grove-export-color-row')
 		for (const color of HIGHLIGHT_COLORS) {
 			const chip = chips.createEl('button', {
@@ -115,11 +116,11 @@ export class AnnotationExportModal extends Modal {
 		}
 
 		const toggles = grid.createDiv('grove-export-field grove-export-toggles')
-		toggles.createSpan('grove-export-label').setText('条件')
+		toggles.createSpan('grove-export-label').setText(t('条件'))
 		const toggleRow = toggles.createDiv('grove-export-toggle-row')
 		const todayLabel = toggleRow.createEl('label', { cls: 'grove-export-check' })
 		this.todayBox = todayLabel.createEl('input', { type: 'checkbox' })
-		todayLabel.createSpan({ text: '仅今天' })
+		todayLabel.createSpan({ text: t('仅今天') })
 		this.todayBox.addEventListener('change', () => {
 			this.todayOnly = this.todayBox.checked
 			this.#refresh()
@@ -127,7 +128,7 @@ export class AnnotationExportModal extends Modal {
 		const notesLabel = toggleRow.createEl('label', { cls: 'grove-export-check' })
 		this.notesBox = notesLabel.createEl('input', { type: 'checkbox' })
 		this.notesBox.checked = this.onlyNotes
-		notesLabel.createSpan({ text: '只看有评论的' })
+		notesLabel.createSpan({ text: t('只看有评论的') })
 		this.notesBox.addEventListener('change', () => {
 			this.onlyNotes = this.notesBox.checked
 			this.#refresh()
@@ -135,10 +136,10 @@ export class AnnotationExportModal extends Modal {
 
 		const optionsRow = contentEl.createDiv('grove-export-options')
 		const groupField = optionsRow.createDiv('grove-export-field')
-		groupField.createSpan('grove-export-label').setText('分组')
+		groupField.createSpan('grove-export-label').setText(t('分组'))
 		this.groupSelect = groupField.createEl('select', { cls: 'dropdown' })
 		for (const key of ['book', 'chapter', 'color'] as ExportGroupBy[]) {
-			this.groupSelect.createEl('option', { value: key, text: EXPORT_GROUP_LABELS[key] })
+			this.groupSelect.createEl('option', { value: key, text: t(EXPORT_GROUP_LABELS[key]) })
 		}
 		this.groupSelect.addEventListener('change', () => {
 			this.groupBy = (this.groupSelect.value as ExportGroupBy) ?? 'book'
@@ -146,7 +147,7 @@ export class AnnotationExportModal extends Modal {
 		})
 
 		const contentField = optionsRow.createDiv('grove-export-field')
-		contentField.createSpan('grove-export-label').setText('Markdown 内容')
+		contentField.createSpan('grove-export-label').setText(t('Markdown 内容'))
 		const contentRow = contentField.createDiv('grove-export-toggle-row')
 		const addContent = (key: 'comment' | 'link' | 'meta', label: string): void => {
 			const wrap = contentRow.createEl('label', { cls: 'grove-export-check' })
@@ -161,12 +162,12 @@ export class AnnotationExportModal extends Modal {
 			})
 			this.contentBoxes.push({ key, el: box })
 		}
-		addContent('meta', '位置与颜色')
-		addContent('comment', '评论')
-		addContent('link', '回跳链接')
+		addContent('meta', t('位置与颜色'))
+		addContent('comment', t('评论'))
+		addContent('link', t('回跳链接'))
 
 		const formatField = optionsRow.createDiv('grove-export-field')
-		formatField.createSpan('grove-export-label').setText('格式')
+		formatField.createSpan('grove-export-label').setText(t('格式'))
 		const formatRow = formatField.createDiv('grove-export-format')
 		for (const value of ['md', 'csv'] as const) {
 			const btn = formatRow.createEl('button', {
@@ -187,9 +188,9 @@ export class AnnotationExportModal extends Modal {
 		this.previewEl = contentEl.createEl('pre', { cls: 'grove-export-preview' })
 
 		const footer = contentEl.createDiv('modal-button-container')
-		const cancel = footer.createEl('button', { text: '取消' })
+		const cancel = footer.createEl('button', { text: t('取消') })
 		cancel.addEventListener('click', () => this.close())
-		this.exportBtn = footer.createEl('button', { text: '导出', cls: 'mod-cta' })
+		this.exportBtn = footer.createEl('button', { text: t('导出'), cls: 'mod-cta' })
 		this.exportBtn.addEventListener('click', () => void this.#doExport())
 
 		this.#refresh(true)
@@ -291,7 +292,7 @@ export class AnnotationExportModal extends Modal {
 		this.exportBtn.setText(`导出（${docs.length}）`)
 		this.exportBtn.disabled = docs.length === 0
 		if (!docs.length) {
-			this.previewEl.setText('没有符合当前筛选的批注。放宽书籍、章节、颜色或「仅今天」再试。')
+			this.previewEl.setText(t('没有符合当前筛选的批注。放宽书籍、章节、颜色或「仅今天」再试。'))
 			return
 		}
 		const content = this.format === 'md'

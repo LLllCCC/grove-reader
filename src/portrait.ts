@@ -4,6 +4,7 @@
  */
 import type { PlatformIO } from './platformIO'
 import { joinPath, writeJsonFile } from './platformIO'
+import { t } from './i18n'
 
 export interface SourceSection {
 	label: string
@@ -73,7 +74,7 @@ function cutPoint(text: string, room: number): number {
  */
 export function chunkSections(sections: SourceSection[], maxChars = CHUNK_CHARS): TextChunk[] {
 	const parts = sections
-		.map(s => ({ label: (s.label ?? '').trim() || '正文', text: normalizeText(s.text) }))
+		.map(s => ({ label: (s.label ?? '').trim() || t('正文'), text: normalizeText(s.text) }))
 		.filter(s => !!s.text)
 	const total = parts.reduce((n, s) => n + s.text.length, 0)
 	if (!total) return []
@@ -83,7 +84,7 @@ export function chunkSections(sections: SourceSection[], maxChars = CHUNK_CHARS)
 	let label = ''
 	const flush = (): void => {
 		const text = buf.trim()
-		if (text) chunks.push({ chapter: label || '正文', text })
+		if (text) chunks.push({ chapter: label || t('正文'), text })
 		buf = ''
 	}
 	for (const part of parts) {
@@ -192,18 +193,18 @@ export function resumableChunks(doc: PortraitDoc | null, chunks: TextChunk[]): P
 /** 全书问答的提示词：只依据检索到的要点与摘录，要求带章节依据 */
 export function buildAskPrompt(bookTitle: string, question: string, chunks: PortraitChunk[]): string {
 	const materials = chunks.map((chunk, i) => {
-		const head = `[${i + 1}] ${chunk.chapter || '正文'}`
-		const summary = `要点：${chunk.summary || '（无）'}`
+		const head = `[${i + 1}] ${chunk.chapter || t('正文')}`
+		const summary = `要点：${chunk.summary || t('（无）')}`
 		const preview = chunk.preview ? `摘录：${chunk.preview}` : ''
 		return [head, summary, preview].filter(Boolean).join('\n')
 	}).join('\n\n')
 	return [
-		`你是《${bookTitle || '未命名'}》的阅读助手。下面是从全书要点索引里检索到的材料。`,
+		`你是《${bookTitle || t('未命名')}》的阅读助手。下面是从全书要点索引里检索到的材料。`,
 		'',
-		materials || '（没有检索到相关材料）',
+		materials || t('（没有检索到相关材料）'),
 		'',
-		'请只依据上面的材料回答，不要编造。材料没有提到就直说「书中这部分没有提到」。',
-		'回答用中文：先给结论，再用 1-3 条依据（标注章节），总长度控制在 400 字以内。',
+		t('请只依据上面的材料回答，不要编造。材料没有提到就直说「书中这部分没有提到」。'),
+		t('回答用中文：先给结论，再用 1-3 条依据（标注章节），总长度控制在 400 字以内。'),
 		'',
 		`问题：${question.trim()}`,
 	].join('\n')

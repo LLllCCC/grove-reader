@@ -378,10 +378,10 @@ export function scanBookFolders(folders: string[], vaultFiles: string[]): string
 // ------------------------------------------------------------------
 
 const SORT_OPTIONS: Array<[string, string]> = [
-	['default', t('默认（按文件名）')],
-	['added', t('最近添加')],
-	['title', t('按书名')],
-	['progress', t('阅读进度')],
+	['default', '默认（按文件名）'],
+	['added', '最近添加'],
+	['title', '按书名'],
+	['progress', '阅读进度'],
 ]
 
 /** 书单色条：由 id 稳定映射到色相，避免额外存颜色字段 */
@@ -529,7 +529,7 @@ export class BookshelfView extends ItemView {
 		const sortWrap = this.toolsEl.createDiv('grove-shelf-sort')
 		sortWrap.createSpan('grove-shelf-sort-label').setText(t('排序'))
 		this.sortSelect = sortWrap.createEl('select', { cls: 'dropdown' })
-		for (const [key, label] of SORT_OPTIONS) this.sortSelect.createEl('option', { value: key, text: label })
+		for (const [key, label] of SORT_OPTIONS) this.sortSelect.createEl('option', { value: key, text: t(label) })
 		this.sortSelect.value = this.plugin.settings.shelfSort
 		this.sortSelect.addEventListener('change', () => {
 			this.plugin.settings.shelfSort = this.sortSelect.value

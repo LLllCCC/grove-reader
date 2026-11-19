@@ -10,9 +10,9 @@ import { chatCompletion, hintFor, isAiConfigured, type AiConfig } from './ai'
 import { parseMetaSuggestion, type MetaSuggestion } from './bookMeta'
 import { extractBookText } from './librarySearch'
 import { basenameOf, cleanBookTitle } from './util'
+import { t } from './i18n'
 
-const NOT_CONFIGURED =
-	'还没有配置 AI。请到 设置 → 阅读 → AI 解释 填入接口地址、模型与 API Key（推荐智谱 GLM-4-Flash，免费）'
+const NOT_CONFIGURED = '还没有配置 AI。请到 设置 → 阅读 → AI 解释 填入接口地址、模型与 API Key（推荐智谱 GLM-4-Flash，免费）'
 const SAMPLE_CHARS = 3000
 
 type MetaField = 'author' | 'category' | 'intro'
@@ -47,10 +47,10 @@ export class BookMetaModal extends Modal {
 	onOpen(): void {
 		this.contentEl.empty()
 		this.modalEl.addClass('grove-meta-modal')
-		this.contentEl.createEl('h3', { text: 'AI 补全书籍信息' })
+		this.contentEl.createEl('h3', { text: t('AI 补全书籍信息') })
 		this.contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: '读取书名与正文开头，生成作者、分类和一句话简介。只填空字段，不覆盖已有内容；保存前可以改。',
+			text: t('读取书名与正文开头，生成作者、分类和一句话简介。只填空字段，不覆盖已有内容；保存前可以改。'),
 		})
 		this.statusEl = this.contentEl.createDiv('grove-meta-status')
 		this.formEl = this.contentEl.createDiv('grove-meta-form')
@@ -79,7 +79,7 @@ export class BookMetaModal extends Modal {
 		this.error = ''
 		this.#renderForm()
 		try {
-			this.#status('正在读取正文…')
+			this.#status(t('正在读取正文…'))
 			const extracted = await extractBookText(this.plugin, this.bookPath)
 			const sample = extracted.sections
 				.map(section => section.text)
@@ -88,23 +88,23 @@ export class BookMetaModal extends Modal {
 				.trim()
 				.slice(0, SAMPLE_CHARS)
 			if (token !== this.token) return
-			this.#status('正在让 AI 读这本书…')
+			this.#status(t('正在让 AI 读这本书…'))
 			const title = this.plugin.shelfCache.get(this.bookPath)?.title
 				|| cleanBookTitle(basenameOf(this.bookPath).replace(/\.[^.]+$/, ''))
 			const answer = await chatCompletion(cfg, [
 				{
 					role: 'system',
-					content: '你是一位图书信息整理助手。只根据提供的书名和正文片段判断，不确定就留空，不要编造。',
+					content: t('你是一位图书信息整理助手。只根据提供的书名和正文片段判断，不确定就留空，不要编造。'),
 				},
 				{
 					role: 'user',
 					content: [
 						`书名：${title}`,
 						'',
-						`正文开头：${sample || '（没有提取到正文）'}`,
+						`正文开头：${sample || t('（没有提取到正文）')}`,
 						'',
-						'请返回 JSON，不要 Markdown 代码块：',
-						'{"author":"作者，不确定就留空","category":"2-4 个字的分类","intro":"一句话简介，40 字以内"}',
+						t('请返回 JSON，不要 Markdown 代码块：'),
+						t('{"author":"作者，不确定就留空","category":"2-4 个字的分类","intro":"一句话简介，40 字以内"}'),
 					].join('\n'),
 				},
 			], { temperature: 0.2, maxTokens: 300 })
@@ -136,12 +136,12 @@ export class BookMetaModal extends Modal {
 		if (!this.formEl) return
 		this.formEl.empty()
 		this.badges = {}
-		if (this.generating) this.#status('正在生成建议…')
+		if (this.generating) this.#status(t('正在生成建议…'))
 		else if (this.error) this.#status(`生成失败：${this.error}${hintFor(this.error)}`)
 		else if (!isAiConfigured(this.#cfg)) this.#status(NOT_CONFIGURED)
-		else this.#status('建议已生成，确认或修改后保存')
+		else this.#status(t('建议已生成，确认或修改后保存'))
 		if (!isAiConfigured(this.#cfg)) {
-			this.formEl.createDiv('grove-meta-hint').setText('也可以先手动填写下面的空白字段。')
+			this.formEl.createDiv('grove-meta-hint').setText(t('也可以先手动填写下面的空白字段。'))
 		}
 
 		const entry = this.plugin.shelfCache.get(this.bookPath) ?? {}
@@ -159,33 +159,33 @@ export class BookMetaModal extends Modal {
 			const badge = head.createSpan('grove-meta-ai')
 			this.badges[field] = badge
 			if (existing[field]) {
-				head.createSpan({ cls: 'grove-meta-locked', text: '已有内容，不覆盖' })
+				head.createSpan({ cls: 'grove-meta-locked', text: t('已有内容，不覆盖') })
 			} else if (this.#isAiField(field)) {
-				badge.setText('AI 生成')
+				badge.setText(t('AI 生成'))
 			}
 			const input = multiline
 				? row.createEl('textarea', { cls: 'grove-comment-input', attr: { rows: '3' } })
 				: row.createEl('input', { type: 'text', cls: 'grove-folder-input' })
 			input.value = this.values[field]
 			input.disabled = !!existing[field]
-			input.placeholder = field === 'intro' ? '一句话简介，40 字以内' : ''
+			input.placeholder = field === 'intro' ? t('一句话简介，40 字以内') : ''
 			input.addEventListener('input', () => {
 				this.values[field] = input.value
 				this.dirty.add(field)
 				badge.setText('')
 			})
 		}
-		renderField('author', '作者')
-		renderField('category', '分类')
-		renderField('intro', '一句话简介', true)
+		renderField('author', t('作者'))
+		renderField('category', t('分类'))
+		renderField('intro', t('一句话简介'), true)
 
 		const buttons = this.formEl.createDiv('modal-button-container')
-		const regen = buttons.createEl('button', { text: this.generating ? '生成中…' : '重新生成' })
+		const regen = buttons.createEl('button', { text: this.generating ? t('生成中…') : t('重新生成') })
 		regen.disabled = this.generating || !isAiConfigured(this.#cfg)
 		regen.addEventListener('click', () => void this.#generate())
-		const save = buttons.createEl('button', { text: '保存', cls: 'mod-cta' })
+		const save = buttons.createEl('button', { text: t('保存'), cls: 'mod-cta' })
 		save.addEventListener('click', () => this.#save(existing))
-		const cancel = buttons.createEl('button', { text: '取消' })
+		const cancel = buttons.createEl('button', { text: t('取消') })
 		cancel.addEventListener('click', () => this.close())
 	}
 
@@ -208,7 +208,7 @@ export class BookMetaModal extends Modal {
 			else delete aiMeta[field]
 		}
 		if (!changed) {
-			new Notice('Grove Reader：没有需要保存的空白字段')
+			new Notice(t('Grove Reader：没有需要保存的空白字段'))
 			this.close()
 			return
 		}
@@ -226,7 +226,7 @@ export class BookMetaModal extends Modal {
 			intro: entry.intro || data.intro || undefined,
 		})
 		this.plugin.shelfCache.saveNow()
-		new Notice('Grove Reader：书籍信息已保存')
+		new Notice(t('Grove Reader：书籍信息已保存'))
 		this.onSaved?.()
 		this.close()
 	}

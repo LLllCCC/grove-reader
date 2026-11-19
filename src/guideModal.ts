@@ -13,9 +13,9 @@ import {
 	saveGuide,
 	type GuideDoc,
 } from './guide'
+import { t } from './i18n'
 
-const NOT_CONFIGURED =
-	'还没有配置 AI。请到 设置 → 阅读 → AI 解释 填入接口地址、模型与 API Key（推荐智谱 GLM-4-Flash，免费）'
+const NOT_CONFIGURED = '还没有配置 AI。请到 设置 → 阅读 → AI 解释 填入接口地址、模型与 API Key（推荐智谱 GLM-4-Flash，免费）'
 
 /**
  * AI 按章导读：
@@ -69,47 +69,47 @@ export class GuideModal extends Modal {
 		const head = root.createDiv('grove-guide-head')
 		const icon = head.createSpan('grove-guide-icon')
 		setIcon(icon, 'list-tree')
-		head.createSpan('grove-guide-title').setText('AI 按章导读')
-		head.createSpan('grove-guide-book').setText(this.view.bookTitle || '未命名')
+		head.createSpan('grove-guide-title').setText(t('AI 按章导读'))
+		head.createSpan('grove-guide-book').setText(this.view.bookTitle || t('未命名'))
 
 		const status = root.createDiv('grove-guide-status')
-		if (!this.loaded) status.setText('正在读取导读…')
-		else if (!this.doc) status.setText('还没有生成导读。生成后会按章节各写 2-4 句，点其中一章可以跳回原文。')
+		if (!this.loaded) status.setText(t('正在读取导读…'))
+		else if (!this.doc) status.setText(t('还没有生成导读。生成后会按章节各写 2-4 句，点其中一章可以跳回原文。'))
 		else {
 			const when = new Date(this.doc.updatedAt || this.doc.createdAt)
 				.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-			const state = this.doc.status === 'ready' ? '' : '（上次未完成）'
+			const state = this.doc.status === 'ready' ? '' : t('（上次未完成）')
 			status.setText(`已生成 ${this.doc.items.length} 章导读${state} · 更新于 ${when}`)
 		}
 
 		const actions = root.createDiv('grove-guide-actions')
 		const resumable = this.doc?.status === 'partial' && this.doc.items.length > 0
 		const build = actions.createEl('button', {
-			text: this.doc ? (resumable ? '继续生成' : '重新生成') : '生成导读',
+			text: this.doc ? (resumable ? t('继续生成') : t('重新生成')) : t('生成导读'),
 			cls: 'mod-cta',
 		})
 		build.disabled = this.building || !this.loaded
 		build.addEventListener('click', () => void this.#build())
 		if (this.doc) {
-			const del = actions.createEl('button', { text: '删除导读' })
+			const del = actions.createEl('button', { text: t('删除导读') })
 			del.disabled = this.building
 			del.addEventListener('click', () => void this.#delete())
 		}
 		if (this.building) {
-			const cancel = actions.createEl('button', { text: '取消', cls: 'mod-warning' })
+			const cancel = actions.createEl('button', { text: t('取消'), cls: 'mod-warning' })
 			cancel.addEventListener('click', () => {
 				this.buildToken++
 				this.building = false
 				this.progress = ''
 				this.#render()
-				new Notice('Grove Reader：已取消，下次点「继续生成」可接着写')
+				new Notice(t('Grove Reader：已取消，下次点「继续生成」可接着写'))
 			})
 		}
 		this.progressEl = root.createDiv('grove-guide-progress')
-		this.progressEl.setText(this.building ? this.progress || '准备中…' : '')
+		this.progressEl.setText(this.building ? this.progress || t('准备中…') : '')
 
 		if (!isAiConfigured(this.#cfg)) {
-			root.createDiv('grove-guide-hint').setText(NOT_CONFIGURED)
+			root.createDiv('grove-guide-hint').setText(t(NOT_CONFIGURED))
 		}
 
 		this.listEl = root.createDiv('grove-guide-list')
@@ -121,11 +121,11 @@ export class GuideModal extends Modal {
 		if (!list) return
 		list.empty()
 		if (this.building && !this.doc?.items.length) {
-			list.createDiv('grove-guide-empty').setText('正在读取正文并规划章节…')
+			list.createDiv('grove-guide-empty').setText(t('正在读取正文并规划章节…'))
 			return
 		}
 		if (!this.doc?.items.length) {
-			if (this.loaded) list.createDiv('grove-guide-empty').setText('生成后，每一章的导读会列在这里。')
+			if (this.loaded) list.createDiv('grove-guide-empty').setText(t('生成后，每一章的导读会列在这里。'))
 			return
 		}
 		for (const item of this.doc.items) {
@@ -133,8 +133,8 @@ export class GuideModal extends Modal {
 			const top = row.createDiv('grove-guide-item-head')
 			top.createSpan('grove-guide-item-label').setText(item.label || `第 ${item.index + 1} 章`)
 			const jump = top.createSpan('grove-guide-item-jump')
-			jump.setText('回到原文')
-			row.createDiv('grove-guide-item-text').setText(item.summary || '（这一章还没生成）')
+			jump.setText(t('回到原文'))
+			row.createDiv('grove-guide-item-text').setText(item.summary || t('（这一章还没生成）'))
 			row.addEventListener('click', () => {
 				this.view.jumpTo(item.cfi, { chapter: item.label, pct: item.pct })
 				this.close()
@@ -150,35 +150,35 @@ export class GuideModal extends Modal {
 	async #build(): Promise<void> {
 		const cfg = this.#cfg
 		if (!isAiConfigured(cfg)) {
-			new Notice(`Grove Reader：${NOT_CONFIGURED}`, 8000)
+			new Notice(t('Grove Reader：{hint}', { hint: t(NOT_CONFIGURED) }), 8000)
 			return
 		}
 		const token = ++this.buildToken
 		this.building = true
 		this.#render()
 		try {
-			this.#updateProgress('正在读取正文…')
+			this.#updateProgress(t('正在读取正文…'))
 			const sections = await this.view.extractAiSections((done, total) => {
 				if (token === this.buildToken) this.#updateProgress(`正在读取正文 ${done}/${total}`)
 			})
 			if (token !== this.buildToken) return
 			if (!sections.length) {
-				new Notice('Grove Reader：没有提取到正文文字（扫描版 PDF 可能没有文字层）')
+				new Notice(t('Grove Reader：没有提取到正文文字（扫描版 PDF 可能没有文字层）'))
 				return
 			}
 			const planned = planGuideUnits(sections)
 			if (!planned.length) {
-				new Notice('Grove Reader：正文太短，没有可生成导读的内容')
+				new Notice(t('Grove Reader：正文太短，没有可生成导读的内容'))
 				return
 			}
 			const reuse = resumableGuideItems(this.doc, planned)
 			const remaining = planned.length - reuse.length
-			const title = this.view.bookTitle || '未命名'
+			const title = this.view.bookTitle || t('未命名')
 			const long = planned.filter(item => item.chars > GUIDE_TEXT_CHARS).length
 			const message = reuse.length
 				? `《${title}》共 ${planned.length} 章，上次已完成 ${reuse.length} 章；继续生成剩余 ${remaining} 章（约 ${remaining} 次 AI 请求，使用你自己的 API Key）。继续吗？`
 				: `将为《${title}》的 ${planned.length} 章生成导读（约 ${planned.length} 次 AI 请求，使用你自己的 API Key${long ? `；其中 ${long} 章较长，只取头尾` : ''}）。继续吗？`
-			const ok = await confirmAsync(this.app, message, reuse.length ? '继续生成' : '开始生成')
+			const ok = await confirmAsync(this.app, message, reuse.length ? t('继续生成') : t('开始生成'))
 			if (!ok || token !== this.buildToken) return
 			const now = Date.now()
 			const doc: GuideDoc = reuse.length
@@ -246,11 +246,11 @@ export class GuideModal extends Modal {
 
 	async #delete(): Promise<void> {
 		if (!this.doc) return
-		const ok = await confirmAsync(this.app, '删除这本书的按章导读？下次点「生成导读」会重新生成。', '删除')
+		const ok = await confirmAsync(this.app, t('删除这本书的按章导读？下次点「生成导读」会重新生成。'), t('删除'))
 		if (!ok) return
 		await removeGuide(this.plugin.io, this.plugin.getDataRoot(), this.#bookId)
 		this.doc = null
 		this.#render()
-		new Notice('Grove Reader：已删除导读')
+		new Notice(t('Grove Reader：已删除导读'))
 	}
 }

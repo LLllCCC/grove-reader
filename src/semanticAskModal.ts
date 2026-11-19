@@ -7,9 +7,9 @@ import { App, Modal, Notice, setIcon } from 'obsidian'
 import type GroveReaderPlugin from './main'
 import { answerMultiBookQuestion, hintFor, isAiConfigured, type AiConfig, type MultiBookMaterial } from './ai'
 import type { LibraryBookResult } from './librarySearch'
+import { t } from './i18n'
 
-const NOT_CONFIGURED =
-	'还没有配置 AI。请到 设置 → 阅读 → AI 解释 填入接口地址、模型与 API Key（推荐智谱 GLM-4-Flash，免费）'
+const NOT_CONFIGURED = '还没有配置 AI。请到 设置 → 阅读 → AI 解释 填入接口地址、模型与 API Key（推荐智谱 GLM-4-Flash，免费）'
 /** 一次最多交给模型多少段材料，避免 prompt 过长 */
 const MAX_MATERIALS = 12
 
@@ -85,21 +85,21 @@ export class SemanticAskModal extends Modal {
 		const head = root.createDiv('grove-ask-head')
 		const icon = head.createSpan('grove-ask-icon')
 		setIcon(icon, 'sparkles')
-		head.createSpan('grove-ask-title').setText('跨书语义问答')
+		head.createSpan('grove-ask-title').setText(t('跨书语义问答'))
 		head.createSpan('grove-ask-book').setText(`${bookCount} 本书 · ${materials.length} 段材料`)
 
 		const status = root.createDiv('grove-ask-status')
 		status.setText(materials.length
-			? '材料来自刚才的语义检索结果；回答会标注书名与章节，不会编造材料之外的内容。'
-			: '这次检索没有可用的语义段落，先换个问法或为书建立索引。')
+			? t('材料来自刚才的语义检索结果；回答会标注书名与章节，不会编造材料之外的内容。')
+			: t('这次检索没有可用的语义段落，先换个问法或为书建立索引。'))
 
 		const cfg = this.#cfg
-		if (!isAiConfigured(cfg)) root.createDiv('grove-ask-hint').setText(NOT_CONFIGURED)
+		if (!isAiConfigured(cfg)) root.createDiv('grove-ask-hint').setText(t(NOT_CONFIGURED))
 
 		const askRow = root.createDiv('grove-ask-input-row')
 		const input = askRow.createEl('textarea', {
 			cls: 'grove-ask-input',
-			attr: { rows: '2', placeholder: '例如：这几本书对「习惯养成」的看法有什么不同？' },
+			attr: { rows: '2', placeholder: t('例如：这几本书对「习惯养成」的看法有什么不同？') },
 		})
 		input.value = this.question
 		input.addEventListener('input', () => {
@@ -111,7 +111,7 @@ export class SemanticAskModal extends Modal {
 				void this.#ask()
 			}
 		})
-		const ask = askRow.createEl('button', { text: this.asking ? '思考中…' : '提问', cls: 'mod-cta' })
+		const ask = askRow.createEl('button', { text: this.asking ? t('思考中…') : t('提问'), cls: 'mod-cta' })
 		ask.disabled = this.asking || !materials.length || !isAiConfigured(cfg)
 		ask.addEventListener('click', () => void this.#ask())
 
@@ -125,18 +125,18 @@ export class SemanticAskModal extends Modal {
 			}
 			block.createDiv('grove-ask-refs-label').setText(`参考：${ex.books.join('、')}`)
 		}
-		if (this.asking) this.answerEl.createDiv('grove-ask-loading').setText('正在根据这些段落生成回答…')
+		if (this.asking) this.answerEl.createDiv('grove-ask-loading').setText(t('正在根据这些段落生成回答…'))
 	}
 
 	async #ask(): Promise<void> {
 		const question = this.question.trim()
 		if (!question) {
-			new Notice('Grove Reader：先输入问题')
+			new Notice(t('Grove Reader：先输入问题'))
 			return
 		}
 		const cfg = this.#cfg
 		if (!isAiConfigured(cfg)) {
-			new Notice(`Grove Reader：${NOT_CONFIGURED}`, 8000)
+			new Notice(t('Grove Reader：{hint}', { hint: t(NOT_CONFIGURED) }), 8000)
 			return
 		}
 		const materials = this.#materials()

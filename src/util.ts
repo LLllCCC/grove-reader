@@ -1,3 +1,5 @@
+import { t } from './i18n'
+
 /**
  * 纯 JS 的 SHA-1：桌面端原本用 node:crypto，但移动端没有 Node，
  * 而 bookIdFor 必须同步且结果与历史数据完全一致（书 id 就是它以
@@ -164,10 +166,10 @@ export function formatBytes(n: number): string {
 /** 阅读时长友好显示 */
 export function formatDuration(seconds: number): string {
 	if (!Number.isFinite(seconds) || seconds <= 0) return ''
-	if (seconds < 60) return `${Math.round(seconds)} 秒`
-	if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟`
-	if (seconds < 3600 * 24) return `${(seconds / 3600).toFixed(1)} 小时`
-	return `${(seconds / 3600 / 24).toFixed(1)} 天`
+	if (seconds < 60) return t('{n} 秒', { n: Math.round(seconds) })
+	if (seconds < 3600) return t('{n} 分钟', { n: Math.round(seconds / 60) })
+	if (seconds < 3600 * 24) return t('{n} 小时', { n: (seconds / 3600).toFixed(1) })
+	return t('{n} 天', { n: (seconds / 3600 / 24).toFixed(1) })
 }
 
 /** 相对时间：刚刚 / 23 分钟前 / 3 小时前 / 昨天 / 5 天前 / 2 个月前 */
@@ -177,13 +179,13 @@ export function relativeTime(timestamp: number, now = Date.now()): string {
 	const MIN = 60_000
 	const HOUR = 60 * MIN
 	const DAY = 24 * HOUR
-	if (diff < MIN) return '刚刚'
-	if (diff < HOUR) return `${Math.floor(diff / MIN)} 分钟前`
-	if (diff < DAY) return `${Math.floor(diff / HOUR)} 小时前`
-	if (diff < 2 * DAY) return '昨天'
-	if (diff < 30 * DAY) return `${Math.floor(diff / DAY)} 天前`
-	if (diff < 365 * DAY) return `${Math.floor(diff / (30 * DAY))} 个月前`
-	return `${Math.floor(diff / (365 * DAY))} 年前`
+	if (diff < MIN) return t('刚刚')
+	if (diff < HOUR) return t('{n} 分钟前', { n: Math.floor(diff / MIN) })
+	if (diff < DAY) return t('{n} 小时前', { n: Math.floor(diff / HOUR) })
+	if (diff < 2 * DAY) return t('昨天')
+	if (diff < 30 * DAY) return t('{n} 天前', { n: Math.floor(diff / DAY) })
+	if (diff < 365 * DAY) return t('{n} 个月前', { n: Math.floor(diff / (30 * DAY)) })
+	return t('{n} 年前', { n: Math.floor(diff / (365 * DAY)) })
 }
 
 /**

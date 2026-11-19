@@ -16,6 +16,7 @@ import {
 } from './importHighlights'
 import { IMPORT_SOURCE_LABELS, isShelfExt, type Annotation } from './types'
 import { basenameOf, cleanBookTitle } from './util'
+import { t } from './i18n'
 
 const FORMAT_LABELS: Record<HighlightFormat, string> = {
 	kindle: 'Kindle My Clippings',
@@ -47,7 +48,7 @@ class TextFileSuggestModal extends SuggestModal<TFile> {
 		private pick: (file: TFile) => void,
 	) {
 		super(app)
-		this.setPlaceholder('选择 My Clippings.txt / Readwise CSV / 微信读书 Markdown')
+		this.setPlaceholder(t('选择 My Clippings.txt / Readwise CSV / 微信读书 Markdown'))
 	}
 
 	getSuggestions(query: string): TFile[] {
@@ -83,32 +84,32 @@ export class ImportHighlightsModal extends Modal {
 	onOpen(): void {
 		this.contentEl.empty()
 		this.modalEl.addClass('grove-import-modal')
-		this.contentEl.createEl('h3', { text: '导入外部标注' })
+		this.contentEl.createEl('h3', { text: t('导入外部标注') })
 		this.contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: '支持 Kindle 的 My Clippings.txt、Readwise 导出的 CSV、微信读书 Markdown（引用行）。按书名/作者匹配库内书籍，重复的摘录会自动跳过。',
+			text: t('支持 Kindle 的 My Clippings.txt、Readwise 导出的 CSV、微信读书 Markdown（引用行）。按书名/作者匹配库内书籍，重复的摘录会自动跳过。'),
 		})
 
 		const pickRow = this.contentEl.createDiv('grove-import-pick-row')
-		pickRow.createSpan('grove-import-pick-label').setText('或从库内文件读取：')
-		const pickBtn = pickRow.createEl('button', { text: '选择文件…' })
+		pickRow.createSpan('grove-import-pick-label').setText(t('或从库内文件读取：'))
+		const pickBtn = pickRow.createEl('button', { text: t('选择文件…') })
 		pickBtn.addEventListener('click', () => this.#pickFile())
 
 		this.textEl = this.contentEl.createEl('textarea', {
 			cls: 'grove-import-input',
-			attr: { rows: '9', placeholder: '把 My Clippings.txt / Readwise CSV / 微信读书 Markdown 的内容粘贴到这里…' },
+			attr: { rows: '9', placeholder: t('把 My Clippings.txt / Readwise CSV / 微信读书 Markdown 的内容粘贴到这里…') },
 		})
 		this.textEl.addEventListener('input', () => this.#schedulePreview())
 
 		this.statusEl = this.contentEl.createDiv('grove-import-status')
-		this.statusEl.setText('粘贴文本或从库内选择文件后会自动识别格式。')
+		this.statusEl.setText(t('粘贴文本或从库内选择文件后会自动识别格式。'))
 		this.previewEl = this.contentEl.createDiv('grove-import-preview')
 
 		const buttons = this.contentEl.createDiv('modal-button-container')
-		this.importBtn = buttons.createEl('button', { text: '导入', cls: 'mod-cta' })
+		this.importBtn = buttons.createEl('button', { text: t('导入'), cls: 'mod-cta' })
 		this.importBtn.disabled = true
 		this.importBtn.addEventListener('click', () => void this.#runImport())
-		const close = buttons.createEl('button', { text: '取消' })
+		const close = buttons.createEl('button', { text: t('取消') })
 		close.addEventListener('click', () => this.close())
 	}
 
@@ -123,7 +124,7 @@ export class ImportHighlightsModal extends Modal {
 			.filter(f => TEXT_EXTS.has(f.extension.toLowerCase()) && f.stat.size <= MAX_FILE_BYTES)
 			.sort((a, b) => a.path.localeCompare(b.path))
 		if (!files.length) {
-			this.statusEl.setText('库里没有可读取的 .txt / .csv / .md 文件。')
+			this.statusEl.setText(t('库里没有可读取的 .txt / .csv / .md 文件。'))
 			return
 		}
 		new TextFileSuggestModal(this.app, files, file => {
@@ -169,20 +170,20 @@ export class ImportHighlightsModal extends Modal {
 		this.previewEl.empty()
 		this.plan = null
 		this.importBtn.disabled = true
-		this.importBtn.setText('导入')
+		this.importBtn.setText(t('导入'))
 		const text = this.textEl.value
 		if (!text.trim()) {
-			this.statusEl.setText('粘贴文本或从库内选择文件后会自动识别格式。')
+			this.statusEl.setText(t('粘贴文本或从库内选择文件后会自动识别格式。'))
 			return
 		}
 		const format = detectHighlightFormat(text)
 		if (!format) {
-			this.statusEl.setText('没识别出格式。支持 Kindle My Clippings.txt、Readwise CSV、微信读书 Markdown。')
+			this.statusEl.setText(t('没识别出格式。支持 Kindle My Clippings.txt、Readwise CSV、微信读书 Markdown。'))
 			return
 		}
 		const highlights = parseHighlightText(text, format)
 		if (!highlights.length) {
-			this.statusEl.setText(`识别为 ${FORMAT_LABELS[format]}，但没有解析到划线。`)
+			this.statusEl.setText(t('识别为 {fmt}，但没有解析到划线。', { fmt: t(FORMAT_LABELS[format]) }))
 			return
 		}
 		const match = matchImportedHighlights(highlights, this.#bookTargets())
@@ -202,7 +203,7 @@ export class ImportHighlightsModal extends Modal {
 		const total = groups.reduce((sum, g) => sum + g.annotations.length, 0)
 		const duplicates = groups.reduce((sum, g) => sum + g.duplicates, 0)
 		this.statusEl.setText(
-			`识别为 ${FORMAT_LABELS[format]} · ${highlights.length} 条划线`
+			t('识别为 {fmt} · {count} 条划线', { fmt: t(FORMAT_LABELS[format]), count: highlights.length })
 			+ (duplicates ? `，其中 ${duplicates} 条书里已有` : ''),
 		)
 		for (const group of groups) {
@@ -222,7 +223,7 @@ export class ImportHighlightsModal extends Modal {
 			this.previewEl.createDiv('grove-import-unmatched').setText(`未匹配到库内书籍：${names}${rest}`)
 		}
 		if (!total) {
-			this.statusEl.setText(`识别为 ${FORMAT_LABELS[format]}，但没有需要导入的新划线。`)
+			this.statusEl.setText(t('识别为 {fmt}，但没有需要导入的新划线。', { fmt: t(FORMAT_LABELS[format]) }))
 			return
 		}
 		this.plan = { format, total, groups, unmatched: match.unmatched }
@@ -251,12 +252,12 @@ export class ImportHighlightsModal extends Modal {
 			return
 		}
 		if (!written) {
-			new Notice('Grove Reader：没有可导入的标注')
+			new Notice(t('Grove Reader：没有可导入的标注'))
 			this.close()
 			return
 		}
 		this.plugin.oplog.add(
-			'导入外部标注',
+			t('导入外部标注'),
 			`${IMPORT_SOURCE_LABELS[plan.format] ?? plan.format}；${written} 条 / ${touched.length} 本`,
 		)
 		this.plugin.refreshOpenReaders(touched)

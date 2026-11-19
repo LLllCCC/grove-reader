@@ -13,10 +13,10 @@ import { ImportHighlightsModal } from './importHighlightsModal'
 type SettingsTab = 'appearance' | 'shelf' | 'reading' | 'data'
 
 const SETTINGS_TABS: Array<{ id: SettingsTab; name: string }> = [
-	{ id: 'appearance', name: t('外观') },
-	{ id: 'shelf', name: t('书架') },
-	{ id: 'reading', name: t('阅读与笔记') },
-	{ id: 'data', name: t('数据与维护') },
+	{ id: 'appearance', name: '外观' },
+	{ id: 'shelf', name: '书架' },
+	{ id: 'reading', name: '阅读与笔记' },
+	{ id: 'data', name: '数据与维护' },
 ]
 
 export class GroveSettingTab extends PluginSettingTab {

@@ -3,8 +3,7 @@ import { AiConfig, hintFor, isAiConfigured, transformSelection, type SelectionAi
 import { truncate } from './util'
 import { t } from './i18n'
 
-const NOT_CONFIGURED =
-	t('Grove Reader：还没有配置 AI。设置 → 阅读 → AI 解释 里填入接口地址与 API Key（推荐智谱 GLM-4-Flash，免费）')
+const NOT_CONFIGURED = 'Grove Reader：还没有配置 AI。设置 → 阅读 → AI 解释 里填入接口地址与 API Key（推荐智谱 GLM-4-Flash，免费）'
 
 /**
  * 划词解释浮层。EPUB / TXT 共用一套 DOM 与定位逻辑：
@@ -28,7 +27,7 @@ export class AiPanel {
 	/** 解释 / 翻译 / 摘要共用一套浮层 */
 	async run(cfg: AiConfig, text: string, task: SelectionAiTask, anchor?: DOMRect): Promise<void> {
 		if (!isAiConfigured(cfg)) {
-			new Notice(NOT_CONFIGURED, 8000)
+			new Notice(t(NOT_CONFIGURED), 8000)
 			return
 		}
 		const title = task === 'translate' ? t('AI 翻译') : task === 'summarize' ? t('AI 摘要') : t('AI 解释')
