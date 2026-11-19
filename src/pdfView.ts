@@ -595,7 +595,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 								let offset = 0
 								while (offset < chunk.length) {
 									const { bytesRead } = await handle.read(chunk, offset, chunk.length - offset, begin + offset)
-									if (bytesRead <= 0) throw new Error(`PDF 文件读取提前结束（${begin + offset}/${end}）`)
+									if (bytesRead <= 0) throw new Error(tr('PDF 文件读取提前结束（{a}/{b}）', { a: begin + offset, b: end }))
 									offset += bytesRead
 								}
 								return chunk

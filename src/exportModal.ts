@@ -79,8 +79,8 @@ export class AnnotationExportModal extends Modal {
 		if (this.src.results.length) {
 			const scopeRow = contentEl.createDiv('grove-export-scope')
 			this.scopeButtons = [
-				this.#scopeButton(scopeRow, 'results', `检索结果（${this.src.results.length}）`),
-				this.#scopeButton(scopeRow, 'all', `全部批注（${total}）`),
+				this.#scopeButton(scopeRow, 'results', t('检索结果（{n}）', { n: this.src.results.length })),
+				this.#scopeButton(scopeRow, 'all', t('全部批注（{n}）', { n: total })),
 			]
 		}
 
@@ -289,7 +289,7 @@ export class AnnotationExportModal extends Modal {
 		const docs = this.#filtered()
 		const base = this.#baseDocs().length
 		this.countEl.setText(`符合条件 ${docs.length} 条 / 来源 ${base} 条`)
-		this.exportBtn.setText(`导出（${docs.length}）`)
+		this.exportBtn.setText(t('导出（{n}）', { n: docs.length }))
 		this.exportBtn.disabled = docs.length === 0
 		if (!docs.length) {
 			this.previewEl.setText(t('没有符合当前筛选的批注。放宽书籍、章节、颜色或「仅今天」再试。'))

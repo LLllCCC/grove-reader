@@ -572,7 +572,7 @@ export class BookshelfView extends ItemView {
 		const btn = this.reviewBtn
 		if (!btn) return
 		const pending = this.plugin.reviewPendingCount()
-		const label = pending ? `今日复习（${pending} 条可复习）` : t('今日复习')
+		const label = pending ? t('今日复习（{n} 条可复习）', { n: pending }) : t('今日复习')
 		btn.setAttribute('aria-label', label)
 		btn.setAttribute('title', label)
 		btn.querySelector('.grove-review-badge')?.remove()

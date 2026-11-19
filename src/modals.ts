@@ -332,7 +332,7 @@ export class DeleteBookModal extends Modal {
 		noteBox.id = 'grove-delete-note'
 		noteBox.disabled = !this.noteName
 		const noteLabel = noteRow.createEl('label', {
-			text: this.noteName ? `同时把生成的阅读笔记移入回收站（${this.noteName}）` : t('这本书还没有生成阅读笔记'),
+			text: this.noteName ? t('同时把生成的阅读笔记移入回收站（{name}）', { name: this.noteName }) : t('这本书还没有生成阅读笔记'),
 		})
 		noteLabel.setAttr('for', 'grove-delete-note')
 
@@ -900,7 +900,7 @@ export class HealthReportModal extends Modal {
 			const body = this.contentEl.createDiv('grove-health-body')
 			const section = (title: string, items: string[]): void => {
 				if (!items.length) return
-				body.createEl('h4', { text: `${title}（${items.length}）` })
+				body.createEl('h4', { text: t('{title}（{n}）', { title, n: items.length }) })
 				const list = body.createEl('ul', { cls: 'grove-health-list' })
 				for (const item of items.slice(0, 8)) list.createEl('li', { text: item })
 				if (items.length > 8) list.createEl('li', { text: t("…还有 {p0} 项", { p0: items.length - 8 }), cls: 'grove-health-more' })
@@ -908,7 +908,7 @@ export class HealthReportModal extends Modal {
 			section(t('找不到原文件的批注'), report.missingBooks.map(b =>
 				`《${b.title || t('未命名')}》 · ${b.annotations} 条 · ${b.bookPath || t('无路径')}`))
 			section(t('笔记文件不存在'), report.missingNotes.map(n => `《${n.title || t('未命名')}》 → ${n.notePath}`))
-			section(t('同一路径有多份批注数据'), report.duplicates.map(d => `${d.bookPath}（${d.files.length} 份）`))
+			section(t('同一路径有多份批注数据'), report.duplicates.map(d => t('{p}（{n} 份）', { p: d.bookPath, n: d.files.length })))
 			section(t('书架缓存指向不存在的文件'), report.staleShelf)
 			section(t('书单指向不存在的文件'), report.staleLists)
 			section(t('阅读统计指向不存在的文件'), report.staleStats)

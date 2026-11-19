@@ -212,7 +212,7 @@ export function exportMarkdown(docs: SearchDoc[], query: string, options: Partia
 		'',
 	]
 	for (const group of groupExportDocs(docs, opts.groupBy)) {
-		if (opts.groupBy === 'color') lines.push(`## ${group.title}（${group.docs.length} 条）`)
+		if (opts.groupBy === 'color') lines.push(`## ${t('{title}（{n} 条）', { title: group.title, n: group.docs.length })}`)
 		else lines.push(`## ${group.title}`)
 		if (group.subtitle) lines.push(group.subtitle)
 		lines.push('')

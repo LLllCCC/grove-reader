@@ -450,4 +450,17 @@ export const EN_EXTRA: Record<string, string> = {
 	"只输出 JSON 数组，格式：[{\"name\":\"组名\",\"books\":[1,3,5]}]，不要解释。": "Output only a JSON array: [{\"name\":\"group\",\"books\":[1,3,5]}], no explanation.",
 	"只输出导读，不要复述原文、不要评价、不要寒暄。": "Output only the guide — no quoting back, no evaluation, no pleasantries.",
 	"组名用简洁中文（不超过 8 字），不要「其他」「杂项」这类兜底组。": "use short group names, and no catch-all groups such as \"Other\" or \"Misc\".",
+
+	// —— 计数与括号文案 ——
+	"{p}（{n} 份）": "{p} ({n} copies)",
+	"{title}（{n} 条）": "{title} ({n})",
+	"{title}（{n}）": "{title} ({n})",
+	"导出（{n}）": "Export ({n})",
+	"检索结果（{n}）": "Search results ({n})",
+	"今日复习（{n} 条可复习）": "Review today ({n} due)",
+	"全部批注（{n}）": "All annotations ({n})",
+	"同时把生成的阅读笔记移入回收站（{name}）": "Also move the generated reading note to the trash ({name})",
+	"PDF 文件读取提前结束（{a}/{b}）": "PDF read ended early ({a}/{b})",
+
+	// —— 计数与括号文案 ——
 }
