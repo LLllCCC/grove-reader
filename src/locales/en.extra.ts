@@ -499,7 +499,7 @@ export const EN_EXTRA: Record<string, string> = {
 	"《{title}》 {n} 项": "\"{title}\" · {n} items",
 	"参考：{list}": "References: {list}",
 	"移除失效引用 {n} 项": "Removed {n} stale references",
-	"移入书单（当前：{name}）": "Move to reading list (current: {name})",
+	"移入书单（当前：{name}）": "Move to list (current: {name})",
 	"自动清理 {n} 项": "Auto-cleaned {n} items",
 
 	// —— 目录、编码与删除日志 ——
