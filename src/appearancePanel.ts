@@ -8,19 +8,20 @@
  * #patchAppearance()——那边要负责应用样式、落盘与（必要时）重画面板。
  */
 import { BACKGROUND_PRESETS, type ReaderAppearance } from './types'
+import { t } from './i18n'
 
 /** 字体预设：两个视图共用一份，避免再各写一套慢慢长歪 */
 const FONT_PRESETS: Array<{ label: string; value: string }> = [
-	{ label: '跟随书籍', value: '' },
-	{ label: '系统衬线', value: 'serif' },
-	{ label: '系统无衬线', value: 'sans-serif' },
-	{ label: '宋体', value: '"Songti SC", "SimSun", "Noto Serif CJK SC", serif' },
-	{ label: '黑体', value: '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif' },
-	{ label: '楷体', value: '"KaiTi", "STKaiti", "Kaiti SC", serif' },
-	{ label: '仿宋', value: '"FangSong", "STFangsong", "Fang Song", serif' },
-	{ label: '霞鹜文楷', value: '"LXGW WenKai", "LXGW WenKai GB", "LXGW WenKai Screen", KaiTi, serif' },
-	{ label: '思源宋体', value: '"Source Han Serif SC", "Noto Serif CJK SC", "SimSun", serif' },
-	{ label: '思源黑体', value: '"Source Han Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif' },
+	{ label: t('跟随书籍'), value: '' },
+	{ label: t('系统衬线'), value: 'serif' },
+	{ label: t('系统无衬线'), value: 'sans-serif' },
+	{ label: t('宋体'), value: '"Songti SC", "SimSun", "Noto Serif CJK SC", serif' },
+	{ label: t('黑体'), value: '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif' },
+	{ label: t('楷体'), value: '"KaiTi", "STKaiti", "Kaiti SC", serif' },
+	{ label: t('仿宋'), value: '"FangSong", "STFangsong", "Fang Song", serif' },
+	{ label: t('霞鹜文楷'), value: '"LXGW WenKai", "LXGW WenKai GB", "LXGW WenKai Screen", KaiTi, serif' },
+	{ label: t('思源宋体'), value: '"Source Han Serif SC", "Noto Serif CJK SC", "SimSun", serif' },
+	{ label: t('思源黑体'), value: '"Source Han Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif' },
 ]
 
 export interface AppearancePanelHost {
@@ -38,10 +39,10 @@ export function renderAppearancePanel(panel: HTMLElement, host: AppearancePanelH
 
 	// —— 背景 ——
 	const bgRow = panel.createDiv('grove-appear-row')
-	bgRow.createSpan('grove-appear-label').setText('背景')
+	bgRow.createSpan('grove-appear-label').setText(t('背景'))
 	const swatches = bgRow.createDiv('grove-appear-swatches')
 	const themeChip = swatches.createEl('button', { cls: 'grove-appear-chip' })
-	themeChip.setText('跟随主题')
+	themeChip.setText(t('跟随主题'))
 	themeChip.addEventListener('click', () => host.patch({ followTheme: true }, true))
 	if (a.followTheme) themeChip.addClass('is-active')
 
@@ -57,7 +58,7 @@ export function renderAppearancePanel(panel: HTMLElement, host: AppearancePanelH
 	const customWrap = swatches.createDiv('grove-appear-swatch grove-appear-custom')
 	customWrap.style.backgroundColor = a.customBg
 	if (!a.followTheme && a.bgKey === 'custom') customWrap.addClass('is-active')
-	const colorInput = customWrap.createEl('input', { attr: { type: 'color', title: '自定义背景色' } })
+	const colorInput = customWrap.createEl('input', { attr: { type: 'color', title: t('自定义背景色') } })
 	colorInput.value = /^#[0-9a-fA-F]{6}$/.test(a.customBg) ? a.customBg : '#ffffff'
 	colorInput.addEventListener('input', () => {
 		host.patch({ followTheme: false, bgKey: 'custom', customBg: colorInput.value })
@@ -66,25 +67,25 @@ export function renderAppearancePanel(panel: HTMLElement, host: AppearancePanelH
 
 	// —— 字体 ——
 	const fontRow = panel.createDiv('grove-appear-row')
-	fontRow.createSpan('grove-appear-label').setText('字体')
+	fontRow.createSpan('grove-appear-label').setText(t('字体'))
 	const fontCol = fontRow.createDiv('grove-appear-col')
 	const fontSelect = fontCol.createEl('select', { cls: 'dropdown' })
 	for (const font of FONT_PRESETS) {
 		// 第一项是「不指定字体」，两个视图的措辞不同：EPUB 跟随书籍内嵌样式，TXT 跟随主题
-		const label = font.value === '' && host.surface === 'txt' ? '跟随主题' : font.label
+		const label = font.value === '' && host.surface === 'txt' ? t('跟随主题') : font.label
 		fontSelect.createEl('option', { value: font.value, text: label })
 	}
 	const presetValue = FONT_PRESETS.some(f => f.value === a.fontFamily) ? a.fontFamily : ''
 	fontSelect.value = presetValue
 
 	const customFont = fontCol.createEl('input', {
-		attr: { type: 'text', placeholder: '自定义字体名（可留空），如 霞鹜文楷' },
+		attr: { type: 'text', placeholder: t('自定义字体名（可留空），如 霞鹜文楷') },
 	})
 	if (!presetValue && a.fontFamily) customFont.value = a.fontFamily.replace(/["']/g, '')
 
 	const themeFont = getComputedStyle(document.body).getPropertyValue('--font-text').trim()
 	const preview = fontCol.createDiv('grove-font-preview')
-	preview.setText('永 Aa 阅读字体预览 123')
+	preview.setText(t('永 Aa 阅读字体预览 123'))
 	preview.style.fontFamily = a.fontFamily || themeFont || 'serif'
 	const updatePreview = (family: string): void => {
 		preview.style.fontFamily = family || themeFont || 'serif'
@@ -110,22 +111,22 @@ export function renderAppearancePanel(panel: HTMLElement, host: AppearancePanelH
 		step: number
 		fmt: (v: number) => string
 	}> = [
-		{ label: '字号', key: 'fontSize', min: 80, max: 180, step: 5, fmt: v => `${Math.round(v)}%` },
-		{ label: '行距', key: 'lineHeight', min: 1.2, max: 2.4, step: 0.05, fmt: v => v.toFixed(2) },
-		{ label: '上下留白', key: 'pageMargin', min: 0, max: 200, step: 4, fmt: v => `${Math.round(v)}px` },
+		{ label: t('字号'), key: 'fontSize', min: 80, max: 180, step: 5, fmt: v => `${Math.round(v)}%` },
+		{ label: t('行距'), key: 'lineHeight', min: 1.2, max: 2.4, step: 0.05, fmt: v => v.toFixed(2) },
+		{ label: t('上下留白'), key: 'pageMargin', min: 0, max: 200, step: 4, fmt: v => `${Math.round(v)}px` },
 	]
 	if (host.surface === 'ebook') {
 		sliders.push({
-			label: '段间距',
+			label: t('段间距'),
 			key: 'paragraphSpacing',
 			min: 0,
 			max: 2,
 			step: 0.1,
-			fmt: v => (v <= 0 ? '跟随书籍' : `${v.toFixed(1)}em`),
+			fmt: v => (v <= 0 ? t('跟随书籍') : `${v.toFixed(1)}em`),
 		})
 		// 版心宽只有 EPUB 能落地：它对应 foliate 的 max-inline-size。
 		// TXT 是自研分栏分页，版心就是屏幕宽度，这个值读不到，渲染出来就是死控件。
-		sliders.push({ label: '版心宽', key: 'maxInlineSize', min: 480, max: 1200, step: 20, fmt: v => `${Math.round(v)}px` })
+		sliders.push({ label: t('版心宽'), key: 'maxInlineSize', min: 480, max: 1200, step: 20, fmt: v => `${Math.round(v)}px` })
 	}
 
 	for (const item of sliders) {
@@ -154,47 +155,47 @@ export function renderAppearancePanel(panel: HTMLElement, host: AppearancePanelH
 	// —— EPUB 版式（只有电子书有分栏/滚动） ——
 	if (host.surface === 'ebook') {
 		const columnsRow = panel.createDiv('grove-appear-row')
-		columnsRow.createSpan('grove-appear-label').setText('分栏')
+		columnsRow.createSpan('grove-appear-label').setText(t('分栏'))
 		const columnsSelect = columnsRow.createEl('select', { cls: 'dropdown' })
-		columnsSelect.createEl('option', { value: '0', text: '跟随窗口' })
-		columnsSelect.createEl('option', { value: '1', text: '单栏' })
-		columnsSelect.createEl('option', { value: '2', text: '双栏（窄屏自动单栏）' })
+		columnsSelect.createEl('option', { value: '0', text: t('跟随窗口') })
+		columnsSelect.createEl('option', { value: '1', text: t('单栏') })
+		columnsSelect.createEl('option', { value: '2', text: t('双栏（窄屏自动单栏）') })
 		columnsSelect.value = String(a.epubColumns ?? 0)
 		columnsSelect.addEventListener('change', () => {
 			host.patch({ epubColumns: Number(columnsSelect.value) as 0 | 1 | 2 })
 		})
 
 		const flowRow = panel.createDiv('grove-appear-row')
-		flowRow.createSpan('grove-appear-label').setText('翻页方式')
+		flowRow.createSpan('grove-appear-label').setText(t('翻页方式'))
 		const flowSelect = flowRow.createEl('select', { cls: 'dropdown' })
-		flowSelect.createEl('option', { value: 'paginated', text: '左右翻页' })
-		flowSelect.createEl('option', { value: 'scrolled', text: '上下滚动' })
+		flowSelect.createEl('option', { value: 'paginated', text: t('左右翻页') })
+		flowSelect.createEl('option', { value: 'scrolled', text: t('上下滚动') })
 		flowSelect.value = a.epubFlow === 'scrolled' ? 'scrolled' : 'paginated'
 		flowSelect.addEventListener('change', () => {
 			host.patch({ epubFlow: flowSelect.value === 'scrolled' ? 'scrolled' : 'paginated' })
 		})
 
 		const verticalRow = panel.createDiv('grove-appear-row')
-		verticalRow.createSpan('grove-appear-label').setText('排版')
+		verticalRow.createSpan('grove-appear-label').setText(t('排版'))
 		const verticalLabel = verticalRow.createEl('label', { cls: 'grove-appear-toggle' })
 		const verticalBox = verticalLabel.createEl('input', { attr: { type: 'checkbox' } })
 		verticalBox.checked = !!a.epubVertical
-		verticalLabel.createSpan({ text: '竖排（从右往左）' })
+		verticalLabel.createSpan({ text: t('竖排（从右往左）') })
 		verticalBox.addEventListener('change', () => host.patch({ epubVertical: verticalBox.checked }))
 	}
 
 	// —— 翻页 ——
 	const pageRow = panel.createDiv('grove-appear-row')
-	pageRow.createSpan('grove-appear-label').setText('翻页')
+	pageRow.createSpan('grove-appear-label').setText(t('翻页'))
 	const pageCol = pageRow.createDiv('grove-appear-col')
 	const wheelLabel = pageCol.createEl('label', { cls: 'grove-appear-toggle' })
 	const wheelBox = wheelLabel.createEl('input', { attr: { type: 'checkbox' } })
 	wheelBox.checked = a.wheelPageTurn
-	wheelLabel.createSpan({ text: '鼠标滚动切换（上下滚动翻页）' })
+	wheelLabel.createSpan({ text: t('鼠标滚动切换（上下滚动翻页）') })
 	wheelBox.addEventListener('change', () => host.patch({ wheelPageTurn: wheelBox.checked }))
 
 	// —— 恢复默认 ——
 	const foot = panel.createDiv('grove-appear-foot')
-	const reset = foot.createEl('button', { text: '恢复默认' })
+	const reset = foot.createEl('button', { text: t('恢复默认') })
 	reset.addEventListener('click', () => host.reset())
 }

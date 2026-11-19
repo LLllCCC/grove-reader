@@ -2,6 +2,7 @@ import { Annotation, BookData, HIGHLIGHT_COLORS, colorName } from './types'
 import { todayKey } from './stats'
 import { normalizeReview } from './review'
 import { basenameOf, bookIdFor, cleanBookTitle, stripTitleAuthor } from './util'
+import { t } from './i18n'
 
 export interface SearchDoc {
 	bookPath: string
@@ -86,9 +87,9 @@ export function normalizeTerms(query: string): string[] {
 export type ExportGroupBy = 'book' | 'chapter' | 'color'
 
 export const EXPORT_GROUP_LABELS: Record<ExportGroupBy, string> = {
-	book: '按书',
-	chapter: '按章',
-	color: '按颜色',
+	book: t('按书'),
+	chapter: t('按章'),
+	color: t('按颜色'),
 }
 
 export interface ExportOptions {
@@ -166,15 +167,15 @@ export function groupExportDocs(docs: SearchDoc[], groupBy: ExportGroupBy = 'boo
 		let title: string
 		let subtitle = ''
 		if (groupBy === 'chapter') {
-			const chapter = (a.chapter ?? '').trim() || '未分章'
+			const chapter = (a.chapter ?? '').trim() || t('未分章')
 			key = `${doc.bookPath}\u0000${chapter}`
-			title = `《${doc.bookTitle}》${doc.bookExists ? '' : '（原文件缺失）'} · ${chapter}`
+			title = `《${doc.bookTitle}》${doc.bookExists ? '' : t('（原文件缺失）')} · ${chapter}`
 		} else if (groupBy === 'color') {
 			key = a.color || 'yellow'
 			title = colorName(key)
 		} else {
 			key = doc.bookPath || doc.bookTitle
-			title = `《${doc.bookTitle}》${doc.bookExists ? '' : '（原文件缺失）'}`
+			title = `《${doc.bookTitle}》${doc.bookExists ? '' : t('（原文件缺失）')}`
 			subtitle = doc.author ? `*${doc.author}*` : ''
 		}
 		let group = groups.get(key)
@@ -191,14 +192,14 @@ export function exportMarkdown(docs: SearchDoc[], query: string, options: Partia
 	const opts = resolveExportOptions(options)
 	const now = new Date()
 	const stamp = formatDate(now)
-	const heading = query.trim() ? `批注检索：${query.trim()}` : '批注导出'
+	const heading = query.trim() ? `批注检索：${query.trim()}` : t('批注导出')
 	const lines: string[] = [
 		'---',
 		`title: ${JSON.stringify(heading)}`,
 		'tags:',
 		'  - Grove-Reader',
-		'  - 批注检索',
-		'  - 批注导出',
+		t('  - 批注检索'),
+		t('  - 批注导出'),
 		`created: ${JSON.stringify(stamp)}`,
 		`query: ${JSON.stringify(query.trim())}`,
 		`count: ${docs.length}`,
@@ -244,8 +245,8 @@ export function exportMarkdown(docs: SearchDoc[], query: string, options: Partia
 
 export function exportCsv(docs: SearchDoc[]): string {
 	const rows = [[
-		'书名', '作者', '章节', '位置', '颜色', '划线', '评论', '原文件', '回跳链接',
-		'复习到期', '间隔(天)', '难度', '复习次数', '忘记次数', '上次复习',
+		t('书名'), t('作者'), t('章节'), t('位置'), t('颜色'), t('划线'), t('评论'), t('原文件'), t('回跳链接'),
+		t('复习到期'), t('间隔(天)'), t('难度'), t('复习次数'), t('忘记次数'), t('上次复习'),
 	]]
 	for (const doc of docs) {
 		const a = doc.annotation
@@ -258,7 +259,7 @@ export function exportCsv(docs: SearchDoc[]): string {
 			colorName(a.color),
 			a.text,
 			a.note ?? '',
-			doc.bookExists ? '在' : '缺失',
+			doc.bookExists ? t('在') : t('缺失'),
 			doc.bookExists && doc.bookId ? jumpUrl(doc.bookId, a.cfi) : '',
 			review ? isoDate(review.due) : '',
 			review ? String(review.interval) : '',

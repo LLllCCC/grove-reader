@@ -5,7 +5,7 @@
  * 用户主动触发，按书顺序扫描；可停止，结果按书分组，点击回原文。
  */
 import { App, Modal, Notice, setIcon } from 'obsidian'
-import * as pdfjsLib from 'pdfjs-dist'
+import type * as pdfjsLib from 'pdfjs-dist'
 import type GroveReaderPlugin from './main'
 import { decodeTextBuffer } from './textCodec'
 import { isShelfExt } from './types'
@@ -140,9 +140,12 @@ async function extractPdf(plugin: GroveReaderPlugin, bytes: ArrayBuffer): Promis
 	let worker: InstanceType<typeof pdfjsLib.PDFWorker> | null = null
 	let doc: PdfTextDoc | null = null
 	try {
+		// 社区版不含 PDF：不解析正文，也不把 pdfjs 打进产物
+		const lib: typeof import('pdfjs-dist') | null = __COMMUNITY_BUILD__ ? null : await import('pdfjs-dist')
+		if (!lib) return { kind: 'pdf', sections: [] }
 		const workerSrc = await plugin.resolvePdfWorkerSrc()
-		if (workerSrc) (pdfjsLib.GlobalWorkerOptions as unknown as { workerSrc: string }).workerSrc = workerSrc
-		worker = new pdfjsLib.PDFWorker()
+		if (workerSrc) (lib.GlobalWorkerOptions as unknown as { workerSrc: string }).workerSrc = workerSrc
+		worker = new lib.PDFWorker()
 		await worker.promise
 		delete (globalThis as unknown as { pdfjsWorker?: unknown }).pdfjsWorker
 		const params: Record<string, unknown> = { data: new Uint8Array(bytes), worker }
@@ -159,7 +162,7 @@ async function extractPdf(plugin: GroveReaderPlugin, bytes: ArrayBuffer): Promis
 				return plugin.readPdfjsAsset(`${dir}/${filename}`)
 			}
 		}
-		doc = (await pdfjsLib.getDocument(params as Parameters<typeof pdfjsLib.getDocument>[0]).promise) as unknown as PdfTextDoc
+		doc = (await lib.getDocument(params as Parameters<typeof lib.getDocument>[0]).promise) as unknown as PdfTextDoc
 		if (!doc) return { kind: 'pdf', sections: [] }
 		const sections: SectionText[] = []
 		for (let n = 1; n <= doc.numPages; n++) {

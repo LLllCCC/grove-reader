@@ -4,13 +4,14 @@ import { TFile } from 'obsidian'
 import { makeBook } from '../lib/foliate-js/view.js'
 import type GroveReaderPlugin from './main'
 import { FORMAT_LABELS, LIBRARY_ROOT, READING_STATUS_LABELS, READING_STATUS_ORDER, SHELF_EXTRA_EXTS, SUPPORTED_BOOK_EXTS, ShelfBookInfo, isReaderExt, isShelfExt, type ReadingStatus } from './types'
-import { basenameOf, cleanBookTitle, duplicateKeyOf, formatAuthor, formatBytes, formatDuration, formatLanguageMap, isAbsolutePath, relativeTime, stripNumericTitlePrefix, stripTitleAuthor, truncate } from './util'
+import { appendInlineSvg, basenameOf, cleanBookTitle, duplicateKeyOf, formatAuthor, formatBytes, formatDuration, formatLanguageMap, isAbsolutePath, relativeTime, stripNumericTitlePrefix, stripTitleAuthor, truncate } from './util'
 import { PlatformIO, joinPath, readJsonFile, writeJsonFile } from './platformIO'
 import { BookInfoModal, ConfirmModal, CoverUrlModal, DeleteBookModal, FolderPromptModal, ListPickerModal, ReadingStatsModal, TextPromptModal } from './modals'
 import { BookMetaModal } from './bookMetaModal'
 import type { BookInfoValues } from './modals'
 import type { BookList } from './lists'
 import { computeShelfWindow, estimateRowHeight, spacerHeight } from './shelfWindow'
+import { t } from './i18n'
 
 export const VIEW_TYPE_GROVE_BOOKSHELF = 'grove-bookshelf-view'
 
@@ -55,7 +56,7 @@ async function downloadImageFromUrl(url: string): Promise<{ buffer: ArrayBuffer;
 			res = await Promise.race([
 				requestUrl({ url, method: 'GET', headers }),
 				new Promise<never>((_, reject) =>
-					window.setTimeout(() => reject(new Error('下载超时（20 秒）')), 20_000),
+					window.setTimeout(() => reject(new Error(t('下载超时（20 秒）'))), 20_000),
 				),
 			])
 		} catch (e) {
@@ -64,8 +65,8 @@ async function downloadImageFromUrl(url: string): Promise<{ buffer: ArrayBuffer;
 		}
 		if (res.status >= 200 && res.status < 300) {
 			const mime = (res.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase()
-			if (!mime.startsWith('image/')) throw new Error('这个链接返回的不是图片')
-			if (res.arrayBuffer.byteLength > 12 * 1024 * 1024) throw new Error('图片超过 12 MB，请换一张小一些的')
+			if (!mime.startsWith('image/')) throw new Error(t('这个链接返回的不是图片'))
+			if (res.arrayBuffer.byteLength > 12 * 1024 * 1024) throw new Error(t('图片超过 12 MB，请换一张小一些的'))
 			return { buffer: res.arrayBuffer, mime }
 		}
 		lastStatus = res.status
@@ -75,7 +76,7 @@ async function downloadImageFromUrl(url: string): Promise<{ buffer: ArrayBuffer;
 			`对方站点拒绝了下载（HTTP ${lastStatus}，防盗链）。可以右键图片「图片另存为」，再用「更换封面」选择本地文件。`,
 		)
 	}
-	throw new Error(`下载失败：HTTP ${lastStatus || '未知'}`)
+	throw new Error(`下载失败：HTTP ${lastStatus || t('未知')}`)
 }
 
 // ------------------------------------------------------------------
@@ -219,7 +220,7 @@ export class ShelfCache {
 			.catch(() => undefined)
 			.then(() => writeJsonFile(this.io, this.file, snapshot))
 			.catch(e => {
-				console.error('[Grove Reader] 书架缓存写入失败', e)
+				console.error(t('[Grove Reader] 书架缓存写入失败'), e)
 			})
 	}
 
@@ -232,7 +233,7 @@ export class ShelfCache {
 			const ext = blob.type.includes('png') ? 'png' : blob.type.includes('gif') ? 'gif' : 'jpg'
 			return await this.#writeCover(`${bookId}.${ext}`, await blob.arrayBuffer(), blob.type)
 		} catch (e) {
-			console.error('[Grove Reader] 封面保存失败', e)
+			console.error(t('[Grove Reader] 封面保存失败'), e)
 			return undefined
 		}
 	}
@@ -244,7 +245,7 @@ export class ShelfCache {
 			const ext = lower.endsWith('.png') ? 'png' : lower.endsWith('.gif') ? 'gif' : lower.endsWith('.webp') ? 'webp' : 'jpg'
 			return await this.#writeCover(`${bookId}-custom.${ext}`, await file.arrayBuffer(), file.type)
 		} catch (e) {
-			console.error('[Grove Reader] 自定义封面保存失败', e)
+			console.error(t('[Grove Reader] 自定义封面保存失败'), e)
 			return undefined
 		}
 	}
@@ -255,7 +256,7 @@ export class ShelfCache {
 			const ext = mime.includes('png') ? 'png' : mime.includes('gif') ? 'gif' : mime.includes('webp') ? 'webp' : 'jpg'
 			return await this.#writeCover(`${bookId}-custom.${ext}`, data, mime)
 		} catch (e) {
-			console.error('[Grove Reader] 网络封面保存失败', e)
+			console.error(t('[Grove Reader] 网络封面保存失败'), e)
 			return undefined
 		}
 	}
@@ -377,10 +378,10 @@ export function scanBookFolders(folders: string[], vaultFiles: string[]): string
 // ------------------------------------------------------------------
 
 const SORT_OPTIONS: Array<[string, string]> = [
-	['default', '默认（按文件名）'],
-	['added', '最近添加'],
-	['title', '按书名'],
-	['progress', '阅读进度'],
+	['default', t('默认（按文件名）')],
+	['added', t('最近添加')],
+	['title', t('按书名')],
+	['progress', t('阅读进度')],
 ]
 
 /** 书单色条：由 id 稳定映射到色相，避免额外存颜色字段 */
@@ -451,7 +452,7 @@ export class BookshelfView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return '书架'
+		return t('书架')
 	}
 
 	getIcon(): string {
@@ -513,7 +514,7 @@ export class BookshelfView extends ItemView {
 		const searchWrap = this.toolsEl.createDiv('grove-shelf-search')
 		const searchIcon = searchWrap.createSpan('grove-shelf-search-icon')
 		setIcon(searchIcon, 'search')
-		this.searchInput = searchWrap.createEl('input', { type: 'search', placeholder: '搜索书名 / 作者 / 出版社…' })
+		this.searchInput = searchWrap.createEl('input', { type: 'search', placeholder: t('搜索书名 / 作者 / 出版社…') })
 		this.searchInput.value = this.plugin.shelfSearch
 		this.searchInput.addEventListener('input', () => {
 			this.plugin.shelfSearch = this.searchInput.value.trim().toLowerCase()
@@ -526,7 +527,7 @@ export class BookshelfView extends ItemView {
 		})
 		// 排序单独包一层并带「排序」字样：否则它和搜索框长得一样，容易被当成第二个搜索框
 		const sortWrap = this.toolsEl.createDiv('grove-shelf-sort')
-		sortWrap.createSpan('grove-shelf-sort-label').setText('排序')
+		sortWrap.createSpan('grove-shelf-sort-label').setText(t('排序'))
 		this.sortSelect = sortWrap.createEl('select', { cls: 'dropdown' })
 		for (const [key, label] of SORT_OPTIONS) this.sortSelect.createEl('option', { value: key, text: label })
 		this.sortSelect.value = this.plugin.settings.shelfSort
@@ -538,9 +539,9 @@ export class BookshelfView extends ItemView {
 
 		// 手动阅读状态筛选：只筛已标记的书，没标记的归到「全部」
 		const statusWrap = this.toolsEl.createDiv('grove-shelf-status-filter')
-		statusWrap.createSpan('grove-shelf-sort-label').setText('状态')
+		statusWrap.createSpan('grove-shelf-sort-label').setText(t('状态'))
 		const statusSelect = statusWrap.createEl('select', { cls: 'dropdown' })
-		statusSelect.createEl('option', { value: 'all', text: '全部' })
+		statusSelect.createEl('option', { value: 'all', text: t('全部') })
 		for (const key of READING_STATUS_ORDER) {
 			statusSelect.createEl('option', { value: key, text: READING_STATUS_LABELS[key] })
 		}
@@ -558,11 +559,11 @@ export class BookshelfView extends ItemView {
 			btn.addEventListener('click', onClick)
 			return btn
 		}
-		action('folder-plus', '添加扫描文件夹', () => void this.#addFolder())
-		action('upload', '导入书籍…', () => this.#importBooks())
-		action('refresh-cw', '重新扫描', () => void this.refresh({ rescan: true }))
-		action('bar-chart-2', '阅读统计', () => new ReadingStatsModal(this.app, this.plugin).open())
-		this.reviewBtn = action('repeat', '今日复习', () => this.plugin.openReview())
+		action('folder-plus', t('添加扫描文件夹'), () => void this.#addFolder())
+		action('upload', t('导入书籍…'), () => this.#importBooks())
+		action('refresh-cw', t('重新扫描'), () => void this.refresh({ rescan: true }))
+		action('bar-chart-2', t('阅读统计'), () => new ReadingStatsModal(this.app, this.plugin).open())
+		this.reviewBtn = action('repeat', t('今日复习'), () => this.plugin.openReview())
 		this.updateReviewEntry()
 	}
 
@@ -571,7 +572,7 @@ export class BookshelfView extends ItemView {
 		const btn = this.reviewBtn
 		if (!btn) return
 		const pending = this.plugin.reviewPendingCount()
-		const label = pending ? `今日复习（${pending} 条可复习）` : '今日复习'
+		const label = pending ? `今日复习（${pending} 条可复习）` : t('今日复习')
 		btn.setAttribute('aria-label', label)
 		btn.setAttribute('title', label)
 		btn.querySelector('.grove-review-badge')?.remove()
@@ -620,8 +621,8 @@ export class BookshelfView extends ItemView {
 		const folders = plugin.settings.scanFolders
 
 		if (!folders.length) {
-			this.#showEmpty('还没有扫描文件夹。选择一个放书的文件夹（库内或本机任意路径），书架会递归扫描其中的电子书与 PDF。')
-			const addBtn = this.emptyEl.createEl('button', { text: '添加文件夹', cls: 'mod-cta' })
+			this.#showEmpty(t('还没有扫描文件夹。选择一个放书的文件夹（库内或本机任意路径），书架会递归扫描其中的电子书与 PDF。'))
+			const addBtn = this.emptyEl.createEl('button', { text: t('添加文件夹'), cls: 'mod-cta' })
 			addBtn.addEventListener('click', () => void this.#addFolder())
 			plugin.markShelfInteractive(0)
 			return
@@ -653,14 +654,14 @@ export class BookshelfView extends ItemView {
 			const hiddenCount = plugin.settings.hiddenBooks?.length ?? 0
 			if (!visiblePaths.length && hiddenCount) {
 				this.#showEmpty(`扫描到的 ${hiddenCount} 本书都被移出书架了，原文件仍在库中。`)
-				const restore = this.emptyEl.createEl('button', { text: '全部恢复', cls: 'mod-cta' })
+				const restore = this.emptyEl.createEl('button', { text: t('全部恢复'), cls: 'mod-cta' })
 				restore.addEventListener('click', () => void plugin.restoreHiddenBooks())
 				plugin.markShelfInteractive(0)
 				return
 			}
 			this.#showEmpty(visiblePaths.length && this.listFilter !== 'all'
-				? '这个书单里还没有书。在书籍卡片上右键 →「移入书单…」，或直接把书拖到书单标签上。'
-				: '扫描文件夹里没有找到书籍文件（支持 epub / mobi / azw3 / fb2 / cbz / txt，PDF 会一并收纳）。')
+				? t('这个书单里还没有书。在书籍卡片上右键 →「移入书单…」，或直接把书拖到书单标签上。')
+				: t('扫描文件夹里没有找到书籍文件（支持 epub / mobi / azw3 / fb2 / cbz / txt，PDF 会一并收纳）。'))
 			plugin.markShelfInteractive(0)
 			return
 		}
@@ -803,7 +804,7 @@ export class BookshelfView extends ItemView {
 		const wordmark = this.plugin.logoWordmark()
 		if (wordmark) {
 			const logo = this.emptyEl.createDiv('grove-empty-logo')
-			logo.innerHTML = wordmark
+			appendInlineSvg(logo, wordmark)
 		}
 		this.emptyEl.createSpan('grove-empty-text').setText(message)
 		this.emptyEl.removeClass('grove-hidden')
@@ -836,7 +837,7 @@ export class BookshelfView extends ItemView {
 		this.#renderWindow(true)
 		if (this.filteredPaths.length === 0 && this.allPaths.length > 0) {
 			this.#showEmpty(this.statusFilter === 'all'
-				? '没有匹配的书。试试只输书名或作者里的关键词。'
+				? t('没有匹配的书。试试只输书名或作者里的关键词。')
 				: `没有标记为「${READING_STATUS_LABELS[this.statusFilter]}」的书。右键书籍卡片可以设置阅读状态。`)
 		} else {
 			this.emptyEl.addClass('grove-hidden')
@@ -863,7 +864,7 @@ export class BookshelfView extends ItemView {
 
 		this.continueHasItems = true
 		this.continueEl.removeClass('grove-hidden')
-		this.continueEl.createDiv('grove-continue-head').setText('继续阅读')
+		this.continueEl.createDiv('grove-continue-head').setText(t('继续阅读'))
 		const row = this.continueEl.createDiv('grove-continue-row')
 		for (const [path, info] of items) {
 			const item = row.createEl('button', { cls: 'grove-continue-item', attr: { type: 'button' } })
@@ -923,13 +924,13 @@ export class BookshelfView extends ItemView {
 				chip.addEventListener('contextmenu', e => {
 					e.preventDefault()
 					const menu = new Menu()
-					menu.addItem(item => item.setTitle('重命名书单').setIcon('pencil').onClick(() => {
-						new TextPromptModal(this.app, '重命名书单', '书单名称', list.name, name => {
+					menu.addItem(item => item.setTitle(t('重命名书单')).setIcon('pencil').onClick(() => {
+						new TextPromptModal(this.app, t('重命名书单'), t('书单名称'), list.name, name => {
 							lists.rename(list.id, name)
 							void this.refresh()
 						}).open()
 					}))
-					menu.addItem(item => item.setTitle('删除书单').setIcon('trash-2').onClick(() => {
+					menu.addItem(item => item.setTitle(t('删除书单')).setIcon('trash-2').onClick(() => {
 						new ConfirmModal(this.app, `删除书单「${list.name}」？不会删除书籍文件，书会回到「未分类」。`, () => {
 							if (this.listFilter === list.id) this.listFilter = 'all'
 							lists.remove(list.id)
@@ -940,15 +941,15 @@ export class BookshelfView extends ItemView {
 				})
 			}
 		}
-		mkChip('全部', 'all', allPaths.length)
-		mkChip('未分类', 'none', allPaths.filter(p => !lists.listIdOf(p)).length)
+		mkChip(t('全部'), 'all', allPaths.length)
+		mkChip(t('未分类'), 'none', allPaths.filter(p => !lists.listIdOf(p)).length)
 		for (const l of lists.lists()) {
 			mkChip(l.name, l.id, allPaths.filter(p => lists.listIdOf(p) === l.id).length, l)
 		}
 		const newBtn = this.listsEl.createSpan('grove-shelf-list-chip grove-shelf-list-new')
-		newBtn.setText('＋ 新建书单')
+		newBtn.setText(t('＋ 新建书单'))
 		newBtn.addEventListener('click', () => {
-			new TextPromptModal(this.app, '新建书单', '书单名称', '', name => {
+			new TextPromptModal(this.app, t('新建书单'), t('书单名称'), '', name => {
 				const created = lists.create(name)
 				this.listFilter = created.id
 				void this.refresh()
@@ -1105,7 +1106,7 @@ export class BookshelfView extends ItemView {
 		const lists = this.plugin.lists
 		new ListPickerModal(this.app, lists.lists(), picked => {
 			if (picked === 'new') {
-				new TextPromptModal(this.app, '新建书单', '书单名称', '', name => {
+				new TextPromptModal(this.app, t('新建书单'), t('书单名称'), '', name => {
 					const created = lists.create(name)
 					lists.setMember(path, created.id)
 					void this.refresh()
@@ -1127,7 +1128,7 @@ export class BookshelfView extends ItemView {
 		this.plugin.refreshNoteForBook(path)
 		new Notice(status
 			? `Grove Reader：已标记为「${READING_STATUS_LABELS[status]}」`
-			: 'Grove Reader：已清除手动阅读状态')
+			: t('Grove Reader：已清除手动阅读状态'))
 		void this.refresh()
 	}
 
@@ -1139,11 +1140,11 @@ export class BookshelfView extends ItemView {
 				buffer,
 				mime,
 			)
-			if (!name) throw new Error('封面保存失败，请检查磁盘权限')
+			if (!name) throw new Error(t('封面保存失败，请检查磁盘权限'))
 			const prev = this.plugin.shelfCache.get(path) ?? {}
 			this.plugin.shelfCache.set(path, { ...prev, cover: name, customCover: true, failed: false })
 			this.#updateCard(card, { ...prev, coverName: name })
-			new Notice('封面已更新')
+			new Notice(t('封面已更新'))
 		}).open()
 	}
 
@@ -1153,23 +1154,23 @@ export class BookshelfView extends ItemView {
 			const file = input.files?.[0]
 			if (!file) return
 			if (!file.type.startsWith('image/') && !/\.(jpe?g|png|webp|gif)$/i.test(file.name)) {
-				new Notice('请选择图片文件（jpg / png / webp / gif）')
+				new Notice(t('请选择图片文件（jpg / png / webp / gif）'))
 				return
 			}
 			if (file.size > 12 * 1024 * 1024) {
-				new Notice('图片超过 12 MB，请换一张小一些的')
+				new Notice(t('图片超过 12 MB，请换一张小一些的'))
 				return
 			}
 			void (async () => {
 				const name = await this.plugin.shelfCache.saveCustomCover(this.plugin.store.bookId(path), file)
 				if (!name) {
-					new Notice('更换封面失败')
+					new Notice(t('更换封面失败'))
 					return
 				}
 				const prev = this.plugin.shelfCache.get(path) ?? {}
 				this.plugin.shelfCache.set(path, { ...prev, cover: name, customCover: true, failed: false })
 				this.#updateCard(card, { ...prev, coverName: name })
-				new Notice('封面已更新')
+				new Notice(t('封面已更新'))
 			})()
 		})
 		input.click()
@@ -1206,8 +1207,8 @@ export class BookshelfView extends ItemView {
 				const hidden = this.plugin.settings.hiddenBooks ?? []
 				this.plugin.settings.hiddenBooks = hidden.filter(p => p !== path)
 				await this.plugin.saveSettings()
-				this.plugin.oplog.add('删除书籍', `《${title}》；${trashed ? '移入回收站' : '已删除原文件'}；阅读笔记${deleteNote ? (trashed ? '一并移入' : '一并删除') : '保留'}`)
-				new Notice(trashed ? '已移入回收站，可在 设置 → 回收站 恢复' : '已删除书籍文件')
+				this.plugin.oplog.add(t('删除书籍'), `《${title}》；${trashed ? t('移入回收站') : t('已删除原文件')}；阅读笔记${deleteNote ? (trashed ? t('一并移入') : t('一并删除')) : t('保留')}`)
+				new Notice(trashed ? t('已移入回收站，可在 设置 → 回收站 恢复') : t('已删除书籍文件'))
 			} else {
 				const hidden = this.plugin.settings.hiddenBooks ?? []
 				if (!hidden.includes(path)) hidden.push(path)
@@ -1221,8 +1222,8 @@ export class BookshelfView extends ItemView {
 					this.plugin.store.save(fresh)
 				}
 				await this.plugin.saveSettings()
-				this.plugin.oplog.add('删除书籍', `《${title}》；仅移出书架；阅读笔记${deleteNote ? '已删除' : '保留'}`)
-				new Notice('已从书架移除，原文件与批注数据都保留')
+				this.plugin.oplog.add(t('删除书籍'), `《${title}》；仅移出书架；阅读笔记${deleteNote ? t('已删除') : t('保留')}`)
+				new Notice(t('已从书架移除，原文件与批注数据都保留'))
 			}
 			await this.refresh({ rescan: true })
 		}).open()
@@ -1268,7 +1269,7 @@ export class BookshelfView extends ItemView {
 			const track = coverWrap.createDiv('grove-cover-progress')
 			const pct = Math.min(100, Math.max(1, Math.round(fraction * 100)))
 			track.createDiv('grove-cover-progress-fill').style.width = `${pct}%`
-			track.title = fraction >= 0.995 ? '已读完' : `读至 ${pct}%`
+			track.title = fraction >= 0.995 ? t('已读完') : `读至 ${pct}%`
 		}
 
 		// 悬浮/键盘聚焦：只保留一个自定义提示，整合书名、文件名、大小与阅读信息
@@ -1303,13 +1304,13 @@ export class BookshelfView extends ItemView {
 		if (display.showFormatBadge && format) {
 			const badge = meta.createSpan(`grove-shelf-badge grove-fmt-${ext}`)
 			badge.setText(format)
-			badge.title = `${format} · ${ext === 'pdf' ? '用 Obsidian 查看器打开' : '在插件内阅读'}`
+			badge.title = `${format} · ${ext === 'pdf' ? t('用 Obsidian 查看器打开') : t('在插件内阅读')}`
 		}
 		if (display.showProgress && typeof fraction === 'number' && fraction > 0.001) {
 			const done = fraction >= 0.995
 			const progress = meta.createSpan('grove-shelf-progress')
-			progress.setText(done ? '已读' : `${Math.round(fraction * 100)}%`)
-			progress.title = done ? '已读完' : `读至 ${Math.round(fraction * 100)}%`
+			progress.setText(done ? t('已读') : `${Math.round(fraction * 100)}%`)
+			progress.title = done ? t('已读完') : `读至 ${Math.round(fraction * 100)}%`
 		}
 		if (display.showAnnotationCount && info && info.annotations > 0) {
 			meta.createSpan('grove-shelf-badge').setText(`批注 ${info.annotations}`)
@@ -1330,7 +1331,7 @@ export class BookshelfView extends ItemView {
 		if (display.showNoteBadge && info?.notePath) {
 			const note = meta.createSpan('grove-note-badge')
 			setIcon(note, 'file-text')
-			note.title = '已生成阅读笔记，点击打开'
+			note.title = t('已生成阅读笔记，点击打开')
 			note.setAttr('role', 'button')
 			note.tabIndex = 0
 			note.addEventListener('click', e => {
@@ -1347,13 +1348,13 @@ export class BookshelfView extends ItemView {
 		}
 		if (dupes && dupes.length) {
 			const badge = meta.createSpan('grove-shelf-badge grove-shelf-dup')
-			badge.setText('疑似重复')
+			badge.setText(t('疑似重复'))
 			badge.title = `文件名与其他 ${dupes.length} 本书高度相似：\n${dupes.map(d => basenameOf(d)).join('\n')}`
 		}
 		if (info?.readingStatus) {
 			const status = meta.createSpan(`grove-shelf-badge grove-shelf-status grove-status-${info.readingStatus}`)
 			status.setText(READING_STATUS_LABELS[info.readingStatus])
-			status.title = '手动标记的阅读状态（右键卡片可修改）'
+			status.title = t('手动标记的阅读状态（右键卡片可修改）')
 		}
 
 		// 拖拽到书单标签上即可归类
@@ -1374,15 +1375,15 @@ export class BookshelfView extends ItemView {
 		card.addEventListener('contextmenu', e => {
 			e.preventDefault()
 			const menu = new Menu()
-			menu.addItem(item => item.setTitle('打开书籍').setIcon('book-open').onClick(() => void plugin.openBookByPath(path)))
-			menu.addItem(item => item.setTitle('笔记模板…').setIcon('file-text').onClick(() => plugin.showTemplatePicker(path)))
-			menu.addItem(item => item.setTitle('更换封面').setIcon('image').onClick(() => void this.#changeCover(path, card)))
-			menu.addItem(item => item.setTitle('用图片链接更换封面…').setIcon('link').onClick(() => void this.#changeCoverByUrl(path, card)))
-			menu.addItem(item => item.setTitle('编辑书籍信息').setIcon('pencil').onClick(() => this.#editInfo(path)))
+			menu.addItem(item => item.setTitle(t('打开书籍')).setIcon('book-open').onClick(() => void plugin.openBookByPath(path)))
+			menu.addItem(item => item.setTitle(t('笔记模板…')).setIcon('file-text').onClick(() => plugin.showTemplatePicker(path)))
+			menu.addItem(item => item.setTitle(t('更换封面')).setIcon('image').onClick(() => void this.#changeCover(path, card)))
+			menu.addItem(item => item.setTitle(t('用图片链接更换封面…')).setIcon('link').onClick(() => void this.#changeCoverByUrl(path, card)))
+			menu.addItem(item => item.setTitle(t('编辑书籍信息')).setIcon('pencil').onClick(() => this.#editInfo(path)))
 			menu.addItem(item => {
 				const lid = plugin.lists.listIdOf(path)
 				const name = plugin.lists.lists().find(l => l.id === lid)?.name
-				item.setTitle(name ? `移入书单（当前：${name}）` : '移入书单…').setIcon('list').onClick(() => this.#pickList(path))
+				item.setTitle(name ? `移入书单（当前：${name}）` : t('移入书单…')).setIcon('list').onClick(() => this.#pickList(path))
 			})
 			// 阅读状态：手动标记后覆盖按进度自动判断的状态
 			const currentStatus = plugin.store.load(path).readingStatus
@@ -1394,26 +1395,26 @@ export class BookshelfView extends ItemView {
 			}
 			if (currentStatus) {
 				menu.addItem(item => item
-					.setTitle('清除阅读状态')
+					.setTitle(t('清除阅读状态'))
 					.setIcon('x')
 					.onClick(() => this.#setReadingStatus(path, null)))
 			}
-			menu.addItem(item => item.setTitle('AI 补全书籍信息…').setIcon('sparkles').onClick(() => this.#aiMeta(path)))
-			menu.addItem(item => item.setTitle('重新解析封面与信息').setIcon('refresh-cw').onClick(() => {
+			menu.addItem(item => item.setTitle(t('AI 补全书籍信息…')).setIcon('sparkles').onClick(() => this.#aiMeta(path)))
+			menu.addItem(item => item.setTitle(t('重新解析封面与信息')).setIcon('refresh-cw').onClick(() => {
 				const entry = this.plugin.shelfCache.get(path)
 				const run = (): void => {
 					this.plugin.shelfCache.set(path, {})
 					void this.#ensureEntry(path, card, true)
 				}
 				if (entry?.customCover || entry?.manualMeta) {
-					new ConfirmModal(this.app, '重新解析会清除手动更换的封面或手动编辑的书名/作者，继续？', run).open()
+					new ConfirmModal(this.app, t('重新解析会清除手动更换的封面或手动编辑的书名/作者，继续？'), run).open()
 				} else {
 					run()
 				}
 			}))
 			// electron 只在桌面端存在：延迟 require，避免手机端加载插件时就 require('electron')
 			if (!Platform.isMobile) {
-				menu.addItem(item => item.setTitle('在文件夹中显示').setIcon('folder-open').onClick(() => {
+				menu.addItem(item => item.setTitle(t('在文件夹中显示')).setIcon('folder-open').onClick(() => {
 					try {
 						const { shell } = require('electron') as typeof import('electron')
 						shell.showItemInFolder(this.#absPath(path))
@@ -1422,13 +1423,13 @@ export class BookshelfView extends ItemView {
 					}
 				}))
 			}
-			menu.addItem(item => item.setTitle('复制完整文件名').setIcon('copy').onClick(() => {
+			menu.addItem(item => item.setTitle(t('复制完整文件名')).setIcon('copy').onClick(() => {
 				void navigator.clipboard.writeText(basenameOf(path))
-				new Notice('已复制文件名')
+				new Notice(t('已复制文件名'))
 			}))
 			menu.addSeparator()
-			menu.addItem(item => item.setTitle('清空本书批注…').setIcon('eraser').onClick(() => this.plugin.clearAnnotationsFor(path)))
-			menu.addItem(item => item.setTitle('删除书籍…').setIcon('trash-2').onClick(() => void this.#deleteBook(path)))
+			menu.addItem(item => item.setTitle(t('清空本书批注…')).setIcon('eraser').onClick(() => this.plugin.clearAnnotationsFor(path)))
+			menu.addItem(item => item.setTitle(t('删除书籍…')).setIcon('trash-2').onClick(() => void this.#deleteBook(path)))
 			menu.showAtPosition({ x: e.clientX, y: e.clientY })
 		})
 		return card
@@ -1560,7 +1561,7 @@ export class BookshelfView extends ItemView {
 						coverName = (await cache.saveCover(plugin.store.bookId(path), info.cover)) ?? undefined
 					}
 				} catch (e) {
-					console.error('[Grove Reader] 生成 PDF 封面失败', path, e)
+					console.error(t('[Grove Reader] 生成 PDF 封面失败'), path, e)
 				}
 				// 解析失败时保留旧封面，避免一次异常把已有封面抹掉
 				if (!coverName && !force) coverName = existing?.cover
@@ -1631,7 +1632,7 @@ export class BookshelfView extends ItemView {
 			cache.set(path, { title, author, publisher, cover: coverName, customCover: existing?.customCover, manualMeta: existing?.manualMeta, mtime, size, addedAt })
 			this.#updateCard(card, { title, author, publisher, coverName })
 		} catch (e) {
-			console.error('[Grove Reader] 解析书籍信息失败', path, e)
+			console.error(t('[Grove Reader] 解析书籍信息失败'), path, e)
 			// publisher 补空串：避免每次刷新都重读解析失败的整本书
 			cache.set(path, { ...existing, mtime, size, addedAt, failed: true, publisher: existing?.publisher ?? '' })
 			this.#updateCard(card, {})
@@ -1688,9 +1689,9 @@ export class BookshelfView extends ItemView {
 	}
 
 	async #addFolder(): Promise<void> {
-		new FolderPromptModal(this.app, '添加扫描文件夹', '例如：书籍', async value => {
+		new FolderPromptModal(this.app, t('添加扫描文件夹'), t('例如：书籍'), async value => {
 			if (this.plugin.settings.scanFolders.includes(value)) {
-				new Notice('该文件夹已在列表中')
+				new Notice(t('该文件夹已在列表中'))
 				return
 			}
 			this.plugin.settings.scanFolders.push(value)
@@ -1751,7 +1752,7 @@ export class BookshelfView extends ItemView {
 						await this.app.vault.createBinary(path, await file.arrayBuffer())
 						done++
 					} catch (e) {
-						console.error('[Grove Reader] 导入书籍失败', file.name, e)
+						console.error(t('[Grove Reader] 导入书籍失败'), file.name, e)
 						failed.push(file.name)
 					}
 				}

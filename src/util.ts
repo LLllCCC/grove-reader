@@ -137,6 +137,21 @@ export function setHighlightedText(el: HTMLElement, text: string, query: string)
 	if (from < text.length) el.createSpan().setText(text.slice(from))
 }
 
+/**
+ * 把受信任的内联 SVG 字符串解析成真实 DOM 节点。
+ * 替代 innerHTML：内容来自本仓库 logos.ts 常量，但仍走解析而非字符串注入，
+ * 既满足 Obsidian 审核对 innerHTML 的要求，也不给未来拼接用户内容留口子。
+ */
+export function appendInlineSvg(target: HTMLElement, svg: string): SVGSVGElement | null {
+	const parsed = new DOMParser().parseFromString(svg, 'image/svg+xml')
+	if (parsed.querySelector('parsererror')) return null
+	const root = parsed.documentElement
+	if (!root || root.nodeName.toLowerCase() !== 'svg') return null
+	const node = document.importNode(root, true) as unknown as SVGSVGElement
+	target.appendChild(node)
+	return node
+}
+
 /** 文件大小友好显示：1234 → 1.2 KB */
 export function formatBytes(n: number): string {
 	if (!Number.isFinite(n) || n < 0) return ''

@@ -12,7 +12,8 @@
 		"smoke": "node esbuild.config.mjs production && node scripts/smoke.mjs",
 		"foliate:check": "node scripts/foliate-check.mjs",
 		"foliate:baseline": "node scripts/foliate-baseline.mjs",
-		"obsidian:eval": "node scripts/obsidian-eval.mjs"
+		"obsidian:eval": "node scripts/obsidian-eval.mjs",
+		"build:community": "tsc -noEmit -skipLibCheck && GROVE_COMMUNITY=1 node esbuild.config.mjs production"
 	},
 	"devDependencies": {
 		"@types/node": "^22.10.2",

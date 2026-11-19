@@ -6,6 +6,7 @@ import { App, Modal } from 'obsidian'
 import type { ReviewGrade, ReviewQueueItem } from './review'
 import { REVIEW_GRADE_KEYS, REVIEW_GRADE_LABELS, dueLabel } from './review'
 import { IMPORT_SOURCE_LABELS, colorCss } from './types'
+import { t } from './i18n'
 
 export interface ReviewModalHandlers {
 	/** 评分落库（由插件写回批注 JSON） */
@@ -131,7 +132,7 @@ export class ReviewModal extends Modal {
 		const doneToday = this.data.reviewedToday + this.#graded
 		const scope = this.data.scopeTitle
 		const scopeLabel = scope ? (scope.startsWith('《') ? scope : `《${scope}》`) : ''
-		contentEl.createEl('h3', { text: scope ? '复习本书' : '今日复习', cls: 'grove-review-title' })
+		contentEl.createEl('h3', { text: scope ? t('复习本书') : t('今日复习'), cls: 'grove-review-title' })
 		contentEl.createEl('p', {
 			cls: 'grove-review-meta',
 			text: scope
@@ -165,7 +166,7 @@ export class ReviewModal extends Modal {
 		const note = (a.note ?? '').trim()
 		if (note) {
 			const noteEl = card.createDiv('grove-review-note')
-			noteEl.createSpan({ cls: 'grove-review-note-label', text: '我的评论' })
+			noteEl.createSpan({ cls: 'grove-review-note-label', text: t('我的评论') })
 			noteEl.createSpan({ cls: 'grove-review-note-text', text: note })
 		}
 
@@ -182,15 +183,15 @@ export class ReviewModal extends Modal {
 
 		const foot = contentEl.createDiv('grove-review-foot')
 		const jump = foot.createEl('button', { cls: 'grove-review-link', attr: { type: 'button' } })
-		jump.setText('回原文')
+		jump.setText(t('回原文'))
 		jump.addEventListener('click', () => this.#jump())
 		const comment = foot.createEl('button', { cls: 'grove-review-link', attr: { type: 'button' } })
-		comment.setText(a.note ? '改想法' : '写想法')
+		comment.setText(a.note ? t('改想法') : t('写想法'))
 		comment.addEventListener('click', () => this.#comment())
 		const skip = foot.createEl('button', { cls: 'grove-review-link', attr: { type: 'button' } })
-		skip.setText('跳过这条')
+		skip.setText(t('跳过这条'))
 		skip.addEventListener('click', () => this.#skip())
-		foot.createSpan({ cls: 'grove-review-hint', text: '键盘：1–4 评分 · E 写想法 · N 跳过 · O 回原文' })
+		foot.createSpan({ cls: 'grove-review-hint', text: t('键盘：1–4 评分 · E 写想法 · N 跳过 · O 回原文') })
 	}
 
 	#renderSummary(contentEl: HTMLElement): void {
@@ -223,10 +224,10 @@ export class ReviewModal extends Modal {
 			})
 		} else {
 			box.createEl('p', { cls: 'grove-review-empty', text: this.data.scopeTitle
-				? '这本书今天没有更多可复习的划线了。'
-				: '今天没有更多到期的划线和旧摘录了，明天再来。' })
+				? t('这本书今天没有更多可复习的划线了。')
+				: t('今天没有更多到期的划线和旧摘录了，明天再来。') })
 		}
-		const close = actions.createEl('button', { text: '关闭', attr: { type: 'button' } })
+		const close = actions.createEl('button', { text: t('关闭'), attr: { type: 'button' } })
 		close.addEventListener('click', () => this.close())
 	}
 }

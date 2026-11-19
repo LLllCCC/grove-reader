@@ -1,9 +1,10 @@
 import { Notice, setIcon } from 'obsidian'
 import { AiConfig, hintFor, isAiConfigured, transformSelection, type SelectionAiTask } from './ai'
 import { truncate } from './util'
+import { t } from './i18n'
 
 const NOT_CONFIGURED =
-	'Grove Reader：还没有配置 AI。设置 → 阅读 → AI 解释 里填入接口地址与 API Key（推荐智谱 GLM-4-Flash，免费）'
+	t('Grove Reader：还没有配置 AI。设置 → 阅读 → AI 解释 里填入接口地址与 API Key（推荐智谱 GLM-4-Flash，免费）')
 
 /**
  * 划词解释浮层。EPUB / TXT 共用一套 DOM 与定位逻辑：
@@ -30,7 +31,7 @@ export class AiPanel {
 			new Notice(NOT_CONFIGURED, 8000)
 			return
 		}
-		const title = task === 'translate' ? 'AI 翻译' : task === 'summarize' ? 'AI 摘要' : 'AI 解释'
+		const title = task === 'translate' ? t('AI 翻译') : task === 'summarize' ? t('AI 摘要') : t('AI 解释')
 		this.show(text, anchor, title)
 		try {
 			this.fill(await transformSelection(cfg, text, task))
@@ -40,19 +41,19 @@ export class AiPanel {
 		}
 	}
 
-	show(sourceText: string, anchor?: DOMRect, title = 'AI 解释'): void {
+	show(sourceText: string, anchor?: DOMRect, title = t('AI 解释')): void {
 		this.hide()
 		const panel = document.body.createDiv('grove-ai-panel')
 		const head = panel.createDiv('grove-ai-head')
 		const icon = head.createSpan('grove-ai-icon')
 		setIcon(icon, 'sparkles')
 		head.createSpan('grove-ai-title').setText(title)
-		const close = head.createEl('button', { cls: 'grove-ai-close', attr: { 'aria-label': '关闭' } })
+		const close = head.createEl('button', { cls: 'grove-ai-close', attr: { 'aria-label': t('关闭') } })
 		setIcon(close, 'x')
 		close.addEventListener('click', () => this.hide())
 		panel.createDiv('grove-ai-source').setText(truncate(sourceText.replace(/\s+/g, ' '), 80))
 		const body = panel.createDiv('grove-ai-body')
-		body.setText('思考中…')
+		body.setText(t('思考中…'))
 		body.addClass('is-loading')
 
 		document.body.appendChild(panel)

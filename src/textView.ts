@@ -33,6 +33,7 @@ import { GuideModal } from './guideModal'
 import { ProgressTicks, chapterFractions, readSeconds, remainingSuffix } from './progressMeta'
 import { TtsController, scrollRangeIntoView, sentenceRanges, type TtsSentence, type TtsState } from './tts'
 import { WordLookupModal } from './wordLookupModal'
+import { t } from './i18n'
 
 export { VIEW_TYPE_GROVE_TEXT } from './textCodec'
 
@@ -238,7 +239,7 @@ export class TextView extends ItemView implements ReaderEngine {
 		this.resizeObserver = new ResizeObserver(() => this.#scheduleRelayout())
 		this.resizeObserver.observe(this.scrollEl)
 		if (this.bookPath) await this.#load()
-		else this.#showEmpty('没有指定要打开的 TXT 文件')
+		else this.#showEmpty(t('没有指定要打开的 TXT 文件'))
 	}
 
 	async onClose(): Promise<void> {
@@ -301,20 +302,20 @@ export class TextView extends ItemView implements ReaderEngine {
 			toolbar.dataset.barOpen = '0'
 			const handle = toolbar.createEl('button', {
 				cls: 'grove-mobile-toolbar-close',
-				attr: { type: 'button', 'aria-label': '展开阅读工具栏', title: '展开 / 收起工具栏' },
+				attr: { type: 'button', 'aria-label': t('展开阅读工具栏'), title: t('展开 / 收起工具栏') },
 			})
 			handle.addEventListener('click', (event) => {
 				event.preventDefault()
 				event.stopPropagation()
 				this.#setMobileBarOpen(toolbar.dataset.barOpen !== '1')
 			})
-			handle.setText('工具栏')
+			handle.setText(t('工具栏'))
 			this.mobileToolbarHandle = handle
 		}
 
 		const tocWrap = toolbar.createDiv('grove-toc')
 		// 本书章节上千条，原生下拉框难用，改成「按钮 + 可搜索目录面板」
-		this.tocBtn = tocWrap.createEl('button', { cls: 'grove-toc-btn', text: '目录' })
+		this.tocBtn = tocWrap.createEl('button', { cls: 'grove-toc-btn', text: t('目录') })
 		this.tocBtn.addEventListener('click', () => this.#openToc())
 
 		const progress = toolbar.createDiv('grove-progress')
@@ -367,7 +368,7 @@ export class TextView extends ItemView implements ReaderEngine {
 		const encodingWrap = toolbar.createDiv('grove-text-encoding')
 		this.encodingSelect = encodingWrap.createEl('select', { cls: 'dropdown' })
 		for (const [value, label] of [
-			['auto', '自动'],
+			['auto', t('自动')],
 			['utf-8', 'UTF-8'],
 			['gb18030', 'GB18030'],
 			['big5', 'Big5'],
@@ -379,7 +380,7 @@ export class TextView extends ItemView implements ReaderEngine {
 			this.encoding = this.encodingSelect.value
 			const fraction = this.pages.length > 1 ? this.page / (this.pages.length - 1) : 0
 			this.#decodeAndRender(fraction)
-			new Notice(`${this.plugin.manifest.name}：编码已切换为 ${this.encoding === 'auto' ? '自动' : this.encoding}`)
+			new Notice(`${this.plugin.manifest.name}：编码已切换为 ${this.encoding === 'auto' ? t('自动') : this.encoding}`)
 		})
 
 		// 编码识别结果：短标签放末尾，鼠标悬停看完整信息
@@ -488,14 +489,14 @@ export class TextView extends ItemView implements ReaderEngine {
 		this.pageBtnsEl = pageBtns
 		this.prevBtn = pageBtns.createEl('button', {
 			cls: 'clickable-icon grove-page-btn',
-			attr: { 'aria-label': '上一页' },
+			attr: { 'aria-label': t('上一页') },
 		})
 		setIcon(this.prevBtn, 'chevron-left')
 		this.prevBtn.disabled = true
 		this.prevBtn.addEventListener('click', () => this.prevPage())
 		this.nextBtn = pageBtns.createEl('button', {
 			cls: 'clickable-icon grove-page-btn',
-			attr: { 'aria-label': '下一页' },
+			attr: { 'aria-label': t('下一页') },
 		})
 		setIcon(this.nextBtn, 'chevron-right')
 		this.nextBtn.disabled = true
@@ -526,8 +527,8 @@ export class TextView extends ItemView implements ReaderEngine {
 		const chrome = createReaderSidebar(body, {
 			startHidden: true,
 			colorFilter: true,
-			searchPlaceholder: '搜索批注（摘录 / 评论 / 章节）…',
-			sortLabels: { position: '排序：章节', recent: '排序：最近' },
+			searchPlaceholder: t('搜索批注（摘录 / 评论 / 章节）…'),
+			sortLabels: { position: t('排序：章节'), recent: t('排序：最近') },
 			hooks: {
 				onAddBookmark: () => this.#toggleBookmark(),
 				onSearch: q => {
@@ -592,7 +593,7 @@ export class TextView extends ItemView implements ReaderEngine {
 		const path = this.bookPath
 		if (!path || this.loadingPath === path) return
 		this.loadingPath = path
-		this.#showEmpty('正在读取…')
+		this.#showEmpty(t('正在读取…'))
 		try {
 			const bytes = await this.plugin.readBookBytes(path)
 			if (this.loadingPath !== path) return
@@ -626,7 +627,7 @@ export class TextView extends ItemView implements ReaderEngine {
 		this.fullTextLowerCache = null
 		this.findHit = null
 		this.fullTextSearchResults?.empty()
-		this.fullTextSearchStatus?.setText('输入关键词后按 Enter 搜索全文')
+		this.fullTextSearchStatus?.setText(t('输入关键词后按 Enter 搜索全文'))
 
 		let target: number | null = null
 		const jump = this.pendingCfi ? parseTextCfi(this.pendingCfi) : null
@@ -651,7 +652,7 @@ export class TextView extends ItemView implements ReaderEngine {
 
 		const encName = this.detected ? this.detected.toUpperCase() : ''
 		// 识别结果压进编码下拉的悬停提示；只有编码异常时才在工具栏显示小标签
-		this.metaEl.setText(this.warning ? '编码异常' : '')
+		this.metaEl.setText(this.warning ? t('编码异常') : '')
 		this.metaEl.toggleClass('grove-hidden', !this.warning)
 		this.metaEl.title = `编码 ${encName} · ${this.pages.length} 页${this.warning ? ` · ${this.warning}` : ''}`
 		this.encodingSelect.title = this.metaEl.title
@@ -740,8 +741,8 @@ export class TextView extends ItemView implements ReaderEngine {
 	#buildToc(): void {
 		if (!this.tocBtn) return
 		this.currentChapterOffset = -1
-		this.tocBtn.setText(this.chapters.length ? `目录（${this.chapters.length}）` : '目录')
-		this.tocBtn.title = this.chapters.length ? '打开目录（可搜索）' : '没有识别到章节'
+		this.tocBtn.setText(this.chapters.length ? `目录（${this.chapters.length}）` : t('目录'))
+		this.tocBtn.title = this.chapters.length ? t('打开目录（可搜索）') : t('没有识别到章节')
 	}
 
 	/** 打开可搜索目录面板 */
@@ -752,7 +753,7 @@ export class TextView extends ItemView implements ReaderEngine {
 			return
 		}
 		if (!this.chapters.length) {
-			new Notice(`Grove Reader：这本 TXT 没有识别到章节标题`)
+			new Notice(t(`Grove Reader：这本 TXT 没有识别到章节标题`))
 			return
 		}
 		const pop = document.createElement('div')
@@ -762,7 +763,7 @@ export class TextView extends ItemView implements ReaderEngine {
 		const search = document.createElement('input')
 		search.className = 'grove-toc-search'
 		search.type = 'search'
-		search.placeholder = '搜索章节名…'
+		search.placeholder = t('搜索章节名…')
 		pop.appendChild(search)
 
 		const list = document.createElement('div')
@@ -774,7 +775,7 @@ export class TextView extends ItemView implements ReaderEngine {
 			const kw = keyword.trim().toLowerCase()
 			const items = kw ? this.chapters.filter(c => c.title.toLowerCase().includes(kw)) : this.chapters
 			if (!items.length) {
-				list.createDiv('grove-toc-empty').setText('没有匹配的章节')
+				list.createDiv('grove-toc-empty').setText(t('没有匹配的章节'))
 				return
 			}
 			const limit = 400
@@ -865,7 +866,7 @@ export class TextView extends ItemView implements ReaderEngine {
 		if (next < this.chapters.length && this.chapters[next].offset < start + span) idx = next
 		this.currentChapterOffset = idx >= 0 ? this.chapters[idx].offset : -1
 		this.tocBtn.setText(idx >= 0 ? truncate(this.chapters[idx].title, 28) : `目录（${this.chapters.length}）`)
-		this.tocBtn.title = idx >= 0 ? `${this.chapters[idx].title} · 点击打开目录` : '点击打开目录'
+		this.tocBtn.title = idx >= 0 ? `${this.chapters[idx].title} · 点击打开目录` : t('点击打开目录')
 	}
 
 	#chapterAt(offset: number): string | undefined {
@@ -966,7 +967,7 @@ export class TextView extends ItemView implements ReaderEngine {
 			try {
 				fn()
 			} catch (e) {
-				console.error('[Grove Reader] 分页刷新失败', e)
+				console.error(t('[Grove Reader] 分页刷新失败'), e)
 			}
 		}
 		window.requestAnimationFrame(run)
@@ -1221,7 +1222,7 @@ export class TextView extends ItemView implements ReaderEngine {
 		const btn = this.ttsBtnEl
 		if (!btn) return
 		setIcon(btn, state === 'playing' ? 'pause' : 'volume-2')
-		btn.setAttr('aria-label', state === 'playing' ? '暂停朗读' : state === 'paused' ? '继续朗读' : '朗读当前页（系统语音）')
+		btn.setAttr('aria-label', state === 'playing' ? t('暂停朗读') : state === 'paused' ? t('继续朗读') : t('朗读当前页（系统语音）'))
 		btn.toggleClass('is-active', state !== 'idle')
 	}
 
@@ -1428,12 +1429,12 @@ export class TextView extends ItemView implements ReaderEngine {
 		const text = this.#fullText()
 		if (!text) return []
 		const marks = this.chapters.filter(c => c.offset >= 0 && c.offset < text.length)
-		if (!marks.length) return [{ label: this.bookTitle || '正文', text }]
+		if (!marks.length) return [{ label: this.bookTitle || t('正文'), text }]
 		const out: SourceSection[] = []
 		const first = marks[0].offset
 		if (first > 0) {
 			const head = text.slice(0, first).trim()
-			if (head) out.push({ label: '开头', text: head })
+			if (head) out.push({ label: t('开头'), text: head })
 		}
 		for (let i = 0; i < marks.length; i++) {
 			const start = marks[i].offset
@@ -1449,7 +1450,7 @@ export class TextView extends ItemView implements ReaderEngine {
 		const q = query.trim()
 		if (!q) return
 		if (!this.bytes) {
-			new Notice('Grove Reader：文件还在加载，请稍后再试')
+			new Notice(t('Grove Reader：文件还在加载，请稍后再试'))
 			return
 		}
 		this.sidebarEl.removeClass('grove-hidden')
@@ -1468,7 +1469,7 @@ export class TextView extends ItemView implements ReaderEngine {
 			this.#renderPage()
 		}
 		if (!query) {
-			this.fullTextSearchStatus.setText('输入关键词后按 Enter 搜索全文')
+			this.fullTextSearchStatus.setText(t('输入关键词后按 Enter 搜索全文'))
 			return
 		}
 		const text = this.#fullText()
@@ -1485,7 +1486,7 @@ export class TextView extends ItemView implements ReaderEngine {
 			from = idx + Math.max(1, needle.length)
 		}
 		if (!hits.length) {
-			this.fullTextSearchStatus.setText('没有找到匹配内容')
+			this.fullTextSearchStatus.setText(t('没有找到匹配内容'))
 			return
 		}
 		for (const hit of hits) {
@@ -1520,7 +1521,7 @@ export class TextView extends ItemView implements ReaderEngine {
 		this.fullTextTaskId++
 		if (this.fullTextSearchInput) this.fullTextSearchInput.value = ''
 		this.fullTextSearchResults?.empty()
-		this.fullTextSearchStatus?.setText('输入关键词后按 Enter 搜索全文')
+		this.fullTextSearchStatus?.setText(t('输入关键词后按 Enter 搜索全文'))
 		if (this.findHit) {
 			this.findHit = null
 			this.#renderPage()
@@ -1690,25 +1691,25 @@ export class TextView extends ItemView implements ReaderEngine {
 
 	#toggleBookmark(): void {
 		if (!this.data) {
-			new Notice('Grove Reader：还没加载完，稍等一下再试')
+			new Notice(t('Grove Reader：还没加载完，稍等一下再试'))
 			return
 		}
 		const cfi = this.#currentCfi()
 		if (!cfi) {
-			new Notice('Grove Reader：还没定位到当前位置')
+			new Notice(t('Grove Reader：还没定位到当前位置'))
 			return
 		}
 		const list = this.data.bookmarks ?? (this.data.bookmarks = [])
 		const idx = findBookmarkIndex(list, cfi)
 		if (idx >= 0) {
 			list.splice(idx, 1)
-			new Notice('Grove Reader：已移除当前位置的书签')
+			new Notice(t('Grove Reader：已移除当前位置的书签'))
 		} else {
 			const offset = this.#currentOffset()
 			const si = this.#sectionIndexOf(offset)
 			const label = si >= 0 ? (this.chapters[si]?.title?.trim() ?? '') : ''
 			list.push(makeBookmark(cfi, label))
-			new Notice('Grove Reader：已加书签')
+			new Notice(t('Grove Reader：已加书签'))
 		}
 		this.#afterBookmarksChanged()
 	}
@@ -1730,7 +1731,7 @@ export class TextView extends ItemView implements ReaderEngine {
 		const on = !!cfi && findBookmarkIndex(this.data?.bookmarks ?? [], cfi) >= 0
 		this.bookmarkBtnEl?.toggleClass('is-active', on)
 		if (!this.bookmarkBtnEl) return
-		if (this.plugin.settings.toolbarStyle === 'text') this.bookmarkBtnEl.setText('书签')
+		if (this.plugin.settings.toolbarStyle === 'text') this.bookmarkBtnEl.setText(t('书签'))
 		else setIcon(this.bookmarkBtnEl, on ? 'bookmark-check' : 'bookmark')
 	}
 
@@ -1828,26 +1829,26 @@ export class TextView extends ItemView implements ReaderEngine {
 		}
 
 		const buttonCss = `border:none;cursor:pointer;padding:3px 8px;border-radius:6px;font-size:12px;background:${dark ? '#3a3a42' : '#ececf0'};color:${dark ? '#dcddde' : '#1f1f23'};`
-		const commentBtn = popup.createEl('button', { text: '评论' })
+		const commentBtn = popup.createEl('button', { text: t('评论') })
 		commentBtn.style.cssText = buttonCss
 		commentBtn.addEventListener('click', e => {
 			e.preventDefault()
 			void this.#commentOnSelection()
 		})
 
-		const copyBtn = popup.createEl('button', { text: '复制' })
+		const copyBtn = popup.createEl('button', { text: t('复制') })
 		copyBtn.style.cssText = buttonCss
 		copyBtn.addEventListener('click', e => {
 			e.preventDefault()
 			if (this.pending) {
-				void navigator.clipboard.writeText(this.pending.text).then(() => new Notice('Grove Reader：已复制'))
+				void navigator.clipboard.writeText(this.pending.text).then(() => new Notice(t('Grove Reader：已复制')))
 			}
 			this.#clearPending()
 		})
 
 		// 摘录：复制回跳双链 / 存为摘录 / 存为名词（落在独立的摘录文件里）
-		const saveBtn = popup.createEl('button', { text: '摘录' })
-		saveBtn.title = '复制回跳链接 / 存为摘录 / 存为名词'
+		const saveBtn = popup.createEl('button', { text: t('摘录') })
+		saveBtn.title = t('复制回跳链接 / 存为摘录 / 存为名词')
 		saveBtn.style.cssText = buttonCss
 		saveBtn.addEventListener('click', e => {
 			e.preventDefault()
@@ -1875,16 +1876,16 @@ export class TextView extends ItemView implements ReaderEngine {
 			}
 			const rect = saveBtn.getBoundingClientRect()
 			const menu = new Menu()
-			menu.addItem(item => item.setTitle('复制回跳双链').setIcon('link').onClick(() => {
-				void navigator.clipboard.writeText(link).then(() => new Notice('Grove Reader：已复制双链'))
+			menu.addItem(item => item.setTitle(t('复制回跳双链')).setIcon('link').onClick(() => {
+				void navigator.clipboard.writeText(link).then(() => new Notice(t('Grove Reader：已复制双链')))
 			}))
-			menu.addItem(item => item.setTitle('存为摘录').setIcon('quote').onClick(() => save('quote')))
-			menu.addItem(item => item.setTitle('存为名词').setIcon('list').onClick(() => save('term')))
+			menu.addItem(item => item.setTitle(t('存为摘录')).setIcon('quote').onClick(() => save('quote')))
+			menu.addItem(item => item.setTitle(t('存为名词')).setIcon('list').onClick(() => save('term')))
 			menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 })
 		})
 
-		const lookupBtn = popup.createEl('button', { text: '查词' })
-		lookupBtn.title = '查词并加入生词本'
+		const lookupBtn = popup.createEl('button', { text: t('查词') })
+		lookupBtn.title = t('查词并加入生词本')
 		lookupBtn.style.cssText = buttonCss
 		lookupBtn.addEventListener('click', e => {
 			e.preventDefault()
@@ -1894,15 +1895,15 @@ export class TextView extends ItemView implements ReaderEngine {
 		})
 
 		const aiBtn = popup.createEl('button', { text: 'AI' })
-		aiBtn.title = 'AI 解释 / 翻译 / 摘要'
+		aiBtn.title = t('AI 解释 / 翻译 / 摘要')
 		aiBtn.style.cssText = buttonCss
 		aiBtn.addEventListener('click', e => {
 			e.preventDefault()
 			const rect = aiBtn.getBoundingClientRect()
 			const menu = new Menu()
-			menu.addItem(item => item.setTitle('解释').setIcon('message-circle-question').onClick(() => void this.#runAiTask('explain')))
-			menu.addItem(item => item.setTitle('翻译').setIcon('languages').onClick(() => void this.#runAiTask('translate')))
-			menu.addItem(item => item.setTitle('摘要').setIcon('align-left').onClick(() => void this.#runAiTask('summarize')))
+			menu.addItem(item => item.setTitle(t('解释')).setIcon('message-circle-question').onClick(() => void this.#runAiTask('explain')))
+			menu.addItem(item => item.setTitle(t('翻译')).setIcon('languages').onClick(() => void this.#runAiTask('translate')))
+			menu.addItem(item => item.setTitle(t('摘要')).setIcon('align-left').onClick(() => void this.#runAiTask('summarize')))
 			menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 })
 		})
 
@@ -1924,15 +1925,15 @@ export class TextView extends ItemView implements ReaderEngine {
 	/** 手机工具栏的「AI」：用当前待处理选区弹 解释 / 翻译 / 摘要 菜单 */
 	openSelectionAiMenu(anchor: HTMLElement): void {
 		if (!this.pending) {
-			new Notice('Grove Reader：先划选一段文字')
+			new Notice(t('Grove Reader：先划选一段文字'))
 			return
 		}
 		const rect = anchor.getBoundingClientRect()
 		const menu = new Menu()
-		menu.addItem(item => item.setTitle('解释').setIcon('message-circle-question').onClick(() => void this.#runAiTask('explain')))
-		menu.addItem(item => item.setTitle('翻译').setIcon('languages').onClick(() => void this.#runAiTask('translate')))
-		menu.addItem(item => item.setTitle('摘要').setIcon('align-left').onClick(() => void this.#runAiTask('summarize')))
-		menu.addItem(item => item.setTitle('查词').setIcon('book-open').onClick(() => {
+		menu.addItem(item => item.setTitle(t('解释')).setIcon('message-circle-question').onClick(() => void this.#runAiTask('explain')))
+		menu.addItem(item => item.setTitle(t('翻译')).setIcon('languages').onClick(() => void this.#runAiTask('translate')))
+		menu.addItem(item => item.setTitle(t('摘要')).setIcon('align-left').onClick(() => void this.#runAiTask('summarize')))
+		menu.addItem(item => item.setTitle(t('查词')).setIcon('book-open').onClick(() => {
 			const pending = this.pending
 			if (!pending) return
 			this.#openWordLookup(pending.text, `txt:${pending.start}-${pending.end}`, this.#chapterAt(pending.start))
@@ -1977,8 +1978,8 @@ export class TextView extends ItemView implements ReaderEngine {
 		bar.dataset.barOpen = open ? '1' : '0'
 		const handle = this.mobileToolbarHandle
 		if (handle) {
-			handle.setText(open ? '收起' : '工具栏')
-			handle.setAttribute('aria-label', open ? '收起阅读工具栏' : '展开阅读工具栏')
+			handle.setText(open ? t('收起') : t('工具栏'))
+			handle.setAttribute('aria-label', open ? t('收起阅读工具栏') : t('展开阅读工具栏'))
 		}
 		bar.style.setProperty('transform', 'translateY(0)', 'important')
 		if (open) bar.scrollLeft = 0
@@ -2006,7 +2007,7 @@ export class TextView extends ItemView implements ReaderEngine {
 			onEditComment: () => this.#editComment(a),
 			onChangeColor: color => this.#changeColor(a, color),
 			onCopyText: () => {
-				void navigator.clipboard.writeText(a.text).then(() => new Notice('Grove Reader：已复制'))
+				void navigator.clipboard.writeText(a.text).then(() => new Notice(t('Grove Reader：已复制')))
 			},
 			onDelete: () => this.#confirmDelete(a),
 			onMakeCard: () => void this.plugin.exportQuoteCard(this, a.id),
@@ -2019,7 +2020,7 @@ export class TextView extends ItemView implements ReaderEngine {
 	async #createHighlight(color: string): Promise<void> {
 		const pending = this.pending
 		if (!pending) {
-			new Notice('Grove Reader：请先在正文中划选文字')
+			new Notice(t('Grove Reader：请先在正文中划选文字'))
 			return
 		}
 		if (!this.data) return
@@ -2054,7 +2055,7 @@ export class TextView extends ItemView implements ReaderEngine {
 	async #commentOnSelection(): Promise<void> {
 		const pending = this.pending
 		if (!pending) {
-			new Notice('Grove Reader：请先在正文中划选文字')
+			new Notice(t('Grove Reader：请先在正文中划选文字'))
 			return
 		}
 		if (!this.data) return
@@ -2117,7 +2118,7 @@ export class TextView extends ItemView implements ReaderEngine {
 		this.#scheduleSave(true)
 		this.#renderPage()
 		this.#renderSidebar()
-		new Notice('Grove Reader：批注已删除（历史备份仍保留在插件数据目录中）')
+		new Notice(t('Grove Reader：批注已删除（历史备份仍保留在插件数据目录中）'))
 	}
 
 	#setSelectMode(on: boolean): void {
@@ -2199,11 +2200,11 @@ export class TextView extends ItemView implements ReaderEngine {
 		this.annListEl.empty()
 		this.annItemEls.clear()
 		if (!all.length) {
-			this.annListEl.createDiv('grove-ann-empty').setText('暂无批注。在正文中划选文字即可添加高亮与评论。')
+			this.annListEl.createDiv('grove-ann-empty').setText(t('暂无批注。在正文中划选文字即可添加高亮与评论。'))
 			return
 		}
 		if (!filtered.length) {
-			this.annListEl.createDiv('grove-ann-empty').setText('没有匹配的批注。')
+			this.annListEl.createDiv('grove-ann-empty').setText(t('没有匹配的批注。'))
 			return
 		}
 
@@ -2276,21 +2277,21 @@ export class TextView extends ItemView implements ReaderEngine {
 
 		const jump = actions.createEl('button', {
 			cls: 'clickable-icon grove-mini-btn',
-			attr: { 'aria-label': '跳转到原文' },
+			attr: { 'aria-label': t('跳转到原文') },
 		})
 		setIcon(jump, 'arrow-up-left')
 		jump.addEventListener('click', () => this.jumpTo(a.cfi, { text: a.text, chapter: a.chapter }))
 
 		const edit = actions.createEl('button', {
 			cls: 'clickable-icon grove-mini-btn',
-			attr: { 'aria-label': '编辑评论' },
+			attr: { 'aria-label': t('编辑评论') },
 		})
 		setIcon(edit, 'message-square')
 		edit.addEventListener('click', () => this.#editComment(a))
 
 		const del = actions.createEl('button', {
 			cls: 'clickable-icon grove-mini-btn',
-			attr: { 'aria-label': '删除批注' },
+			attr: { 'aria-label': t('删除批注') },
 		})
 		setIcon(del, 'trash-2')
 		del.addEventListener('click', () => this.#confirmDelete(a))
@@ -2326,7 +2327,7 @@ export class TextView extends ItemView implements ReaderEngine {
 				this.#jumpToOffset(offset, undefined, false)
 				return
 			}
-			new Notice('Grove Reader：找不到原句（文件可能换了版本），先停在当前位置')
+			new Notice(t('Grove Reader：找不到原句（文件可能换了版本），先停在当前位置'))
 			return
 		}
 		if (range) this.#jumpToOffset(range.start, ann?.id, false)

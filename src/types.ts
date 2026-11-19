@@ -336,6 +336,8 @@ export interface GroveSettings {
 	hiddenBooks: string[]
 	/** 调试模式：把关键事件写入 data/debug.log（默认关） */
 	debugMode: boolean
+	/** 界面语言：auto = 跟随 Obsidian，zh = 中文，en = English */
+	uiLocale: 'auto' | 'zh' | 'en'
 	/** 自动备份：off / daily / weekly */
 	autoBackup: 'off' | 'daily' | 'weekly'
 	/** 上次自动备份的时间戳（毫秒） */
@@ -452,6 +454,7 @@ export const DEFAULT_SETTINGS: GroveSettings = {
 	scanFolders: [],
 	hiddenBooks: [],
 	debugMode: false,
+	uiLocale: 'auto',
 	autoBackup: 'off',
 	lastAutoBackupAt: 0,
 	dailyGoalMinutes: 30,

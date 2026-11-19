@@ -1,4 +1,5 @@
-import { FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, TFile, TFolder, WorkspaceLeaf, addIcon, normalizePath, setIcon } from 'obsidian'
+import { FileSystemAdapter, MarkdownView, Notice, Platform, Plugin, TFile, TFolder, WorkspaceLeaf, addIcon, getLanguage, normalizePath, setIcon } from 'obsidian'
+import { applyLocale, t } from './i18n'
 import { BookStore } from './store'
 import { ShelfCache } from './bookshelf'
 import { ListsStore } from './lists'
@@ -108,6 +109,7 @@ export default class GroveReaderPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		await this.loadSettings()
+		applyLocale(this.settings.uiLocale, getLanguage())
 		this.applyEinkMode()
 		for (const option of LOGO_OPTIONS) {
 			if (option.icon) addIcon(`grove-logo-${option.id}`, option.icon)
@@ -136,7 +138,7 @@ export default class GroveReaderPlugin extends Plugin {
 			.purgeExpired()
 			.then(purged => {
 				if (!purged) return
-				this.oplog?.add('回收站清理', `自动清理 ${purged} 项`)
+				this.oplog?.add(t('回收站清理'), `自动清理 ${purged} 项`)
 				this.debug('trash', 'purge expired', { count: purged })
 			})
 			.catch(() => {
@@ -146,13 +148,13 @@ export default class GroveReaderPlugin extends Plugin {
 		await this.store.preload()
 		let lastSaveErrorAt = 0
 		this.store.onError = e => {
-			console.error('[Grove Reader] 批注数据保存失败', e)
-			this.oplog?.add('批注保存失败', e instanceof Error ? e.message : String(e))
+			console.error(t('[Grove Reader] 批注数据保存失败'), e)
+			this.oplog?.add(t('批注保存失败'), e instanceof Error ? e.message : String(e))
 			this.debug('store', 'save error', e instanceof Error ? e.message : String(e))
 			const now = Date.now()
 			if (now - lastSaveErrorAt > 30_000) {
 				lastSaveErrorAt = now
-				new Notice('Grove Reader：批注数据保存失败（文件可能被 iCloud/杀软锁定），稍后会自动重试')
+				new Notice(t('Grove Reader：批注数据保存失败（文件可能被 iCloud/杀软锁定），稍后会自动重试'))
 			}
 		}
 		this.shelfCache = new ShelfCache(this.dataRoot, io)
@@ -195,8 +197,11 @@ export default class GroveReaderPlugin extends Plugin {
 		this.registerView(VIEW_TYPE_GROVE_BOOKSHELF, leaf => new BookshelfView(leaf, this))
 		this.registerView(VIEW_TYPE_GROVE_TEXT, leaf => new TextView(leaf, this))
 		// PDF 视图：桌面走本地文件的 range 读取，手机退化为整文件读入内存（大文件会拒绝）
-		const { PdfView } = await import('./pdfView')
-		this.registerView(VIEW_TYPE_GROVE_PDF, leaf => new PdfView(leaf, this))
+		// 社区版不含 PDF：pdfjs 运行时资源无法随目录安装分发，这里不注册视图。
+		if (!__COMMUNITY_BUILD__) {
+			const { PdfView } = await import('./pdfView')
+			this.registerView(VIEW_TYPE_GROVE_PDF, leaf => new PdfView(leaf, this))
+		}
 		// 注册扩展名：电子书文件会显示在文件列表中，点击直接用阅读器打开
 		// 注意：pdf 不注册——保持 Obsidian 原生双击行为，PDF 经书架/协议进入插件
 		this.registerExtensions(SUPPORTED_BOOK_EXTS, VIEW_TYPE_GROVE_READER)
@@ -243,7 +248,7 @@ export default class GroveReaderPlugin extends Plugin {
 		this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
 			if (file instanceof TFile && file.extension.toLowerCase() === 'txt') {
 				menu.addItem(item =>
-					item.setTitle('用 Grove Reader 打开（自动识别编码）')
+					item.setTitle(t('用 Grove Reader 打开（自动识别编码）'))
 						.setIcon('book-open')
 						.onClick(() => void this.#openTextBook(file.path)))
 			}
@@ -432,7 +437,7 @@ export default class GroveReaderPlugin extends Plugin {
 		this.shelfCache.saveNow()
 		this.lists.saveNow()
 		this.stats.saveNow()
-		this.oplog.add('数据体检清理', `移除失效引用 ${removed} 项`)
+		this.oplog.add(t('数据体检清理'), `移除失效引用 ${removed} 项`)
 		this.debug('health', 'cleanup', { removed })
 		this.refreshShelfViews()
 		new Notice(`${APP_NAME}：已清理 ${removed} 项失效引用`)
@@ -478,7 +483,7 @@ export default class GroveReaderPlugin extends Plugin {
 		this.settings.hiddenBooks = (this.settings.hiddenBooks ?? []).filter(p => p !== entry.bookPath)
 		await this.saveSettings()
 		this.refreshShelfViews()
-		this.oplog.add('恢复回收站', `《${entry.title}》`)
+		this.oplog.add(t('恢复回收站'), `《${entry.title}》`)
 		this.debug('trash', 'restore', { id, bookPath: entry.bookPath })
 		new Notice(`${APP_NAME}：已恢复《${entry.title}》`)
 	}
@@ -487,7 +492,7 @@ export default class GroveReaderPlugin extends Plugin {
 		if (!this.trash) return
 		const entry = (await this.trash.list()).find(e => e.id === id)
 		await this.trash.purge(id)
-		this.oplog.add('回收站永久删除', entry ? `《${entry.title}》` : id)
+		this.oplog.add(t('回收站永久删除'), entry ? `《${entry.title}》` : id)
 		this.debug('trash', 'purge', { id })
 		new Notice(`${APP_NAME}：已永久删除`)
 	}
@@ -495,7 +500,7 @@ export default class GroveReaderPlugin extends Plugin {
 	async emptyTrash(): Promise<void> {
 		if (!this.trash) return
 		const count = await this.trash.empty()
-		this.oplog.add('清空回收站', `${count} 项`)
+		this.oplog.add(t('清空回收站'), `${count} 项`)
 		this.debug('trash', 'empty', { count })
 		new Notice(`${APP_NAME}：已清空回收站（${count} 项）`)
 	}
@@ -569,7 +574,7 @@ export default class GroveReaderPlugin extends Plugin {
 			return
 		}
 		const now = Date.now()
-		const bookLabel = scope ? (scope.title ? (scope.title.startsWith('《') ? scope.title : `《${scope.title}》`) : '本书') : ''
+		const bookLabel = scope ? (scope.title ? (scope.title.startsWith('《') ? scope.title : `《${scope.title}》`) : t('本书')) : ''
 		const all = this.reviewCandidates()
 		const candidates = scope ? all.filter(i => i.bookPath === scope.bookPath) : all
 		if (scope && !candidates.length) {
@@ -605,7 +610,7 @@ export default class GroveReaderPlugin extends Plugin {
 			queue,
 			dailyCap: scope ? 0 : cap,
 			reviewedToday: scope ? 0 : stats.today,
-			scopeTitle: scope ? (scope.title || '本书') : undefined,
+			scopeTitle: scope ? (scope.title || t('本书')) : undefined,
 		}, {
 			onGrade: (item, grade) => this.gradeReviewItem(item, grade),
 			onJump: item => void this.openBookByPath(item.bookPath, item.annotation.cfi),
@@ -689,9 +694,9 @@ export default class GroveReaderPlugin extends Plugin {
 		}
 		new DangerConfirmModal(
 			this.app,
-			'清空全部复习排期',
+			t('清空全部复习排期'),
 			`将清除 ${scheduled} 条划线的复习进度（到期日、间隔、难度）。划线、评论和笔记都不动；清完它们会重新按「旧划线」进入队列。`,
-			'清空',
+			t('清空'),
 			() => {
 				const now = Date.now()
 				let cleared = 0
@@ -707,7 +712,7 @@ export default class GroveReaderPlugin extends Plugin {
 					}
 					if (changed) this.store.save(data)
 				}
-				this.oplog.add('清空复习排期', `${cleared} 条`)
+				this.oplog.add(t('清空复习排期'), `${cleared} 条`)
 				this.refreshShelfReviewBadges()
 				new Notice(`${APP_NAME}：已清空 ${cleared} 条复习排期`)
 			},
@@ -719,7 +724,7 @@ export default class GroveReaderPlugin extends Plugin {
 		data.bookmarks = (data.bookmarks ?? []).filter(b => b.id !== row.bookmark.id)
 		this.store.save(data)
 		this.refreshNoteForBook(row.bookPath)
-		new Notice(`${APP_NAME}：已删除书签「${row.bookmark.label || '未命名位置'}」`)
+		new Notice(`${APP_NAME}：已删除书签「${row.bookmark.label || t('未命名位置')}」`)
 	}
 
 	loadSearchIndex(): SearchDoc[] {
@@ -758,7 +763,7 @@ export default class GroveReaderPlugin extends Plugin {
 			const existing = this.app.vault.getAbstractFileByPath(path)
 			if (existing instanceof TFile) await this.app.vault.modify(existing, content)
 			else await this.app.vault.create(path, content)
-			this.oplog.add('生成书架 Base', path)
+			this.oplog.add(t('生成书架 Base'), path)
 			new Notice(`${APP_NAME}：已生成 ${path}（重新生成会覆盖）`)
 		} catch (e) {
 			new Notice(`${APP_NAME}：生成书架 Base 失败（${e instanceof Error ? e.message : String(e)}）`)
@@ -799,7 +804,7 @@ export default class GroveReaderPlugin extends Plugin {
 				return
 			}
 		}
-		this.oplog.add('导出批注检索', `${docs.length} 条 → ${target}`)
+		this.oplog.add(t('导出批注检索'), `${docs.length} 条 → ${target}`)
 		this.debug('search', 'export', { count: docs.length, target, format })
 		new Notice(`${APP_NAME}：已导出 ${docs.length} 条到 ${target}`)
 	}
@@ -815,7 +820,7 @@ export default class GroveReaderPlugin extends Plugin {
 		const changed = adoptMigratedFolders({ vaultBase: this.vaultBase, settings: this.settings })
 		if (!changed) return
 		void this.saveSettings()
-		console.log('[Grove Reader] 已自动接管迁移后的书库目录')
+		console.log(t('[Grove Reader] 已自动接管迁移后的书库目录'))
 		this.debug('adopt', 'switched settings to current library root', { root: LIBRARY_ROOT })
 	}
 
@@ -960,14 +965,14 @@ export default class GroveReaderPlugin extends Plugin {
 		const s = this.settings
 		const cfg = { baseUrl: s.aiBaseUrl ?? '', apiKey: s.aiApiKey ?? '', model: s.aiModel ?? '' }
 		if (!isAiConfigured(cfg)) {
-			new Notice('Grove Reader：还没有配置 AI。设置 → 阅读 → AI 解释 里填入接口地址与 API Key', 8000)
+			new Notice(t('Grove Reader：还没有配置 AI。设置 → 阅读 → AI 解释 里填入接口地址与 API Key'), 8000)
 			return
 		}
 		const entries = this.shelfCache.entries()
 			.filter(([path]) => isShelfExt((path.split('.').pop() ?? '').toLowerCase()))
 			.slice(0, 60)
 		if (!entries.length) {
-			new Notice('Grove Reader：书架还没有书，先添加扫描文件夹或导入书籍')
+			new Notice(t('Grove Reader：书架还没有书，先添加扫描文件夹或导入书籍'))
 			return
 		}
 		new ConfirmModal(
@@ -1000,7 +1005,7 @@ export default class GroveReaderPlugin extends Plugin {
 						const end = answer.lastIndexOf(']')
 						groups = JSON.parse(answer.slice(start, end + 1)) as typeof groups
 					} catch {
-						new Notice('Grove Reader：AI 返回的内容不是可识别的 JSON，换本模型再试')
+						new Notice(t('Grove Reader：AI 返回的内容不是可识别的 JSON，换本模型再试'))
 						return
 					}
 					let assigned = 0
@@ -1018,10 +1023,10 @@ export default class GroveReaderPlugin extends Plugin {
 						}
 					}
 					if (!assigned) {
-						new Notice('Grove Reader：AI 没有给出可用的分组')
+						new Notice(t('Grove Reader：AI 没有给出可用的分组'))
 						return
 					}
-					this.oplog.add('AI 整理书单', `${created} 个书单 / ${assigned} 本书`)
+					this.oplog.add(t('AI 整理书单'), `${created} 个书单 / ${assigned} 本书`)
 					new Notice(`Grove Reader：已整理出 ${created} 个书单，归入 ${assigned} 本书`)
 					for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_BOOKSHELF)) {
 						const view = leaf.view
@@ -1029,7 +1034,7 @@ export default class GroveReaderPlugin extends Plugin {
 					}
 				})()
 			},
-			'开始整理',
+			t('开始整理'),
 			'mod-cta',
 		).open()
 	}
@@ -1103,7 +1108,7 @@ export default class GroveReaderPlugin extends Plugin {
 				const markdown = await this.#composeNoteMarkdown(data, existing, false, true)
 				if (markdown !== existing) await this.app.vault.modify(file, markdown)
 			} catch (e) {
-				console.error('[Grove Reader] 刷新阅读笔记失败', e)
+				console.error(t('[Grove Reader] 刷新阅读笔记失败'), e)
 			}
 		})()
 	}
@@ -1145,7 +1150,7 @@ export default class GroveReaderPlugin extends Plugin {
 		this.settings.hiddenBooks = []
 		await this.saveSettings()
 		this.refreshShelfViews()
-		this.oplog.add('恢复隐藏书籍', `${count} 本`)
+		this.oplog.add(t('恢复隐藏书籍'), `${count} 本`)
 		new Notice(`${APP_NAME}：已恢复 ${count} 本`)
 	}
 
@@ -1157,13 +1162,13 @@ export default class GroveReaderPlugin extends Plugin {
 			new Notice(`${APP_NAME}：这本书还没有批注`)
 			return
 		}
-		const title = data.title || bookPath.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || '这本书'
-		const openHint = this.hasOpenBookView(bookPath) ? ' 当前有打开的阅读窗口，清空后会自动关闭它。' : ''
+		const title = data.title || bookPath.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || t('这本书')
+		const openHint = this.hasOpenBookView(bookPath) ? t(' 当前有打开的阅读窗口，清空后会自动关闭它。') : ''
 		new DangerConfirmModal(
 			this.app,
-			'清空本书批注',
+			t('清空本书批注'),
 			`将删除《${title}》的 ${count} 条批注与评论；阅读位置会保留。${openHint}`,
-			'清空',
+			t('清空'),
 			() => {
 				const closed = this.closeBookViews(bookPath)
 				const finish = (): void => {
@@ -1173,7 +1178,7 @@ export default class GroveReaderPlugin extends Plugin {
 					this.store.save(fresh)
 					this.refreshNoteForBook(bookPath)
 					this.refreshShelfViews()
-					this.oplog.add('清空批注', `《${title}》；${count} 条`)
+					this.oplog.add(t('清空批注'), `《${title}》；${count} 条`)
 					this.debug('annotations', 'clear', { bookPath, count })
 					new Notice(`已清空 ${count} 条批注`)
 				}
@@ -1188,7 +1193,7 @@ export default class GroveReaderPlugin extends Plugin {
 			.getFiles()
 			.filter(f => isShelfExt(f.extension))
 		if (!books.length) {
-			new Notice('Grove Reader：库中没有找到电子书文件（支持 epub / mobi / azw3 / fb2 / cbz，PDF 也可选）')
+			new Notice(t('Grove Reader：库中没有找到电子书文件（支持 epub / mobi / azw3 / fb2 / cbz，PDF 也可选）'))
 			return
 		}
 		new BookPickerModal(this.app, file => void this.openBook(file)).open()
@@ -1259,6 +1264,11 @@ export default class GroveReaderPlugin extends Plugin {
 
 	/** 在 Grove Reader 内打开 PDF（专用视图：渲染 + 文字层划选批注） */
 	async #openPdfBook(bookPath: string, cfi?: string, fallback?: GroveLinkTarget): Promise<void> {
+		if (__COMMUNITY_BUILD__) {
+			new Notice(t('Grove Reader 社区版不含 PDF 阅读，已改用系统默认程序打开。完整版请从 GitHub Release 安装。'))
+			await this.#openWithNativeViewer(bookPath)
+			return
+		}
 		const existing = this.app.workspace
 			.getLeavesOfType(VIEW_TYPE_GROVE_PDF)
 			.find(leaf => this.#isPdfView(leaf.view) && leaf.view.bookPath === bookPath)
@@ -1284,7 +1294,7 @@ export default class GroveReaderPlugin extends Plugin {
 				// 运行时 API，未收录进官方类型定义
 				;(this.app as unknown as { openWithDefaultApp(path: string): void }).openWithDefaultApp(bookPath)
 			} catch (e) {
-				console.error('[Grove Reader] 打开外部文件失败', e)
+				console.error(t('[Grove Reader] 打开外部文件失败'), e)
 				new Notice(`Grove Reader：请在文件管理器中打开该文件（${bookPath}）`)
 			}
 			return
@@ -1303,12 +1313,12 @@ export default class GroveReaderPlugin extends Plugin {
 
 	private async openByBookId(bookId: string, cfi: string): Promise<void> {
 		if (!bookId) {
-			new Notice('Grove Reader：链接缺少书籍信息')
+			new Notice(t('Grove Reader：链接缺少书籍信息'))
 			return
 		}
 		const bookPath = this.store.getPathForBookId(bookId)
 		if (!bookPath) {
-			new Notice('Grove Reader：找不到该链接对应的书籍数据')
+			new Notice(t('Grove Reader：找不到该链接对应的书籍数据'))
 			return
 		}
 		await this.openBookByPath(bookPath, cfi || undefined)
@@ -1394,7 +1404,7 @@ export default class GroveReaderPlugin extends Plugin {
 				const pend = this.#pendingGroveLink
 				if (!pend) return
 				this.#pendingGroveLink = null
-				this.debug('link', 'file-open 未到达，兜底直接打开')
+				this.debug('link', t('file-open 未到达，兜底直接打开'))
 				pend.open()
 			}, 900)
 			this.#pendingGroveLink = { path, open, timer }
@@ -1425,13 +1435,13 @@ export default class GroveReaderPlugin extends Plugin {
 			const leaf = leaves.find(l => l.view.containerEl.contains(span))
 			const view = leaf?.view as MarkdownView | undefined
 			if (!view?.editor) {
-				this.debug('link', 'LP 反查：找不到所属 markdown leaf')
+				this.debug('link', t('LP 反查：找不到所属 markdown leaf'))
 				return null
 			}
 			// editor.cm 是 CM6 的 EditorView，官方 API 没收录，只能按运行时形状取
 			const cm = (view.editor as unknown as { cm?: { posAtDOM(node: Node, offset?: number): number } }).cm
 			if (!cm?.posAtDOM) {
-				this.debug('link', 'LP 反查：editor.cm 不可用')
+				this.debug('link', t('LP 反查：editor.cm 不可用'))
 				return null
 			}
 			const pos = cm.posAtDOM(span, 0)
@@ -1444,7 +1454,7 @@ export default class GroveReaderPlugin extends Plugin {
 			for (let i = from; i <= to; i++) lines.push(view.editor.getLine(i) ?? '')
 			const text = lines.join('\n')
 			const cursor = lines.slice(0, at.line - from).reduce((n, line) => n + line.length + 1, 0) + at.ch
-			this.debug('link', 'LP 反查', { line: at.line, ch: at.ch, from, to, text: text.slice(0, 80) })
+			this.debug('link', t('LP 反查'), { line: at.line, ch: at.ch, from, to, text: text.slice(0, 80) })
 			const re = /\[\[([^[\]]+)\]\]/g
 			for (let m = re.exec(text); m; m = re.exec(text)) {
 				const start = m.index
@@ -1453,7 +1463,7 @@ export default class GroveReaderPlugin extends Plugin {
 			}
 			return null
 		} catch (e) {
-			this.debug('link', 'LP 反查异常', e instanceof Error ? e.message : String(e))
+			this.debug('link', t('LP 反查异常'), e instanceof Error ? e.message : String(e))
 			return null
 		}
 	}
@@ -1577,7 +1587,7 @@ export default class GroveReaderPlugin extends Plugin {
 			this.pdfWorkerBlobUrl = URL.createObjectURL(new Blob([buf], { type: 'text/javascript' }))
 			return this.pdfWorkerBlobUrl
 		} catch (e) {
-			console.warn('[Grove Reader] 读取 pdf.worker 失败，退回资源路径', e)
+			console.warn(t('[Grove Reader] 读取 pdf.worker 失败，退回资源路径'), e)
 			return direct
 		}
 	}
@@ -1614,7 +1624,7 @@ export default class GroveReaderPlugin extends Plugin {
 		const notePath = data.notePath
 		const file = notePath ? this.app.vault.getAbstractFileByPath(notePath) : null
 		if (!(file instanceof TFile)) {
-			new Notice('Grove Reader：这本书还没有生成阅读笔记')
+			new Notice(t('Grove Reader：这本书还没有生成阅读笔记'))
 			return
 		}
 		await this.app.workspace.getLeaf('tab').openFile(file)
@@ -1627,22 +1637,22 @@ export default class GroveReaderPlugin extends Plugin {
 	private registerCommands(): void {
 		this.addCommand({
 			id: 'open-bookshelf',
-			name: '打开书架',
+			name: t('打开书架'),
 			callback: () => void this.openBookshelf(),
 		})
 		this.addCommand({
 			id: 'open-book',
-			name: '打开书籍…',
+			name: t('打开书籍…'),
 			callback: () => this.openPicker(),
 		})
 		this.addCommand({
 			id: 'next-page',
-			name: '下一页',
+			name: t('下一页'),
 			checkCallback: checking => this.withAnyReader(checking, v => v.nextPage()),
 		})
 		this.addCommand({
 			id: 'prev-page',
-			name: '上一页',
+			name: t('上一页'),
 			checkCallback: checking => this.withAnyReader(checking, v => v.prevPage()),
 		})
 		for (const c of HIGHLIGHT_COLORS) {
@@ -1654,57 +1664,57 @@ export default class GroveReaderPlugin extends Plugin {
 		}
 		this.addCommand({
 			id: 'add-comment',
-			name: '评论当前划选',
+			name: t('评论当前划选'),
 			checkCallback: checking => this.withAnyReader(checking, v => v.comment()),
 		})
 		this.addCommand({
 			id: 'stop-tts',
-			name: '停止朗读',
+			name: t('停止朗读'),
 			checkCallback: checking => this.withAnyReader(checking, v => v.stopTts?.()),
 		})
 		this.addCommand({
 			id: 'toggle-sidebar',
-			name: '收起 / 展开批注栏',
+			name: t('收起 / 展开批注栏'),
 			checkCallback: checking => this.withAnyReader(checking, v => v.toggleSidebar?.()),
 		})
 		this.addCommand({
 			id: 'clear-book-annotations',
-			name: '清空当前书籍的全部批注',
+			name: t('清空当前书籍的全部批注'),
 			checkCallback: checking => this.withAnyReader(checking, v => this.clearAnnotationsFor(v.bookPath)),
 		})
 		this.addCommand({
 			id: 'generate-note',
-			name: '生成 / 更新阅读笔记',
+			name: t('生成 / 更新阅读笔记'),
 			checkCallback: checking => this.withAnyReader(checking, v => this.generateNoteFor(v)),
 		})
 		this.addCommand({
 			id: 'book-ask',
-			name: '问这本书（AI 全书问答）',
+			name: t('问这本书（AI 全书问答）'),
 			checkCallback: checking => this.withAnyReader(checking, v => new BookAskModal(this.app, this, v).open()),
 		})
 		this.addCommand({
 			id: 'book-guide',
-			name: '按章导读（AI 逐章摘要）',
+			name: t('按章导读（AI 逐章摘要）'),
 			checkCallback: checking => this.withAnyReader(checking, v => new GuideModal(this.app, this, v).open()),
 		})
 		this.addCommand({
 			id: 'multi-book-ask',
-			name: '多书一起问（跨书 AI 问答）',
+			name: t('多书一起问（跨书 AI 问答）'),
 			callback: () => new MultiBookAskModal(this.app, this).open(),
 		})
 		this.addCommand({
 			id: 'theme-lists',
-			name: 'AI 按主题整理书单',
+			name: t('AI 按主题整理书单'),
 			callback: () => this.organizeThemeLists(),
 		})
 		this.addCommand({
 			id: 'toggle-immersive',
-			name: '切换沉浸阅读（隐藏工具栏 / 侧栏）',
+			name: t('切换沉浸阅读（隐藏工具栏 / 侧栏）'),
 			callback: () => this.toggleImmersive(),
 		})
 		this.addCommand({
 			id: 'rescan-bookshelf',
-			name: '重新扫描书架',
+			name: t('重新扫描书架'),
 			callback: () => {
 				const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_BOOKSHELF)
 				if (!leaves.length) {
@@ -1719,87 +1729,87 @@ export default class GroveReaderPlugin extends Plugin {
 		})
 		this.addCommand({
 			id: 'view-oplog',
-			name: '查看操作记录',
+			name: t('查看操作记录'),
 			callback: () => new OpLogModal(this.app, this.oplog.list()).open(),
 		})
 		this.addCommand({
 			id: 'search-annotations',
-			name: '全局搜索批注',
+			name: t('全局搜索批注'),
 			callback: () => this.showSearch(),
 		})
 		this.addCommand({
 			id: 'import-highlights',
-			name: '导入外部标注…',
+			name: t('导入外部标注…'),
 			callback: () => new ImportHighlightsModal(this.app, this).open(),
 		})
 		this.addCommand({
 			id: 'generate-shelf-base',
-			name: '生成书架 Base（.base 卡片墙）',
+			name: t('生成书架 Base（.base 卡片墙）'),
 			callback: () => void this.generateShelfBase(),
 		})
 		this.addCommand({
 			id: 'choose-note-template',
-			name: '选择当前书的笔记模板',
+			name: t('选择当前书的笔记模板'),
 			checkCallback: checking => this.withAnyReader(checking, v => this.showTemplatePicker(v.bookPath)),
 		})
 		this.addCommand({
 			id: 'migrate-data-folder',
-			name: '迁移数据文件夹…',
+			name: t('迁移数据文件夹…'),
 			callback: () => this.promptMigrateDataFolder(),
 		})
 		this.addCommand({
 			id: 'search-library-fulltext',
-			name: '全库搜索（正文，含 PDF）',
+			name: t('全库搜索（正文，含 PDF）'),
 			callback: () => new LibrarySearchModal(this.app, this).open(),
 		})
 		this.addCommand({
 			id: 'search-current-book-fulltext',
-			name: '搜索当前书全文',
+			name: t('搜索当前书全文'),
 			checkCallback: checking => this.withAnyReader(checking, v => {
 				if (v instanceof TextView) {
-					new PromptModal(this.app, '搜索当前书全文', '输入关键词，在当前书正文里搜索', query => v.searchFullText(query)).open()
+					new PromptModal(this.app, t('搜索当前书全文'), t('输入关键词，在当前书正文里搜索'), query => v.searchFullText(query)).open()
 					return
 				}
 				if (!(v instanceof ReaderView)) {
 					new Notice(`${APP_NAME}：PDF 请用阅读器内的全文搜索`)
 					return
 				}
-				new PromptModal(this.app, '搜索当前书全文', '输入关键词，在当前书正文里搜索', query => v.searchFullText(query)).open()
+				new PromptModal(this.app, t('搜索当前书全文'), t('输入关键词，在当前书正文里搜索'), query => v.searchFullText(query)).open()
 			}),
 		})
 		this.addCommand({
 			id: 'export-annotations-canvas',
-			name: '把批注发送到 Canvas…',
+			name: t('把批注发送到 Canvas…'),
 			checkCallback: checking => this.withAnyReader(checking, v => void this.exportToCanvas(v)),
 		})
 		this.addCommand({
 			id: 'refresh-all-notes',
-			name: '刷新全部阅读笔记（补齐统计字段）',
+			name: t('刷新全部阅读笔记（补齐统计字段）'),
 			callback: () => void this.refreshAllNotes(),
 		})
 		this.addCommand({
 			id: 'sync-note-to-annotations',
-			name: '从笔记同步批注…',
+			name: t('从笔记同步批注…'),
 			checkCallback: checking => this.withAnyReader(checking, v => void this.openNoteSync(v)),
 		})
 		this.addCommand({
 			id: 'open-trash',
-			name: '打开回收站',
+			name: t('打开回收站'),
 			callback: () => this.showTrash(),
 		})
 		this.addCommand({
 			id: 'health-check',
-			name: '运行数据体检',
+			name: t('运行数据体检'),
 			callback: () => this.showHealthReport(),
 		})
 		this.addCommand({
 			id: 'open-debug-log',
-			name: '打开调试日志',
+			name: t('打开调试日志'),
 			callback: () => void this.openDebugLog(),
 		})
 		this.addCommand({
 			id: 'clear-debug-log',
-			name: '清空调试日志',
+			name: t('清空调试日志'),
 			callback: () => {
 				this.debugLog.clear()
 				new Notice(`${APP_NAME}：调试日志已清空`)
@@ -1807,42 +1817,42 @@ export default class GroveReaderPlugin extends Plugin {
 		})
 		this.addCommand({
 			id: 'restore-hidden-books',
-			name: '恢复从书架移除的书籍',
+			name: t('恢复从书架移除的书籍'),
 			callback: () => void this.restoreHiddenBooks(),
 		})
 		this.addCommand({
 			id: 'regenerate-usage-doc',
-			name: '重新生成使用指南',
+			name: t('重新生成使用指南'),
 			callback: () => this.confirmRegenerateUsageDoc(),
 		})
 		this.addCommand({
 			id: 'backup-data',
-			name: '备份批注数据到库内',
+			name: t('备份批注数据到库内'),
 			callback: () => void this.exportDataBackup(),
 		})
 		this.addCommand({
 			id: 'global-bookmarks',
-			name: '全局书签',
+			name: t('全局书签'),
 			callback: () => this.openGlobalBookmarks(),
 		})
 		this.addCommand({
 			id: 'review-queue',
-			name: '今日复习（间隔重复）',
+			name: t('今日复习（间隔重复）'),
 			callback: () => this.openReview(),
 		})
 		this.addCommand({
 			id: 'review-this-book',
-			name: '复习本书（间隔重复）',
+			name: t('复习本书（间隔重复）'),
 			checkCallback: checking => this.withAnyReader(checking, v => this.openReview({ bookPath: v.bookPath, title: v.bookTitle })),
 		})
 		this.addCommand({
 			id: 'reset-review',
-			name: '清空全部复习排期',
+			name: t('清空全部复习排期'),
 			callback: () => this.resetReviewSchedule(),
 		})
 		this.addCommand({
 			id: 'reading-stats',
-			name: '阅读统计',
+			name: t('阅读统计'),
 			callback: () => new ReadingStatsModal(this.app, this).open(),
 		})
 	}
@@ -1852,7 +1862,7 @@ export default class GroveReaderPlugin extends Plugin {
 		const data = view.snapshot()
 		const a = data?.annotations.find(x => x.id === annotationId)
 		if (!data || !a) {
-			new Notice('Grove Reader：找不到这条批注')
+			new Notice(t('Grove Reader：找不到这条批注'))
 			return
 		}
 		let canvas: HTMLCanvasElement
@@ -1860,7 +1870,7 @@ export default class GroveReaderPlugin extends Plugin {
 			canvas = renderQuoteCard({
 				text: a.text,
 				note: a.note,
-				bookTitle: data.title || '未命名',
+				bookTitle: data.title || t('未命名'),
 				author: data.author,
 				chapter: a.chapter,
 				color: a.color,
@@ -1871,12 +1881,12 @@ export default class GroveReaderPlugin extends Plugin {
 		}
 		const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
 		if (!blob) {
-			new Notice('Grove Reader：生成书摘卡失败（导出图片为空）')
+			new Notice(t('Grove Reader：生成书摘卡失败（导出图片为空）'))
 			return
 		}
 		const folder = normalizePath(`${LIBRARY_ROOT}/书摘卡`)
 		if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder)
-		let path = normalizePath(`${folder}/${sanitizeFileName(quoteCardFileName(data.title || '未命名', Date.now()))}`)
+		let path = normalizePath(`${folder}/${sanitizeFileName(quoteCardFileName(data.title || t('未命名'), Date.now()))}`)
 		// 同一秒内连续生成同名卡片时加序号，别让用户看到「保存失败」
 		if (this.app.vault.getAbstractFileByPath(path)) {
 			const base = path.replace(/\.png$/i, '')
@@ -1901,12 +1911,12 @@ export default class GroveReaderPlugin extends Plugin {
 	async exportToCanvas(view: ReaderEngine, ids?: string[]): Promise<void> {
 		const data = view.snapshot()
 		if (!data) {
-			new Notice('Grove Reader：当前没有已打开的书籍')
+			new Notice(t('Grove Reader：当前没有已打开的书籍'))
 			return
 		}
 		const list = ids?.length ? data.annotations.filter(a => ids.includes(a.id)) : data.annotations
 		if (!list.length) {
-			new Notice('Grove Reader：这本书还没有批注')
+			new Notice(t('Grove Reader：这本书还没有批注'))
 			return
 		}
 		const canvases = this.app.vault
@@ -1914,7 +1924,7 @@ export default class GroveReaderPlugin extends Plugin {
 			.filter(f => f.extension === 'canvas')
 			.map(f => ({ path: f.path, name: f.basename }))
 			.sort((a, b) => a.name.localeCompare(b.name))
-		const title = data.title || '未命名'
+		const title = data.title || t('未命名')
 		new CanvasExportModal(this.app, title, list, canvases, sanitizeFileName(`${title} - 批注`), payload =>
 			void this.#writeCanvas(data, list, payload),
 		).open()
@@ -1931,7 +1941,7 @@ export default class GroveReaderPlugin extends Plugin {
 		const specOf = (a: (typeof picked)[number]): CardSpec => ({
 			text: buildCardText(
 				a as never,
-				data.title || '未命名',
+				data.title || t('未命名'),
 				noteFile ? `[[${noteFile.path}#^grove-${a.id}|打开笔记]]` : undefined,
 			),
 			color: canvasColor(a.color),
@@ -1942,7 +1952,7 @@ export default class GroveReaderPlugin extends Plugin {
 			const map = new Map<string, CardSpec[]>()
 			for (const a of picked) {
 				const key = groupBy === 'chapter'
-					? ((a.chapter ?? '').trim() || '未分章')
+					? ((a.chapter ?? '').trim() || t('未分章'))
 					: colorName(a.color)
 				const list = map.get(key) ?? []
 				list.push(specOf(a))
@@ -1959,7 +1969,7 @@ export default class GroveReaderPlugin extends Plugin {
 		if (target) {
 			const file = this.app.vault.getAbstractFileByPath(target)
 			if (!(file instanceof TFile)) {
-				new Notice('Grove Reader：目标画布已不存在')
+				new Notice(t('Grove Reader：目标画布已不存在'))
 				return
 			}
 			const existing = await this.app.vault.read(file)
@@ -1967,7 +1977,7 @@ export default class GroveReaderPlugin extends Plugin {
 			try {
 				doc = parseCanvas(existing)
 			} catch {
-				new Notice('Grove Reader：目标不是有效的 Canvas 文件，未做修改')
+				new Notice(t('Grove Reader：目标不是有效的 Canvas 文件，未做修改'))
 				return
 			}
 			written = appendCardWall(doc, groups, wall).cards
@@ -1975,9 +1985,9 @@ export default class GroveReaderPlugin extends Plugin {
 		} else {
 			const folder = normalizePath(`${LIBRARY_ROOT}/画布`)
 			if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder)
-			target = normalizePath(`${folder}/${sanitizeFileName(payload.name || '批注画布')}.canvas`)
+			target = normalizePath(`${folder}/${sanitizeFileName(payload.name || t('批注画布'))}.canvas`)
 			if (this.app.vault.getAbstractFileByPath(target)) {
-				new Notice('Grove Reader：同名画布已存在，请换个名字')
+				new Notice(t('Grove Reader：同名画布已存在，请换个名字'))
 				return
 			}
 			const doc = emptyCanvas()
@@ -1998,14 +2008,14 @@ export default class GroveReaderPlugin extends Plugin {
 			if (file) targets.push({ data, file })
 		}
 		if (!targets.length) {
-			new Notice('Grove Reader：没有找到已生成的阅读笔记')
+			new Notice(t('Grove Reader：没有找到已生成的阅读笔记'))
 			return
 		}
 		new ConfirmModal(
 			this.app,
 			`将刷新 ${targets.length} 份阅读笔记的生成区：区间外的手写内容保留，笔记里有未回写改动的会跳过。`,
 			() => void this.#applyRefreshAll(targets),
-			'开始刷新',
+			t('开始刷新'),
 			'mod-cta',
 		).open()
 	}
@@ -2031,7 +2041,7 @@ export default class GroveReaderPlugin extends Plugin {
 				ok++
 			} catch (e) {
 				failed++
-				console.error('[Grove Reader] 刷新笔记失败', file.path, e)
+				console.error(t('[Grove Reader] 刷新笔记失败'), file.path, e)
 			}
 		}
 		new Notice(
@@ -2092,15 +2102,15 @@ export default class GroveReaderPlugin extends Plugin {
 	async openNoteSync(view: ReaderEngine): Promise<void> {
 		const data = view.snapshot()
 		if (!data) {
-			new Notice('Grove Reader：当前没有已打开的书籍')
+			new Notice(t('Grove Reader：当前没有已打开的书籍'))
 			return
 		}
 		const file = this.#noteFileFor(data)
 		if (!file) {
 			new Notice(
 				data.notePath
-					? 'Grove Reader：没找到这本书的阅读笔记（可能被移动或改名），请重新生成阅读笔记'
-					: 'Grove Reader：这本书还没有阅读笔记，先生成一份再回写',
+					? t('Grove Reader：没找到这本书的阅读笔记（可能被移动或改名），请重新生成阅读笔记')
+					: t('Grove Reader：这本书还没有阅读笔记，先生成一份再回写'),
 			)
 			return
 		}
@@ -2114,7 +2124,7 @@ export default class GroveReaderPlugin extends Plugin {
 			new Notice(
 				plan.missing.length
 					? `Grove Reader：笔记里没有这 ${plan.missing.length} 条批注的改动，未做任何修改`
-					: 'Grove Reader：笔记与批注一致，没有需要回写的改动',
+					: t('Grove Reader：笔记与批注一致，没有需要回写的改动'),
 			)
 			return
 		}
@@ -2122,7 +2132,7 @@ export default class GroveReaderPlugin extends Plugin {
 			const n = applySync(data, changes)
 			this.store.save(data)
 			view.refreshAnnotations()
-			this.oplog.add('从笔记回写批注', `《${data.title || data.bookPath}》 ${n} 项`)
+			this.oplog.add(t('从笔记回写批注'), `《${data.title || data.bookPath}》 ${n} 项`)
 			new Notice(`Grove Reader：已从笔记回写 ${n} 项，笔记未改动`)
 		}).open()
 	}
@@ -2130,7 +2140,7 @@ export default class GroveReaderPlugin extends Plugin {
 	async generateNoteFor(view: ReaderEngine): Promise<void> {
 		const data = view.snapshot()
 		if (!data) {
-			new Notice('Grove Reader：当前没有已打开的书籍')
+			new Notice(t('Grove Reader：当前没有已打开的书籍'))
 			return
 		}
 		const folder = normalizePath(this.settings.notesFolder?.trim() || '阅读笔记')
@@ -2138,7 +2148,7 @@ export default class GroveReaderPlugin extends Plugin {
 
 		const bookName = data.title
 			|| data.bookPath.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '')
-			|| '未命名'
+			|| t('未命名')
 		const fileName = `${sanitizeFileName(bookName)} - 阅读笔记.md`
 
 		let noteFile: TFile | null = null
@@ -2187,8 +2197,8 @@ export default class GroveReaderPlugin extends Plugin {
 						const moved = this.app.vault.getAbstractFileByPath(targetPath)
 						if (moved instanceof TFile) noteFile = moved
 					} catch (e) {
-						console.error('[Grove Reader] 迁移笔记到新文件夹失败', e)
-						new Notice('Grove Reader：笔记无法移动到新文件夹，将在原位置继续更新')
+						console.error(t('[Grove Reader] 迁移笔记到新文件夹失败'), e)
+						new Notice(t('Grove Reader：笔记无法移动到新文件夹，将在原位置继续更新'))
 					}
 				}
 			}
@@ -2240,7 +2250,7 @@ export default class GroveReaderPlugin extends Plugin {
 			const moved = this.app.vault.getAbstractFileByPath(targetPath)
 			return moved instanceof TFile ? moved : file
 		} catch (e) {
-			console.error('[Grove Reader] 笔记跟随书名清洗改名失败', e)
+			console.error(t('[Grove Reader] 笔记跟随书名清洗改名失败'), e)
 			return file
 		}
 	}
@@ -2254,7 +2264,7 @@ export default class GroveReaderPlugin extends Plugin {
 		const stat = this.stats.book(data.bookPath)
 		const status = data.readingStatus
 			? READING_STATUS_LABELS[data.readingStatus]
-			: progress >= 99 ? '读完' : progress > 0 ? '在读' : '想读'
+			: progress >= 99 ? t('读完') : progress > 0 ? t('在读') : t('想读')
 		// 阅读统计按本地日期分桶：最早一天是开始读，最后一天在「读完」时当作完成日
 		const days = Object.keys(stat.days ?? {}).sort()
 		// 封面写进 frontmatter，Bases 卡片视图才能取到图；数据目录在库外时双链无效，留空
@@ -2306,8 +2316,8 @@ export default class GroveReaderPlugin extends Plugin {
 			try {
 				renderNoteTemplate(template, buildTemplateContext(data, bookIdFor(data.bookPath), link))
 			} catch (e) {
-				console.error('[Grove Reader] 笔记模板解析失败', e)
-				if (announce) new Notice('Grove Reader：笔记模板解析失败，本次使用默认模板')
+				console.error(t('[Grove Reader] 笔记模板解析失败'), e)
+				if (announce) new Notice(t('Grove Reader：笔记模板解析失败，本次使用默认模板'))
 				template = null
 			}
 		}
@@ -2345,7 +2355,7 @@ export default class GroveReaderPlugin extends Plugin {
 			if (pending.entries > 0 && pending.changes.length > 0) {
 				if (!this.pendingNoteEdits.has(synced.path)) {
 					this.pendingNoteEdits.add(synced.path)
-					new Notice('Grove Reader：笔记里有未回写的改动，已跳过自动更新（用「从笔记同步批注…」写回）')
+					new Notice(t('Grove Reader：笔记里有未回写的改动，已跳过自动更新（用「从笔记同步批注…」写回）'))
 				}
 				return
 			}
@@ -2364,7 +2374,7 @@ export default class GroveReaderPlugin extends Plugin {
 			const markdown = await this.#composeNoteMarkdown(data, existing, false)
 			if (markdown !== existing) await this.app.vault.modify(synced, markdown)
 		} catch (e) {
-			console.error('[Grove Reader] 自动更新笔记失败', e)
+			console.error(t('[Grove Reader] 自动更新笔记失败'), e)
 		}
 	}
 
@@ -2405,7 +2415,7 @@ export default class GroveReaderPlugin extends Plugin {
 		try {
 			await this.app.vault.create(path, usageDocMarkdown())
 		} catch (e) {
-			console.error('[Grove Reader] 使用指南创建失败', e)
+			console.error(t('[Grove Reader] 使用指南创建失败'), e)
 		}
 	}
 
@@ -2416,7 +2426,7 @@ export default class GroveReaderPlugin extends Plugin {
 		if (!(f instanceof TFile)) {
 			await this.ensureFolderOf(tplPath)
 			f = await this.app.vault.create(tplPath, DEFAULT_NOTE_TEMPLATE)
-			new Notice('Grove Reader：已创建笔记模板文件，可直接编辑')
+			new Notice(t('Grove Reader：已创建笔记模板文件，可直接编辑'))
 		}
 		if (f instanceof TFile) await this.app.workspace.getLeaf('tab').openFile(f)
 	}
@@ -2427,7 +2437,7 @@ export default class GroveReaderPlugin extends Plugin {
 		if (list.length) return list
 		return [{
 			id: 'legacy',
-			name: '默认模板',
+			name: t('默认模板'),
 			path: this.settings.noteTemplatePath?.trim() || DEFAULT_TEMPLATE_PATH,
 		}]
 	}
@@ -2457,8 +2467,8 @@ export default class GroveReaderPlugin extends Plugin {
 		else delete data.templateId
 		this.store.save(data)
 		const tpl = this.templateList().find(t => t.id === templateId)
-		const label = templateId ? (tpl?.name ?? '未知模板') : '跟随默认'
-		this.oplog.add('切换笔记模板', `《${data.title || bookPath}》 → ${label}`)
+		const label = templateId ? (tpl?.name ?? t('未知模板')) : t('跟随默认')
+		this.oplog.add(t('切换笔记模板'), `《${data.title || bookPath}》 → ${label}`)
 		this.debug('template', 'set', { bookPath, templateId })
 		this.refreshNoteForBook(bookPath)
 		new Notice(`${APP_NAME}：笔记模板已切换为「${label}」`)
@@ -2467,7 +2477,7 @@ export default class GroveReaderPlugin extends Plugin {
 	promptMigrateDataFolder(): void {
 		new FolderPromptModal(
 			this.app,
-			'迁移数据文件夹',
+			t('迁移数据文件夹'),
 			this.settings.dataFolder?.trim() || 'Grove Reader',
 			async value => this.migrateDataFolder(value),
 		).open()
@@ -2507,7 +2517,7 @@ export default class GroveReaderPlugin extends Plugin {
 						const result = await migrateDataFolder(this.io, sourceRoot, targetRoot)
 						this.settings.dataFolder = folder
 						await this.saveSettings()
-						this.oplog.add('迁移数据文件夹', `${sourceRoot} → ${targetRoot}；${result.books} 份批注`)
+						this.oplog.add(t('迁移数据文件夹'), `${sourceRoot} → ${targetRoot}；${result.books} 份批注`)
 						this.debug('data', 'migrate', { from: sourceRoot, to: targetRoot, files: result.files, books: result.books })
 						new Notice(`${APP_NAME}：已复制 ${result.files} 个文件。请重启 Obsidian 生效；旧数据确认无误后再删。`)
 					} catch (e) {
@@ -2529,7 +2539,7 @@ export default class GroveReaderPlugin extends Plugin {
 
 	/** 覆盖前确认：使用指南可能被用户改过 */
 	confirmRegenerateUsageDoc(): void {
-		new ConfirmModal(this.app, '重新生成会覆盖当前使用指南，包括你在里面手写的内容。继续？', () => {
+		new ConfirmModal(this.app, t('重新生成会覆盖当前使用指南，包括你在里面手写的内容。继续？'), () => {
 			void this.regenerateUsageDoc()
 		}).open()
 	}
@@ -2576,11 +2586,11 @@ export default class GroveReaderPlugin extends Plugin {
 				new Notice(`Grove Reader：目标文件夹「${rel}」里已有同名文件，为避免误删已中止。请换一个空文件夹，或清空后重试`)
 				return
 			}
-			this.oplog?.add('备份数据', `${result.bookCount} 本书；库内「${rel}」`)
+			this.oplog?.add(t('备份数据'), `${result.bookCount} 本书；库内「${rel}」`)
 			this.debug('backup', 'export', { rel, bookCount: result.bookCount })
 			new Notice(`Grove Reader：已备份 ${result.bookCount} 本书的批注数据到库内「${rel}」${result.extra}`)
 		} catch (e) {
-			console.error('[Grove Reader] 备份批注数据失败', e)
+			console.error(t('[Grove Reader] 备份批注数据失败'), e)
 			new Notice(`Grove Reader：备份失败（${e instanceof Error ? e.message : String(e)}）`)
 		}
 	}
@@ -2624,7 +2634,7 @@ export default class GroveReaderPlugin extends Plugin {
 		this.settings.shelfDisplay = Object.assign({}, DEFAULT_SHELF_DISPLAY, data.shelfDisplay ?? {})
 		if (!Array.isArray(this.settings.scanFolders)) {
 			// 首次使用：默认扫描库内的「书籍」文件夹
-			this.settings.scanFolders = ['书籍']
+			this.settings.scanFolders = [t('书籍')]
 		}
 	}
 

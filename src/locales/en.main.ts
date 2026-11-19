@@ -1,0 +1,138 @@
+/** 命令、通知与主流程文案（英文）。键为中文原文。 */
+export const EN_MAIN: Record<string, string> = {
+	// —— 命令名 ——
+	'打开书籍…': 'Open book…',
+	'打开书架': 'Open bookshelf',
+	'生成 / 更新阅读笔记': 'Generate / update reading note',
+	'从笔记同步批注…': 'Sync annotations from the note…',
+	'从笔记回写批注': 'Write annotations back from the note',
+	'把批注发送到 Canvas…': 'Send annotations to Canvas…',
+	'问这本书（AI 全书问答）': 'Ask this book (AI Q&A)',
+	'多书一起问（跨书 AI 问答）': 'Ask several books (cross-book AI Q&A)',
+	'按章导读（AI 逐章摘要）': 'Chapter guide (AI summary per chapter)',
+	'AI 整理书单': 'Organise reading list with AI',
+	'AI 按主题整理书单': 'Organise a reading list by theme with AI',
+	'今日复习（间隔重复）': 'Review today (spaced repetition)',
+	'复习本书（间隔重复）': 'Review this book (spaced repetition)',
+	'清空全部复习排期': 'Clear every review schedule',
+	'清空复习排期': 'Clear review schedule',
+	'全局搜索批注': 'Search annotations globally',
+	'全局书签': 'Global bookmarks',
+	'导出批注检索': 'Export annotation search',
+	'全库搜索（正文，含 PDF）': 'Vault-wide search (text, including PDF)',
+	'搜索当前书全文': 'Search the current book',
+	'导入外部标注…': 'Import external highlights…',
+	'切换沉浸阅读（隐藏工具栏 / 侧栏）': 'Toggle immersive reading (hide toolbar / sidebar)',
+	'收起 / 展开批注栏': 'Collapse / expand annotations panel',
+	'评论当前划选': 'Comment on the selection',
+	'停止朗读': 'Stop reading aloud',
+	'打开回收站': 'Open trash',
+	'恢复回收站': 'Restore from trash',
+	'清空回收站': 'Empty trash',
+	'回收站清理': 'Trash cleanup',
+	'回收站永久删除': 'Permanently delete from trash',
+	'恢复隐藏书籍': 'Restore hidden books',
+	'恢复从书架移除的书籍': 'Restore books removed from the shelf',
+	'重新扫描书架': 'Rescan shelf',
+	'运行数据体检': 'Run data health check',
+	'数据体检清理': 'Data health cleanup',
+	'打开调试日志': 'Open debug log',
+	'清空调试日志': 'Clear debug log',
+	'查看操作记录': 'View action log',
+	'备份数据': 'Back up data',
+	'生成书架 Base': 'Generate shelf Base',
+	'生成书架 Base（.base 卡片墙）': 'Generate shelf Base (.base card wall)',
+	'刷新全部阅读笔记（补齐统计字段）': 'Refresh all reading notes (fill in stats fields)',
+	'重新生成使用指南': 'Regenerate user guide',
+	'迁移数据文件夹': 'Migrate data folder',
+	'迁移数据文件夹…': 'Migrate data folder…',
+	'选择当前书的笔记模板': "Choose this book's note template",
+	'切换笔记模板': 'Switch note template',
+	'清空本书批注': "Clear this book's annotations",
+	'清空当前书籍的全部批注': 'Clear all annotations in the current book',
+	'用 Grove Reader 打开（自动识别编码）': 'Open with Grove Reader (detects encoding)',
+	'开始刷新': 'Start refreshing',
+	'开始整理': 'Start organising',
+
+	// —— 状态与标签 ——
+	'在读': 'Reading',
+	'想读': 'Want to read',
+	'读完': 'Finished',
+	'本书': 'This book',
+	'这本书': 'This book',
+	'书籍': 'Books',
+	'跟随默认': 'Use default',
+	'未分章': 'Untitled chapter',
+	'未命名': 'Untitled',
+	'未命名位置': 'Unnamed location',
+	'未知模板': 'Unknown template',
+	'上一页': 'Previous page',
+	'下一页': 'Next page',
+	'批注画布': 'Annotation canvas',
+	'输入关键词，在当前书正文里搜索': 'Enter a keyword to search the current book',
+	' 当前有打开的阅读窗口，清空后会自动关闭它。': ' A book is open; clearing will close it.',
+
+	// —— 通知 ——
+	'Grove Reader：书架还没有书，先添加扫描文件夹或导入书籍':
+		'Grove Reader: the shelf is empty. Add a scan folder or import a book first.',
+	'Grove Reader：库中没有找到电子书文件（支持 epub / mobi / azw3 / fb2 / cbz，PDF 也可选）':
+		'Grove Reader: no e-book files found in the vault (epub / mobi / azw3 / fb2 / cbz; PDF is optional)',
+	'Grove Reader：当前没有已打开的书籍': 'Grove Reader: no book is open',
+	'Grove Reader：找不到该链接对应的书籍数据': 'Grove Reader: no book data matches that link',
+	'Grove Reader：链接缺少书籍信息': 'Grove Reader: the link is missing book information',
+	'Grove Reader：找不到这条批注': 'Grove Reader: annotation not found',
+	'Grove Reader：这本书还没有批注': 'Grove Reader: this book has no annotations yet',
+	'Grove Reader：这本书还没有生成阅读笔记': 'Grove Reader: no reading note has been generated for this book',
+	'Grove Reader：这本书还没有阅读笔记，先生成一份再回写':
+		'Grove Reader: this book has no reading note yet. Generate one before writing back.',
+	'Grove Reader：没有找到已生成的阅读笔记': 'Grove Reader: no generated reading note found',
+	'Grove Reader：没找到这本书的阅读笔记（可能被移动或改名），请重新生成阅读笔记':
+		"Grove Reader: could not find this book's reading note (it may have been moved or renamed). Generate it again.",
+	'Grove Reader：笔记与批注一致，没有需要回写的改动':
+		'Grove Reader: note and annotations already match, nothing to write back',
+	'Grove Reader：笔记里有未回写的改动，已跳过自动更新（用「从笔记同步批注…」写回）':
+		'Grove Reader: the note has unsaved edits, so automatic updating was skipped (write them back with "Sync annotations from the note…").',
+	'Grove Reader：笔记模板解析失败，本次使用默认模板':
+		'Grove Reader: failed to parse the note template, using the default one',
+	'Grove Reader：笔记无法移动到新文件夹，将在原位置继续更新':
+		'Grove Reader: the note could not be moved to the new folder and will keep updating in place',
+	'Grove Reader：已创建笔记模板文件，可直接编辑':
+		'Grove Reader: note template file created — you can edit it now',
+	'Grove Reader：批注数据保存失败（文件可能被 iCloud/杀软锁定），稍后会自动重试':
+		'Grove Reader: failed to save annotation data (the file may be locked by iCloud or antivirus). Retrying automatically.',
+	'Grove Reader：目标画布已不存在': 'Grove Reader: the target canvas no longer exists',
+	'Grove Reader：目标不是有效的 Canvas 文件，未做修改':
+		'Grove Reader: the target is not a valid Canvas file; nothing was changed',
+	'Grove Reader：同名画布已存在，请换个名字':
+		'Grove Reader: a canvas with that name already exists. Pick another name.',
+	'Grove Reader：生成书摘卡失败（导出图片为空）':
+		'Grove Reader: failed to create the excerpt card (exported image was empty)',
+	'Grove Reader：还没有配置 AI。设置 → 阅读 → AI 解释 里填入接口地址与 API Key':
+		'Grove Reader: AI is not configured yet. Fill in the endpoint and API key under Settings → Reading → AI explanation.',
+	'Grove Reader：AI 返回的内容不是可识别的 JSON，换本模型再试':
+		'Grove Reader: the AI response was not valid JSON. Try another model.',
+	'Grove Reader：AI 没有给出可用的分组': 'Grove Reader: the AI did not return usable groups',
+	'重新生成会覆盖当前使用指南，包括你在里面手写的内容。继续？':
+		'Regenerating replaces the current user guide, including anything you wrote in it. Continue?',
+	'批注保存失败': 'Failed to save the annotation',
+	'file-open 未到达，兜底直接打开': 'file-open did not arrive; opening directly as a fallback',
+	'LP 反查': 'LP reverse lookup',
+	'LP 反查异常': 'LP reverse lookup error',
+	'LP 反查：editor.cm 不可用': 'LP reverse lookup: editor.cm unavailable',
+	'LP 反查：找不到所属 markdown leaf': 'LP reverse lookup: owning markdown leaf not found',
+
+	// —— 错误日志 ——
+	'[Grove Reader] 备份批注数据失败': '[Grove Reader] Failed to back up annotation data',
+	'[Grove Reader] 笔记跟随书名清洗改名失败': '[Grove Reader] Failed to rename the note after the title was cleaned',
+	'[Grove Reader] 笔记模板解析失败': '[Grove Reader] Failed to parse the note template',
+	'[Grove Reader] 打开外部文件失败': '[Grove Reader] Failed to open the external file',
+	'[Grove Reader] 读取 pdf.worker 失败，退回资源路径': '[Grove Reader] Failed to read pdf.worker; falling back to the resource path',
+	'[Grove Reader] 批注数据保存失败': '[Grove Reader] Failed to save annotation data',
+	'[Grove Reader] 迁移笔记到新文件夹失败': '[Grove Reader] Failed to move notes to the new folder',
+	'[Grove Reader] 使用指南创建失败': '[Grove Reader] Failed to create the user guide',
+	'[Grove Reader] 刷新笔记失败': '[Grove Reader] Failed to refresh the note',
+	'[Grove Reader] 刷新阅读笔记失败': '[Grove Reader] Failed to refresh the reading note',
+	'[Grove Reader] 已自动接管迁移后的书库目录': '[Grove Reader] Adopted the migrated library folder',
+	'[Grove Reader] 自动更新笔记失败': '[Grove Reader] Failed to update the note automatically',
+	"Grove Reader 社区版不含 PDF 阅读，已改用系统默认程序打开。完整版请从 GitHub Release 安装。": "Grove Reader: PDF reading is not included in the community build. Opening it with the system default app instead — install the full build from GitHub Releases for in-app PDF reading.",
+}

@@ -18,6 +18,7 @@ import {
 import { confirmAsync } from './modals'
 import { MultiBookAskModal } from './multiBookAskModal'
 import { sanitizeFileName } from './util'
+import { t } from './i18n'
 
 type AskView = ReaderEngine
 
@@ -29,7 +30,7 @@ interface AskExchange {
 }
 
 const NOT_CONFIGURED =
-	'还没有配置 AI。请到 设置 → 阅读 → AI 解释 填入接口地址、模型与 API Key（推荐智谱 GLM-4-Flash，免费）'
+	t('还没有配置 AI。请到 设置 → 阅读 → AI 解释 填入接口地址、模型与 API Key（推荐智谱 GLM-4-Flash，免费）')
 
 /**
  * AI 全书问答（压缩要点版）：
@@ -88,47 +89,47 @@ export class BookAskModal extends Modal {
 		const head = root.createDiv('grove-ask-head')
 		const icon = head.createSpan('grove-ask-icon')
 		setIcon(icon, 'sparkles')
-		head.createSpan('grove-ask-title').setText('AI 全书问答')
-		head.createSpan('grove-ask-book').setText(this.view.bookTitle || '未命名')
+		head.createSpan('grove-ask-title').setText(t('AI 全书问答'))
+		head.createSpan('grove-ask-book').setText(this.view.bookTitle || t('未命名'))
 
 		const status = root.createDiv('grove-ask-status')
-		if (!this.loaded) status.setText('正在读取索引…')
-		else if (!this.portrait) status.setText('尚未建立索引。建立后会按约 6000 字一段生成要点，提问时先检索要点再回答。')
+		if (!this.loaded) status.setText(t('正在读取索引…'))
+		else if (!this.portrait) status.setText(t('尚未建立索引。建立后会按约 6000 字一段生成要点，提问时先检索要点再回答。'))
 		else {
 			const when = new Date(this.portrait.updatedAt || this.portrait.createdAt)
 				.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-			const state = this.portrait.status === 'ready' ? '' : '（上次未完成）'
+			const state = this.portrait.status === 'ready' ? '' : t('（上次未完成）')
 			status.setText(`已建立 ${this.portrait.chunks.length} 段要点${state} · 更新于 ${when}`)
 		}
 
 		const actions = root.createDiv('grove-ask-actions')
 		const resumable = this.portrait?.status === 'partial' && this.portrait.chunks.length > 0
 		const build = actions.createEl('button', {
-			text: this.portrait ? (resumable ? '继续建立' : '重建索引') : '建立索引',
+			text: this.portrait ? (resumable ? t('继续建立') : t('重建索引')) : t('建立索引'),
 			cls: 'mod-cta',
 		})
 		build.disabled = this.building || !this.loaded
 		build.addEventListener('click', () => void this.#buildIndex())
 		if (this.portrait) {
-			const del = actions.createEl('button', { text: '删除索引' })
+			const del = actions.createEl('button', { text: t('删除索引') })
 			del.disabled = this.building
 			del.addEventListener('click', () => void this.#deleteIndex())
 		}
-		const multi = actions.createEl('button', { text: '多书一起问…' })
+		const multi = actions.createEl('button', { text: t('多书一起问…') })
 		multi.disabled = this.building
 		multi.addEventListener('click', () => new MultiBookAskModal(this.app, this.plugin).open())
 		if (this.building) {
-			const cancel = actions.createEl('button', { text: '取消', cls: 'mod-warning' })
+			const cancel = actions.createEl('button', { text: t('取消'), cls: 'mod-warning' })
 			cancel.addEventListener('click', () => {
 				this.buildToken++
 				this.building = false
 				this.progress = ''
 				this.#render()
-				new Notice('Grove Reader：已取消，下次点「继续建立」可接着生成')
+				new Notice(t('Grove Reader：已取消，下次点「继续建立」可接着生成'))
 			})
 		}
 		this.progressEl = root.createDiv('grove-ask-progress')
-		this.progressEl.setText(this.building ? this.progress || '准备中…' : '')
+		this.progressEl.setText(this.building ? this.progress || t('准备中…') : '')
 
 		if (!isAiConfigured(this.#cfg)) {
 			root.createDiv('grove-ask-hint').setText(NOT_CONFIGURED)
@@ -137,7 +138,7 @@ export class BookAskModal extends Modal {
 		const askRow = root.createDiv('grove-ask-input-row')
 		const input = askRow.createEl('textarea', {
 			cls: 'grove-ask-input',
-			attr: { rows: '2', placeholder: '针对这本书提问，例如：作者的核心观点是什么？' },
+			attr: { rows: '2', placeholder: t('针对这本书提问，例如：作者的核心观点是什么？') },
 		})
 		input.value = this.question
 		input.addEventListener('input', () => {
@@ -149,17 +150,17 @@ export class BookAskModal extends Modal {
 				void this.#ask()
 			}
 		})
-		const ask = askRow.createEl('button', { text: this.asking ? '思考中…' : '提问', cls: 'mod-cta' })
+		const ask = askRow.createEl('button', { text: this.asking ? t('思考中…') : t('提问'), cls: 'mod-cta' })
 		ask.disabled = this.asking || this.building || !this.portrait?.chunks.length
 		ask.addEventListener('click', () => void this.#ask())
 
 		if (this.exchanges.length) {
 			const tools = root.createDiv('grove-ask-tools')
 			tools.createSpan('grove-ask-tools-label').setText(`已进行 ${this.exchanges.length} 轮问答`)
-			const save = tools.createEl('button', { text: '存为笔记' })
+			const save = tools.createEl('button', { text: t('存为笔记') })
 			save.disabled = this.asking
 			save.addEventListener('click', () => void this.#saveConversation())
-			const clear = tools.createEl('button', { text: '清空对话' })
+			const clear = tools.createEl('button', { text: t('清空对话') })
 			clear.disabled = this.asking
 			clear.addEventListener('click', () => {
 				this.askToken++
@@ -180,19 +181,19 @@ export class BookAskModal extends Modal {
 			}
 			if (exchange.refs.length) {
 				const refs = block.createDiv('grove-ask-refs')
-				refs.createSpan('grove-ask-refs-label').setText('参考')
+				refs.createSpan('grove-ask-refs-label').setText(t('参考'))
 				for (const ref of exchange.refs) {
 					const chip = refs.createSpan('grove-ask-ref')
-					chip.setText(ref.chapter || '正文')
+					chip.setText(ref.chapter || t('正文'))
 					chip.setAttribute('title', ref.summary)
 				}
 			}
 		}
 		if (this.asking) {
-			answer.createDiv('grove-ask-loading').setText('正在检索要点并生成回答…')
+			answer.createDiv('grove-ask-loading').setText(t('正在检索要点并生成回答…'))
 		} else if (this.loaded && this.portrait?.chunks.length && !this.exchanges.length) {
 			answer.createDiv('grove-ask-empty').setText(
-				'索引已就绪，输入问题后按「提问」（Ctrl+Enter 也可以）。之后可以接着追问，前面几轮对话会一并带上。',
+				t('索引已就绪，输入问题后按「提问」（Ctrl+Enter 也可以）。之后可以接着追问，前面几轮对话会一并带上。'),
 			)
 		}
 	}
@@ -213,7 +214,7 @@ export class BookAskModal extends Modal {
 		this.exchanges = []
 		this.#render()
 		try {
-			this.#updateProgress('正在读取正文…')
+			this.#updateProgress(t('正在读取正文…'))
 			const extract = (this.view as unknown as {
 				extractAiSections: (cb?: (done: number, total: number) => void) => Promise<SourceSection[]>
 			}).extractAiSections
@@ -222,21 +223,21 @@ export class BookAskModal extends Modal {
 			})
 			if (token !== this.buildToken) return
 			if (!sections.length) {
-				new Notice('Grove Reader：没有提取到正文文字（扫描版 PDF 可能没有文字层）')
+				new Notice(t('Grove Reader：没有提取到正文文字（扫描版 PDF 可能没有文字层）'))
 				return
 			}
 			const chunks = chunkSections(sections)
 			if (!chunks.length) {
-				new Notice('Grove Reader：正文太短，没有可建立索引的内容')
+				new Notice(t('Grove Reader：正文太短，没有可建立索引的内容'))
 				return
 			}
 			const reuse = resumableChunks(this.portrait, chunks)
 			const remaining = chunks.length - reuse.length
-			const title = this.view.bookTitle || '未命名'
+			const title = this.view.bookTitle || t('未命名')
 			const message = reuse.length
 				? `《${title}》共 ${chunks.length} 段，上次已完成 ${reuse.length} 段；继续生成剩余 ${remaining} 段（约 ${remaining} 次 AI 请求，使用你自己的 API Key）。继续吗？`
 				: `将为《${title}》建立 ${chunks.length} 段要点（约 ${chunks.length} 次 AI 请求，使用你自己的 API Key）。继续吗？`
-			const ok = await confirmAsync(this.app, message, reuse.length ? '继续建立' : '开始建立')
+			const ok = await confirmAsync(this.app, message, reuse.length ? t('继续建立') : t('开始建立'))
 			if (!ok || token !== this.buildToken) return
 			const now = Date.now()
 			const doc: PortraitDoc = reuse.length
@@ -301,11 +302,11 @@ export class BookAskModal extends Modal {
 	async #ask(): Promise<void> {
 		const question = this.question.trim()
 		if (!question) {
-			new Notice('Grove Reader：先输入问题')
+			new Notice(t('Grove Reader：先输入问题'))
 			return
 		}
 		if (!this.portrait?.chunks.length) {
-			new Notice('Grove Reader：先建立全书要点索引')
+			new Notice(t('Grove Reader：先建立全书要点索引'))
 			return
 		}
 		const cfg = this.#cfg
@@ -325,7 +326,7 @@ export class BookAskModal extends Modal {
 		this.#render()
 		this.answerEl?.scrollIntoView({ block: 'nearest' })
 		try {
-			const answer = await answerBookQuestion(cfg, this.view.bookTitle || '未命名', question, refs, history)
+			const answer = await answerBookQuestion(cfg, this.view.bookTitle || t('未命名'), question, refs, history)
 			if (token !== this.askToken) return
 			this.exchanges.push({ question, answer, refs })
 		} catch (e) {
@@ -344,7 +345,7 @@ export class BookAskModal extends Modal {
 	/** 把当前对话整段落成一篇 Markdown 笔记，放在「笔记文件夹/AI 问答」下 */
 	async #saveConversation(): Promise<void> {
 		if (!this.exchanges.length) return
-		const title = this.view.bookTitle || '未命名'
+		const title = this.view.bookTitle || t('未命名')
 		const base = (this.plugin.settings.notesFolder?.trim() || '阅读笔记').replace(/\\/g, '/').replace(/\/+$/, '')
 		const folder = normalizePath(`${base}/AI 问答`)
 		try {
@@ -369,7 +370,7 @@ export class BookAskModal extends Modal {
 			`book-path: "${this.view.bookPath.replace(/"/g, "'")}"`,
 			`created: ${now.toISOString()}`,
 			'tags:',
-			'  - 阅读/AI问答',
+			t('  - 阅读/AI问答'),
 			'---',
 			'',
 			`# 《${title}》AI 问答`,
@@ -383,7 +384,7 @@ export class BookAskModal extends Modal {
 			lines.push(exchange.answer.trim())
 			lines.push('')
 			if (exchange.refs.length) {
-				const chapters = [...new Set(exchange.refs.map(ref => ref.chapter || '正文'))]
+				const chapters = [...new Set(exchange.refs.map(ref => ref.chapter || t('正文')))]
 				lines.push(`参考：${chapters.join('、')}`)
 				lines.push('')
 			}
@@ -400,12 +401,12 @@ export class BookAskModal extends Modal {
 
 	async #deleteIndex(): Promise<void> {
 		if (!this.portrait) return
-		const ok = await confirmAsync(this.app, '删除这本书的要点索引？下次提问前需要重新建立。', '删除')
+		const ok = await confirmAsync(this.app, t('删除这本书的要点索引？下次提问前需要重新建立。'), t('删除'))
 		if (!ok) return
 		await removePortrait(this.plugin.io, this.plugin.getDataRoot(), this.#bookId)
 		this.portrait = null
 		this.exchanges = []
 		this.#render()
-		new Notice('Grove Reader：已删除要点索引')
+		new Notice(t('Grove Reader：已删除要点索引'))
 	}
 }

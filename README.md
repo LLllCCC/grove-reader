@@ -26,6 +26,30 @@
 
 没有内置任何遥测、统计或远程配置。API Key 只存在本库的插件配置里，不会发往上述接口以外的地址。
 
+## 界面语言
+
+设置 → 外观 → 界面语言，可选 **跟随 Obsidian / 中文 / English**。默认跟随 Obsidian 的界面语言；切换后重新打开视图或重启 Obsidian 全部生效（已注册的命令名在重启前仍是旧语言）。
+
+英文词条按模块放在 `src/locales/en.*.ts`，以中文原文作键；漏译的条目自动回落中文，不会出现空白或 `undefined`。新增文案时用 `t('中文')` 包起来即可，插值写成 `t('共 {n} 本书', { n })`。
+
+## 桌面与移动端
+
+`manifest.json` 里 `isDesktopOnly` 为 `false`，插件可以在手机上加载。原因是所有 Node 内置模块都隔离在 `src/desktopFs.ts`，只在桌面端通过动态 `import()` 载入：
+
+- `main.ts`：`if (!this.isMobile) this.desktopFs = await import('./desktopFs')`
+- `platformFactory.ts` / `platformIO.ts`：按平台选择 `vault.adapter` 或桌面文件系统
+
+移动端永远不会执行 `require('node:fs')`，加载阶段不会因为这个崩溃。移动端读写库内文件统一走 `vault.adapter`；绝对路径、跨库导入等桌面专属能力在手机上自动隐藏。
+
+## 两种构建
+
+| 构建 | 命令 | 含 PDF | 用途 |
+| --- | --- | --- | --- |
+| 完整版 | `npm run build` | 是 | GitHub Release、自用部署 |
+| 社区版 | `npm run build:community` | 否 | 提交 Obsidian 官方目录 |
+
+社区版通过 `GROVE_COMMUNITY=1` 注入 `__COMMUNITY_BUILD__` 常量：不注册 PDF 视图、PDF 正文提取直接返回空，打开 PDF 时提示改用系统默认程序。原因是目录安装只分发 `main.js` / `manifest.json` / `styles.css`，`pdfjs/` 那 5.9 MB 运行时资源（wasm / cmaps / standard_fonts / worker）无法随插件下发。
+
 ## 第三方代码与许可
 
 本插件以 **MIT** 许可发布，见 [LICENSE](./LICENSE)。内置的第三方代码：
@@ -167,7 +191,8 @@ SORT grove_last_read DESC
 
 ```bash
 npm install
-npm run build     # 类型检查 + 打包 main.js
+npm run build     # 类型检查 + 打包 main.js（完整版）
+npm run build:community  # 社区版（不含 PDF，用于官方目录）
 npm run smoke     # 数据层 + 书架窗口数学冒烟测试 + 样式守卫（无需 Obsidian）
 npm run sample    # 生成示例 EPUB
 npm run dev       # watch 模式

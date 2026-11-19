@@ -1,0 +1,87 @@
+/** 书架文案（英文）。键为中文原文。 */
+export const EN_BOOKSHELF: Record<string, string> = {
+	// 空状态与提示
+	'还没有扫描文件夹。选择一个放书的文件夹（库内或本机任意路径），书架会递归扫描其中的电子书与 PDF。':
+		'No scan folders yet. Pick a folder with books (inside the vault or anywhere on this machine) and the shelf will scan it recursively for e-books and PDFs.',
+	'扫描文件夹里没有找到书籍文件（支持 epub / mobi / azw3 / fb2 / cbz / txt，PDF 会一并收纳）。':
+		'No books found in the scan folders (epub / mobi / azw3 / fb2 / cbz / txt; PDFs are collected too).',
+	'没有匹配的书。试试只输书名或作者里的关键词。': 'No matching books. Try a keyword from the title or author only.',
+	'这个书单里还没有书。在书籍卡片上右键 →「移入书单…」，或直接把书拖到书单标签上。':
+		'This reading list is empty. Right-click a book card → "Move to reading list…", or drag a book onto the list tab.',
+	'搜索书名 / 作者 / 出版社…': 'Search title / author / publisher…',
+	'手动标记的阅读状态（右键卡片可修改）': 'Manually set reading status (right-click a card to change)',
+
+	// 操作与菜单
+	'＋ 新建书单': '+ New reading list',
+	'新建书单': 'New reading list',
+	'重命名书单': 'Rename reading list',
+	'删除书单': 'Delete reading list',
+	'书单名称': 'Reading list name',
+	'移入书单…': 'Move to reading list…',
+	'移入回收站': 'Move to trash',
+	'删除书籍': 'Delete book',
+	'删除书籍…': 'Delete book…',
+	'清空本书批注…': "Clear this book's annotations…",
+	'编辑书籍信息': 'Edit book info',
+	'更换封面': 'Change cover',
+	'用图片链接更换封面…': 'Change cover from image URL…',
+	'重新解析封面与信息': 'Re-parse cover and info',
+	'重新扫描': 'Rescan',
+	'在文件夹中显示': 'Show in folder',
+	'复制完整文件名': 'Copy full file name',
+	'用 Obsidian 查看器打开': 'Open with Obsidian viewer',
+	'在插件内阅读': 'Read in Grove Reader',
+	'笔记模板…': 'Note template…',
+	'AI 补全书籍信息…': 'Complete book info with AI…',
+	'清除阅读状态': 'Clear reading status',
+	'阅读统计': 'Reading stats',
+	'继续阅读': 'Continue reading',
+	'今日复习': 'Review today',
+	'打开书籍': 'Open book',
+	'导入书籍…': 'Import book…',
+
+	// 列表 / 排序
+	'排序': 'Sort',
+	'默认（按文件名）': 'Default (by file name)',
+	'按书名': 'By title',
+	'最近添加': 'Recently added',
+	'状态': 'Status',
+	'全部': 'All',
+	'未分类': 'Uncategorised',
+	'未知': 'Unknown',
+	'保留': 'Keep',
+	'一并删除': 'Delete as well',
+	'一并移入': 'Move as well',
+	'疑似重复': 'Possible duplicate',
+	'已读': 'Read',
+	'已读完': 'Finished',
+	'已删除': 'Deleted',
+	'已删除书籍文件': 'Book file deleted',
+	'已删除原文件': 'Original file deleted',
+
+	// 提示语
+	'封面已更新': 'Cover updated',
+	'更换封面失败': 'Failed to change cover',
+	'封面保存失败，请检查磁盘权限': 'Failed to save the cover. Check disk permissions.',
+	'该文件夹已在列表中': 'That folder is already in the list',
+	'请选择图片文件（jpg / png / webp / gif）': 'Choose an image file (jpg / png / webp / gif)',
+	'图片超过 12 MB，请换一张小一些的': 'Image is over 12 MB. Pick a smaller one.',
+	'这个链接返回的不是图片': 'That URL did not return an image',
+	'下载超时（20 秒）': 'Download timed out (20 s)',
+	'已复制文件名': 'File name copied',
+	'已移入回收站，可在 设置 → 回收站 恢复': 'Moved to trash. Restore it in Settings → Trash.',
+	'已从书架移除，原文件与批注数据都保留': 'Removed from the shelf; the original file and annotations are kept',
+	'已生成阅读笔记，点击打开': 'Reading note generated. Click to open.',
+	'重新解析会清除手动更换的封面或手动编辑的书名/作者，继续？':
+		'Re-parsing replaces any custom cover and any hand-edited title or author. Continue?',
+	'Grove Reader：已清除手动阅读状态': 'Grove Reader: manual reading status cleared',
+
+	// 错误
+	'[Grove Reader] 导入书籍失败': '[Grove Reader] Failed to import book',
+	'[Grove Reader] 封面保存失败': '[Grove Reader] Failed to save cover',
+	'[Grove Reader] 解析书籍信息失败': '[Grove Reader] Failed to parse book info',
+	'[Grove Reader] 生成 PDF 封面失败': '[Grove Reader] Failed to generate PDF cover',
+	'[Grove Reader] 书架缓存写入失败': '[Grove Reader] Failed to write shelf cache',
+	'[Grove Reader] 网络封面保存失败': '[Grove Reader] Failed to save remote cover',
+	'[Grove Reader] 自定义封面保存失败': '[Grove Reader] Failed to save custom cover',
+}

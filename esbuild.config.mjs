@@ -3,6 +3,8 @@ import process from 'process'
 import builtins from 'builtin-modules'
 
 const prod = process.argv[2] === 'production'
+// 社区版：GROVE_COMMUNITY=1 npm run build:community
+const community = process.env.GROVE_COMMUNITY === '1'
 
 const context = await esbuild.context({
 	entryPoints: ['src/main.ts'],
@@ -35,6 +37,7 @@ const context = await esbuild.context({
 	treeShaking: true,
 	outfile: 'main.js',
 	minify: prod,
+	define: { __COMMUNITY_BUILD__: community ? 'true' : 'false' },
 })
 
 const pdfWorkerBuild = {
