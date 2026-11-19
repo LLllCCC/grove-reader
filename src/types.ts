@@ -1,3 +1,5 @@
+import { t } from './i18n'
+
 export const DATA_VERSION = 1
 
 /** 插件对外显示名（manifest 里的 name 与此保持一致） */
@@ -64,7 +66,8 @@ export function colorCss(key: string): string {
 }
 
 export function colorName(key: string): string {
-	return HIGHLIGHT_COLORS.find(c => c.key === key)?.name ?? key
+	const found = HIGHLIGHT_COLORS.find(c => c.key === key)
+	return found ? t(found.name) : key
 }
 
 export interface Annotation {

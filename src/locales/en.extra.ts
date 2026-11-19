@@ -221,4 +221,17 @@ export const EN_EXTRA: Record<string, string> = {
 	"第 {n} 页 · {count} 处": "Page {n} · {count} matches",
 
 	// —— 页码与进度 ——
+
+	// —— 颜色与背景名 ——
+	"黄": "Yellow",
+	"绿": "Green",
+	"蓝": "Blue",
+	"红": "Red",
+	"紫": "Purple",
+	"纸白": "White",
+	"米黄": "Sepia",
+	"护眼": "Eye-care",
+	"夜间": "Night",
+
+	// —— 颜色与背景名 ——
 }

@@ -49,7 +49,7 @@ export function renderAppearancePanel(panel: HTMLElement, host: AppearancePanelH
 	for (const preset of BACKGROUND_PRESETS) {
 		const sw = swatches.createEl('button', {
 			cls: 'grove-appear-swatch',
-			attr: { 'aria-label': preset.name, title: preset.name },
+			attr: { 'aria-label': t(preset.name), title: t(preset.name) },
 		})
 		sw.style.backgroundColor = preset.bg
 		if (!a.followTheme && a.bgKey === preset.key) sw.addClass('is-active')

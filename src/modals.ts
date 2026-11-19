@@ -1183,7 +1183,7 @@ export class SearchModal extends Modal {
 			const head = hit.createDiv('grove-search-hit-head')
 			head.createSpan({ cls: 'grove-search-dot' }).style.background = colorDot(doc.annotation.color)
 			head.createSpan({ cls: 'grove-search-book', text: doc.bookTitle })
-			const meta = [doc.annotation.chapter, doc.annotation.cfi.startsWith('page:') ? `第 ${doc.annotation.cfi.slice(5)} 页` : '', colorName(doc.annotation.color)]
+			const meta = [doc.annotation.chapter, doc.annotation.cfi.startsWith('page:') ? t('第 {n} 页', { n: doc.annotation.cfi.slice(5) }) : '', colorName(doc.annotation.color)]
 				.filter(Boolean)
 				.join(' · ')
 			if (meta) head.createSpan({ cls: 'grove-search-meta', text: meta })
