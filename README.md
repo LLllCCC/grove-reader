@@ -1,282 +1,178 @@
 # Grove Reader
 
-在 Obsidian 里读书、划线和写笔记：支持 epub / mobi / azw3 / fb2 / cbz、PDF 与 TXT，完成「阅读 → 划线批注 → 生成 Markdown 笔记 → 一键回跳原文」的闭环。插件在设置里提供一组字标（彩叶 / 森林 / 灰绿 / 印章），可切换标签页与功能区图标。
+**English · [简体中文](README.zh-CN.md)**
 
-> **English** — Grove Reader turns Obsidian into an e-book reader. It opens EPUB / MOBI / AZW3 / FB2 / CBZ, PDF and TXT files stored in your vault, lets you highlight and comment on the text, and generates one Markdown note per book whose backlinks jump straight back to the annotated passage. Reading progress, rating, ISBN and highlight counts are written to that note's frontmatter, so Dataview and Bases can query your library.
->
-> Install it from the community directory (search "Grove Reader"), or copy `main.js`, `manifest.json` and `styles.css` into `<vault>/.obsidian/plugins/grove-reader/`. PDF support additionally needs the `pdfjs` asset pack from the release page. The interface is currently Chinese-only.
+An e-book reader for Obsidian: read, highlight and take notes without leaving your vault, then generate one Markdown note per book that links back to the exact passage.
 
-电子书渲染引擎为 [foliate-js](https://github.com/johnfactotum/foliate-js)（MIT，已内置于 `lib/foliate-js`）；PDF 阅读与批注基于 pdfjs-dist 独立实现（划选高亮按页存储）。
+Supported formats: **EPUB / MOBI / AZW3 / FB2 / CBZ**, **PDF** and **TXT**. The plugin also ships four wordmarks (autumn / forest / sage / seal) for the tab and ribbon icon.
 
-## 安装
+- Highlights, comments and bookmarks, grouped by chapter, with a collapsible sidebar.
+- Generates a Markdown note per book; every excerpt carries a backlink that returns to the source (EPUB CFI, PDF page plus selection rectangle, or TXT offset).
+- Reading progress, rating, ISBN and highlight counts land in the note frontmatter, so Dataview and Bases can query your library.
+- Optional AI features (explain / translate / summarise, word lookup, book Q&A, chapter guides, semantic search) run against **your own** OpenAI-compatible endpoint.
+- Spaced-repetition review for highlights, reading stats with a heat map and a yearly goal grid.
 
-Release 提供**两种构建**，按需选择：
+## Install
 
-| 构建 | 资产 | PDF 阅读 | 适用 |
+Releases ship **two builds**. Pick one:
+
+| Build | Assets | PDF reading | Use when |
 | --- | --- | --- | --- |
-| 社区版（默认） | `main.js` + `manifest.json` + `styles.css` | 不含 | 从 Obsidian 官方目录安装，或只要 EPUB / TXT |
-| 完整版 | 把 `main.js` 换成 `main.full.js`，再加 `pdfjs/` | 含 | 需要 PDF 划线批注 |
+| Community (default) | `main.js` + `manifest.json` + `styles.css` | No | Installing from the community directory, or you only need EPUB / TXT |
+| Full | swap `main.js` for `main.full.js`, add `pdfjs/` | Yes | You need PDF highlighting and annotation |
 
-**社区版**：把 `main.js`、`manifest.json`、`styles.css` 复制到 `<库>/.obsidian/plugins/grove-reader/`。
+**Community build**: copy `main.js`, `manifest.json` and `styles.css` into `<vault>/.obsidian/plugins/grove-reader/`.
 
-**完整版**：把 `main.full.js` 改名成 `main.js` 覆盖进去，再把 `grove-reader-pdfjs-assets.zip` 解压到同一目录得到 `pdfjs/`（含 `wasm/`、`cmaps/`、`standard_fonts/`、`pdf.worker.mjs`）。两者版本号相同，直接覆盖即可。
+**Full build**: rename `main.full.js` to `main.js`, overwrite, then unzip `grove-reader-pdfjs-assets.zip` into the same folder so you get `pdfjs/` (with `wasm/`, `cmaps/`, `standard_fonts/`, `pdf.worker.mjs`). Both builds share the same version number, so overwriting is enough.
 
-启用：Obsidian 设置 → 第三方插件 → 启用 **Grove Reader**。之后把 EPUB（也支持 mobi / azw3 / fb2 / cbz / txt）放进库里任意位置，点左侧栏书本图标或执行命令「打开书籍…」。
+Then enable **Grove Reader** under Settings → Community plugins. Drop a book anywhere in the vault and click the book icon in the ribbon, or run "Open book…".
 
-社区版点开 PDF 不会报错：会提示「PDF 阅读需要完整版」，并交给系统默认程序打开。
+The community build does not fail on PDFs: it tells you PDF reading requires the full build and hands the file to your default program.
 
-## 网络与隐私
+## Interface language
 
-插件**默认不联网**，所有阅读数据、批注、笔记都只写进当前库。只有你主动使用下面两项功能时才会发起外部请求：
+Settings → Appearance → Interface language: **Follow Obsidian / 中文 / English**. The default follows Obsidian's own language. Reopen views or restart Obsidian for the change to apply everywhere (command names keep the old language until restart).
 
-| 功能 | 请求目标 | 用途 |
+Generated artefacts follow the language too, but paths never change:
+
+| Item | Behaviour |
+| --- | --- |
+| User guide | `Grove Reader User Guide.md` or `Grove Reader 使用指南.md`; both names are recognised on lookup, so switching language does not create a duplicate |
+| Built-in note template | Headings such as "Reading info" and "Bookmarks" follow the language; `{{...}}` placeholders and `grove_*` fields do not |
+| Notes folder / data folder / template paths | **Never** change with the language, so existing notes keep working |
+
+## Network and privacy
+
+The plugin is offline by default. Data lives in your vault. Requests leave your machine only when you use these features:
+
+| Feature | Target | Purpose |
 | --- | --- | --- |
-| 封面下载 / 书籍信息补全 | 你填写的图片或豆瓣书籍页地址 | 只在点「下载封面」时请求一次，结果缓存进库内 |
-| 划词解释、查词、全书问答 | 你在设置里自己填的 OpenAI 兼容接口（`baseUrl` + `apiKey` + `model`） | 把选中的文字或检索片段发给你指定的服务商 |
+| Cover download / metadata completion | The image or book-page URL you paste | One request when you press download; the result is cached in the vault |
+| Explain, word lookup, book Q&A, chapter guides, semantic search | The OpenAI-compatible endpoint you configure (`baseUrl` + `apiKey` + `model`) | Sends the selected text or retrieved chunks to the provider you chose |
 
-没有内置任何遥测、统计或远程配置。API Key 只存在本库的插件配置里，不会发往上述接口以外的地址。
+There is no telemetry, no analytics and no remote configuration. API keys stay in this vault's plugin data and are never sent anywhere else.
 
-## 界面语言
+## Desktop and mobile
 
-设置 → 外观 → 界面语言，可选 **跟随 Obsidian / 中文 / English**。默认跟随 Obsidian 的界面语言；切换后重新打开视图或重启 Obsidian 全部生效（已注册的命令名在重启前仍是旧语言）。
+`manifest.json` sets `isDesktopOnly: false`, and the plugin loads on mobile. Every Node built-in is isolated in `src/desktopFs.ts` and loaded only on desktop via dynamic `import()` guarded by `Platform.isMobile`, so mobile never executes `require('node:fs')`. Mobile reads and writes vault files through `vault.adapter`; absolute paths and cross-vault import are desktop-only and hidden on phones.
 
-英文词条按模块放在 `src/locales/en.*.ts`，以中文原文作键；漏译的条目自动回落中文，不会出现空白或 `undefined`。新增文案时用 `t('中文')` 包起来即可，插值写成 `t('共 {n} 本书', { n })`。
+## Usage
 
-**生成物也跟随语言**，但只翻内容、不动路径：
+**Shelf** — the ribbon book icon opens a cover grid. Scan folders are searched recursively and can be vault folders or absolute paths. Each card field (format badge, progress bar, annotation count, "with comments" count, recently read, note marker, file size, list colour bar) can be toggled in Settings → Shelf display. Large libraries are virtualised: only three rows above and below the viewport are rendered.
 
-| 对象 | 行为 |
-| --- | --- |
-| 使用指南 | 中文用户生成 `Grove Reader 使用指南.md`，英文用户生成 `Grove Reader User Guide.md`；查找时两种文件名都认，切换语言不会多出一份 |
-| 内置笔记模板 | 标题、`书签`、`阅读信息` 等文字按语言生成；`{{...}}` 占位符与 `grove_*` frontmatter 字段不变 |
-| 笔记文件夹 / 数据目录 / 模板路径 | **不随语言变化**，避免动到已存在的目录与已有笔记 |
+**Reading** — page turning by corner arrows, arrow keys, mouse wheel or the progress bar. TXT opens in a dedicated view that detects UTF-8 / GB18030 (GBK) / Big5 / UTF-16, paginates by chapter one screen at a time, promotes volume headings to their own page, and builds a searchable outline from headings like "Chapter 12". EPUB footnotes open in a popover that does not move your reading position. E-ink mode removes animations and shadows and trims the mobile toolbar to five buttons.
 
-## 桌面与移动端
+**Annotations** — select text to highlight (five colours) and comment. The sidebar has four tabs: bookmarks, references, full-text search, annotations. `[` / `]` collapses the sidebar on wide screens. PDF annotation links carry the selection rectangle, so a backlink scrolls to the passage and outlines it briefly.
 
-`manifest.json` 里 `isDesktopOnly` 为 `false`，插件可以在手机上加载。原因是所有 Node 内置模块都隔离在 `src/desktopFs.ts`，只在桌面端通过动态 `import()` 载入：
+**Notes** — "Generate / update reading note" writes one note per book into the notes folder (default `Grove Reader/阅读笔记`). Structure is `# title → ## chapter → ### excerpt`, so every annotation appears in the outline panel. Each excerpt gets a stable block id (`^grove-xxx`). Regeneration only rewrites the region between `GROVE:BEGIN` and `GROVE:END`; anything you write outside it is safe. Multiple templates are supported and can be switched per book.
 
-- `main.ts`：`if (!this.isMobile) this.desktopFs = await import('./desktopFs')`
-- `platformFactory.ts` / `platformIO.ts`：按平台选择 `vault.adapter` 或桌面文件系统
+**Search and export** — full-text search across the current book (EPUB, PDF and TXT share one entry point) and across the whole vault. Global annotation search filters by book, chapter, colour and "today only", previews the result live, then writes Markdown or CSV into `批注检索/` under the notes folder. The CSV includes the review schedule.
 
-移动端永远不会执行 `require('node:fs')`，加载阶段不会因为这个崩溃。移动端读写库内文件统一走 `vault.adapter`；绝对路径、跨库导入等桌面专属能力在手机上自动隐藏。
+**Review** — spaced repetition with four grades (again / hard / good / easy) and a daily cap. The schedule lives inside the annotation JSON, so it syncs and backs up with your annotations and adds no files. "Add to review" pushes a single highlight into today's queue; "Review this book" drills one book with up to 20 cards.
 
-## 两种构建
+**AI** — book Q&A builds an outline index first (about 6000 characters per chunk, stored in `<data folder>/portraits/`), then answers from the five most relevant chunks and cites chapters. Chapter guides write 2–4 sentences per chapter. Semantic search chunks the text at about 1600 characters into `<data folder>/vectors/` and can answer across several books. Every feature uses your own key.
 
-| 构建 | 命令 | 含 PDF | 用途 |
-| --- | --- | --- | --- |
-| 完整版 | `npm run build` | 是 | GitHub Release、自用部署 |
-| 社区版 | `npm run build:community` | 否 | 提交 Obsidian 官方目录 |
+**Stats** — today's reading time and pages, streak, active days, a 12-week heat map, a yearly goal grid and a finish prediction based on the last seven days. "Create reading poster" renders a 1080×1440 PNG into `Grove Reader/书摘卡/`.
 
-社区版通过 `GROVE_COMMUNITY=1` 注入 `__COMMUNITY_BUILD__` 常量：不注册 PDF 视图、PDF 正文提取直接返回空，打开 PDF 时提示改用系统默认程序。原因是目录安装只分发 `main.js` / `manifest.json` / `styles.css`，`pdfjs/` 那 5.9 MB 运行时资源（wasm / cmaps / standard_fonts / worker）无法随插件下发。
+**Data tools** — trash with a 30-day window, one-click annotation clearing (type a confirmation), a read-only data health check that verifies cross-references, automatic backups on first launch of each day or week, manual backup to a vault folder plus an optional second path on another disk, and an operation log limited to 200 important actions.
 
-## 第三方代码与许可
+Reading position is remembered across sessions. Annotations and bookmarks merge across devices by id, newest `updatedAt` wins, and deletions leave tombstones for about 180 days so an older copy from another device cannot resurrect them.
 
-本插件以 **MIT** 许可发布，见 [LICENSE](./LICENSE)。内置的第三方代码：
+Book titles come from embedded metadata first. For PDFs without metadata the file name is cleaned: download-site, OCR and screenshot suffixes such as `(Z-Library)`, `[OCR]_`, `_OCR`, `.layered` and `@image#1:Clipboard_Screenshot...` are stripped, and a trailing author name or bracketed author that duplicates the author line is dropped.
 
-| 组件 | 许可 | 位置 | 说明 |
-| --- | --- | --- | --- |
-| [foliate-js](https://github.com/johnfactotum/foliate-js) | MIT | `lib/foliate-js` | EPUB / MOBI / AZW3 / FB2 / CBZ 渲染引擎，有本地修改 |
-| [pdf.js](https://github.com/mozilla/pdf.js)（pdfjs-dist） | Apache-2.0 | `pdfjs/`、打包进 `main.js` | PDF 解析与渲染；`pdfjs/` 下的 wasm 与字体资源随 Release 单独分发 |
+## Note format
 
-## 使用
+```markdown
+# Book title
 
-| 操作 | 方式 |
-| --- | --- |
-| 打开书 | 功能区书本图标 / 命令「打开书籍…」 |
-| 书架 | 网格视图，扫描文件夹递归找书；卡片信息可逐项开关（批注数旁会多一个「想法 N」，只统计写了评论的批注）；几百本时只渲染视口上下各 3 行（虚拟化），其余用占位撑出滚动高度 |
-| TXT 阅读 | 书架扫描 `.txt`，点击用 Grove TXT 视图打开；自动识别 UTF-8 / GB18030(GBK) / Big5 / UTF-16，可手动切换编码；与 EPUB 共用工具栏、进度条、Aa 外观面板、批注侧栏和右下角翻页按钮；**按章节分页、一屏一页**（像纸质书一样整屏切换，不再靠滚动），章节标题自然落在页首；**卷标题（第X卷/部/篇）单独占一页**，与 EPUB 每个「部分」独立成页一致（只影响显示，不改原文件）；单页 / 双页 / 按窗口宽度自动切换；自动从正文识别「第X章 / 卷 / 序章 / 番外」生成目录，章节标题自动放大加粗（卷更大并带分隔线）；点工具栏目录按钮打开**可搜索目录面板**（上千章也能秒定位）；划选文字可高亮、评论、跳回原文、生成笔记；阅读位置精确到屏 |
-| 翻页 | 右下角箭头、键盘方向键、鼠标滚轮、进度条拖动。TXT 固定为「滚轮即翻页」（一屏一次，不再滚动正文），键盘方向由设置里的「TXT 键盘翻页方向」决定（←/→ 或 ↑/↓）；EPUB 的滚轮翻页仍由 Aa 面板开关控制 |
-| 高亮 | 正文划选文字 → 弹出条选颜色；或划选后用工具栏色点 / 命令 |
-| 评论 | 弹出条「评论」，或划选后点工具栏评论按钮；点击已有高亮也可编辑 |
-| 批注列表 | 工具栏列表按钮，点击条目跳回原文，可改色 / 删除 |
-| 脚注浮窗 | EPUB 点脚注标号原地弹小窗，不打断阅读位置；含「跳到原文」，点别处 / Esc 关闭。识别 `epub:type="noteref"`，也兼容没有标注但写着 `[1]`、指向 `note1`/`fn3` 这类锚点的书 |
-| 目录 | 工具栏下拉框 |
-| 生成笔记 | 工具栏笔记按钮或命令「生成 / 更新阅读笔记」，保存到设置中的笔记文件夹 |
-| 发送到 Canvas | 命令「把批注发送到 Canvas…」：勾选批注导出成画布卡片，可新建画布或追加到已有画布；EPUB 批注菜单与 TXT 划词菜单也有「发送到 Canvas」；卡片色跟随高亮色，按 3 列排布；导出前可选「按章分组 / 按颜色分组」（生成带标题的分组框）与「组内按顺序连线」，追加时新内容接在已有内容下方；卡片含摘录、评论、回笔记与回原文链接 |
-| Dataview 字段 | 每份笔记的 frontmatter 会写 `grove_annotations` / `grove_format` / `grove_progress` / `grove_status` / `grove_seconds` / `grove_last_read` / `grove_publisher` / `grove_rating` / `grove_isbn`，可直接用 Dataview 或 Bases 查询 |
-| 从笔记回写批注 | 命令「从笔记同步批注…」：把笔记里改过的摘录 / 评论写回批注数据，先列差异、逐项勾选；笔记里删掉的条目不会删批注；笔记文件夹改过导致路径失效时按书名与 frontmatter 自动找回 |
-| 全文搜索 | 侧栏「全文搜索」输入关键词回车（EPUB / PDF / TXT 同一入口）；TXT 八百万字实测约 60ms，结果带页码，点击跳转并把命中处标黄 |
-| 阅读目标与热力图 | 阅读统计查看今日阅读（分钟 + 页数）、连续/活跃/累计、最近 12 周热力图、年度目标方格与「读完预测」（按近 7 天速度）；设置 → 阅读与笔记 → 每日阅读目标 / 每日页数目标 / 年度阅读目标 |
-| 朗读（TTS） | 工具栏「朗读」按钮或命令「停止朗读」：用系统语音逐句朗读当前页，当前句用高亮标出，TXT/PDF 自动滚屏、EPUB 读完自动翻页；语速在设置 → 阅读与笔记 →「朗读语速」调整。依赖 Web Speech API，Android WebView 不支持时手机端自动隐藏朗读按钮 |
-| e-ink / 极简模式 | 设置 → 阅读与笔记 → e-ink / 极简模式：关动画、阴影、悬停位移，封面转灰度；手机工具栏只留颜色/评论/外观/笔记/批注 5 个按钮，并启用点正文上下区域翻页 |
-| 查词 / 生词本 | 划选文字后点弹条「查词」（手机在划词 AI 菜单里）：结合书中原文让 AI 给释义与例句，可修改后加入 `阅读笔记/生词本/<书名> 生词本.md`，同词自动去重；也可一键复制 Anki 可导入的两列 CSV |
-| 可折叠双栏 | 宽屏阅读时用 `[` / `]` 或工具栏批注按钮一键收起 / 展开右侧批注栏；命令「收起 / 展开批注栏」同样可用，EPUB 正文里按键也生效 |
-| 侧栏页签 | 批注栏顶部四个页签「书签 / 引用 / 全文搜索 / 批注」，同一时间只显示一组；「批注」页签带圈数字显示数量（筛选时显示符合条件数），关闭按钮在页签条右侧；点正文高亮、点 PDF 引用角标或从命令搜全书会自动切到对应页签 |
-| 导入外部标注 | 设置 → 检索与导出 → 导入外部标注，或命令「导入外部标注…」：粘贴 / 选库内文件，自动识别 Kindle `My Clippings.txt`、Readwise CSV、微信读书 Markdown，按书名/作者匹配书籍、预览条数与重复数，导入后带来源标记，重复摘录跳过 |
-| 多套笔记模板 | 设置 → 阅读与笔记 → 笔记模板可添加多套并设默认；书架右键「笔记模板…」或命令「选择当前书的笔记模板」按书切换 |
-| 回跳原文 | 笔记中每条批注下方的「↩ 回原文」默认是**指向书文件的双链**（`[[Grove Reader/书籍/书.epub#grove-cfi=…&t=…&c=…|↩ 回原文]]`），可进图谱 / 反向链接，插件关掉时点开也能打开书；设置里可切回旧的 `obsidian://grove` 协议链接。链接里的 `t=`（摘录前 24 字）与 `c=`（章节名）用于三级降级：CFI 失效 → 章节内搜原文 → 章节百分比。PDF 链接额外带 `r=`（归一化框选矩形），回跳会滚到原句并短暂标出 |
-| 导入书籍 | 书架右上角上传图标 → 选文件（可多选），复制进第一个库内扫描文件夹（默认 `Grove Reader/书籍`），同名自动加 (2)(3)；原文件不动，导入后自动重扫 |
-| AI 补全书籍信息 | 卡片右键 →「AI 补全书籍信息…」：读书名与正文开头生成作者 / 分类 / 一句话简介；只填空白字段，已有内容不覆盖，保存前可改；AI 字段在「编辑书籍信息」里标「AI 生成」，手改后标记清除 |
-| 更换封面 | 右键书籍 →「更换封面」选本地图片，或「用图片链接更换封面…」填图片直链（经 requestUrl 下载，支持 jpg/png/webp/gif，≤12MB）；豆瓣等防盗链图床会自动带 Referer 重试，仍被拒绝时提示改存本地文件 |
-| 删除书籍 | 右键 →「删除书籍…」：可只从书架移除（保留文件与批注），或把原文件移入插件回收站；勾选删除阅读笔记会自动勾选删除原文件（取消原文件会同时取消笔记） |
-| 回收站 | 设置 → 回收站，或命令「打开回收站」；删除的书籍/笔记/批注/封面保留 30 天，可恢复或永久删除 |
-| 清空批注 | 右键书籍 →「清空本书批注…」，需输入「清空」确认；阅读位置保留，已生成的笔记会同步重写 |
-| 全局批注检索 | 设置 → 检索与导出 → 全局批注检索，或命令「全局搜索批注」；跨书搜划线/评论，结果可跳回原文；「导出…」可先按范围/书/章节/颜色/今天筛选、按书/章/颜色分组并实时预览，再写 Markdown / CSV 到笔记文件夹的 `批注检索/` 子目录；CSV 除摘录/评论外还带复习列（到期、间隔、难度、复习次数、忘记次数、上次复习） |
-| 全局书签 | 命令「全局书签」汇总所有书的书签，按添加时间倒序；可搜索书名/位置/片段，点击跳回书内位置，也可直接删除 |
-| 今日复习 | 命令「今日复习（间隔重复）」或书架右上角复习按钮（右上角徽标=今天可复习条数）：按设置里的每日条数出旧划线，键盘 1–4 或点按钮评分（忘记 / 模糊 / 记住 / 简单），排期写在批注 JSON 里、随批注一起同步与备份；到期最久的先考，昨天及更早的新划线补位；「回原文」跳回书内位置，「写想法」复习时直接补评论，「跳过」不计今日进度；批注菜单「加入今日复习」可把某条立刻排进今天；命令「复习本书（间隔重复）」只刷当前这本书的划线（最多 20 条，不受每日上限拦截）；阅读统计页有「今日复习」卡片，命令「清空全部复习排期」可从头再来 |
-| 书摘卡 | 批注菜单「生成书摘卡」把一条划线画成 1080px 宽 PNG（摘录 + 评论 + 书名/章节/作者/日期），保存到 `Grove Reader/书摘卡/`；EPUB/TXT 在批注菜单，PDF 在批注侧栏的图片按钮 |
-| PDF 页链接 / 本页引用 | PDF 工具栏链接按钮可复制页码、页双链、Obsidian 原生页嵌入（`![[书.pdf#page=N]]`）与批注链接（带 `r=` 框选，回跳精确到句）；侧栏「本页引用」列出引用当前页的笔记，点击打开并滚到链接处 |
-| AI 全书问答 | 工具栏「AI 全书问答」或命令：先按约 6000 字一段生成要点索引（存 `<数据目录>/portraits/`，建立前确认请求次数，可取消/删除），提问时按关键词挑最相关的 5 段再让 AI 回答，并列出参考章节；使用你自己的 API Key |
-| 语义检索 / 跨书语义问答 | 全库搜索勾选「语义检索（向量）」：正文按约 1600 字切块取嵌入（`<数据目录>/vectors/`），按意思找段落；原书改过后重建只重嵌改动块。结果下方「就这些段落问 AI」可把跨书段落交给 AI 回答，答案标书名/章节；向量服务支持本地离线、智谱、硅基流动或自定义 |
-| EPUB 高亮样式 | 设置 → 阅读 →「EPUB 高亮样式」：马克笔（下半段色带 + 底部 1px 细线，默认）或整行色块；竖排自动改为右侧色带 + 右侧细线，重开书本生效 |
-| 操作记录 | 设置 → 操作记录，或命令「查看操作记录」；只记删除 / 清空 / 恢复 / 备份等关键动作，最多 200 条 |
-| 数据体检 | 设置 → 维护 → 数据体检；检查批注 JSON、笔记、书架、书单、统计、AI 要点索引与语义索引的引用，只读，可清理失效引用 |
-| 自动备份 | 设置 → 数据安全 → 自动备份：关闭 / 每天 / 每周首次启动时自动导出；备份包含批注、封面与 AI 要点索引 |
-| 调试模式 | 设置 → 维护 → 调试模式；事件写入 `data/debug.log`（512KB 轮转），默认关闭 |
+> [!info] Reading info
+> - Author: ...
+> - Highlights: 12
+> - Last updated: 2026-11-20
 
-阅读位置自动记忆：重开书籍从上次位置继续（工作区重启后同样恢复）。
+## Chapter 1
 
-多设备同步：批注、书签按 id 合并，同一 id 以更新时间较新的版本为准；删除会留下墓碑（保留约 180 天），另一台设备拿着旧文件写回时不会把已删内容复活。阅读进度也按 `updatedAt` 防止旧进度覆盖。
+### First few words of the excerpt
 
-书名优先取书内元数据；PDF 没有元数据时自动清洗文件名——去掉 `(Z-Library)`、`(z-library.sk, 1lib.sk, z-lib.sk)`、`[OCR]_`、`_OCR`、`_20260911_0340.layered`、`@image#1:Clipboard_Screenshot...` 等下载站/OCR/截图后缀；标题尾部与作者重复的括号或作者名（如「一生受用的概率统计 [日]佐佐木弹」「大国县治（杨华）」）也会去掉，因为作者已经显示在书名下方。
+> quoted text
 
-### 书架显示
+%% your comment %%
 
-设置 → **书架显示** 里可逐项开关卡片信息，改动即时生效：
-
-| 开关 | 作用 |
-| --- | --- |
-| 格式徽章 | 显示 EPUB / PDF / MOBI / AZW3 / FB2 / CBZ，按格式着色 |
-| 阅读进度 | 封面底部进度条 + 卡片百分比，读完后显示「已读」 |
-| 批注条数 | 这本书有多少条批注 |
-| 最近阅读 | 「3 天前」这类相对时间 |
-| 笔记标记 | 已生成笔记的书显示文档图标，点击直接打开笔记 |
-| 文件大小 | 卡片上显示体积（关闭时仍在悬浮提示里） |
-| 继续阅读 | 顶部条显示最近在读、尚未读完的书（最多 6 本） |
-| 作者与出版社合并一行 | 关闭后两行显示，卡片更高 |
-| 书单色条 | 卡片左侧按书单显示色条 |
-
-书架内容区不再单独显示「扫描：」一行：添加文件夹、扫描文件夹列表（可查看/移除）、重新扫描、阅读统计都移到视图右上角的操作栏；库内新增 / 删除 / 改名书籍会自动重扫。
-
-## 笔记格式
-
-笔记中插件生成的内容被 `GROVE:BEGIN / GROVE:END` 注释标记包围：
-
-- 重新生成时**只覆盖标记区间**，区间外你手写的内容原样保留；
-- 每条批注 = 引用块（原文）+ `%%评论%%` + 回跳链接（默认为指向书文件的双链，见上表）；
-- 书签写成 `## 书签` 列表（位置名 + 日期 + 回跳链接），按书中位置排序；没有书签时不输出该段；
-- 按章节分组，章节信息取自书的目录。
-- 想改评论或摘录，直接编辑生成区里的 `%%` 块 / 引用块，再用命令「从笔记同步批注…」回写。
-- 笔记里有还没回写的改动时，**自动更新会跳过这份笔记并提示**，不会把你的编辑覆盖掉。
-- 切换「摘录回跳链接样式」后，**自动更新不会改写旧笔记**（避免悄悄换格式）；点一次「生成/更新阅读笔记」或「刷新全部阅读笔记」才会按新设置重写。
-
-### Dataview 字段
-
-笔记 frontmatter 里插件维护的字段（每次生成/刷新自动更新，用户自己加的字段原样保留）：
-
-| 字段 | 含义 |
-| --- | --- |
-| `grove-book` | 书籍 id（同名书认领笔记用） |
-| `grove_annotations` | 批注条数 |
-| `grove_format` | EPUB / PDF / TXT 等 |
-| `grove_progress` | 阅读进度 0–100 |
-| `grove_status` | 想读 / 在读 / 读完（按进度推） |
-| `grove_seconds` | 累计阅读秒数 |
-| `grove_started` | 开始阅读日期（取统计里最早一天） |
-| `grove_finished` | 读完日期（标记或进度到 100% 时写） |
-| `grove_last_read` | 最近阅读日期 `YYYY-MM-DD` |
-| `grove_publisher` | 出版社（书架里有才写） |
-| `grove_rating` | 个人评分 1–5（在「编辑书籍信息」里选，未评分不写） |
-| `grove_isbn` | ISBN（手动填写，留空不写） |
-| `grove_rating` | 个人评分 1–5（在「编辑书籍信息」里选，未评分不写） |
-| `grove_isbn` | ISBN（手动填写，留空不写） |
-| `grove_cover` | 封面双链（Bases 卡片视图取图） |
-
-命令「生成书架 Base（.base 卡片墙）」会在笔记文件夹生成 `书架.base`：封面画廊 + 在读 / 想读 / 今年读完 / 全部五个视图，字段直接读上面的 frontmatter；重新运行会覆盖该文件。
-
-开启「自动更新阅读笔记」时，**新增划线只增量追加到对应章节**，不会重写整个生成区，因此生成区里的手写行也能保留；删除批注、改评论或模板结构不匹配时才整段重写。
-
-示例查询：
-
-```dataview
-TABLE grove_annotations AS 批注, grove_progress AS 进度, grove_status AS 状态, grove_seconds AS 秒
-FROM "Grove Reader/阅读笔记"
-SORT grove_last_read DESC
+[[Grove Reader/书籍/book.epub#grove-cfi=…|↩ Source]] ^grove-abc123
 ```
 
-已有笔记可以用命令「刷新全部阅读笔记（补齐统计字段）」一次性补上。
+The backlink is a wikilink by default, so it shows up in the graph and in backlinks and still opens the book with the plugin disabled. A legacy `obsidian://grove` form can be selected in settings. Links carry `t=` (first 24 characters) and `c=` (chapter) so a broken CFI degrades gracefully: CFI → search inside the chapter → chapter percentage.
 
-## 数据安全（个人自用优先级最高项）
+### Dataview fields
 
-- 每本书一个 JSON，默认在 `.obsidian/plugins/grove-reader/data/books/<bookId>.json`；设置 → 数据与维护 → **数据文件夹** 可把整个 `data/` 改到库内普通文件夹（填 `Grove Reader` 时实际写入 `Grove Reader/data/`），便于随库同步与备份。修改后点 **「迁移数据…」** 自动复制到新位置并重启 Obsidian；旧数据不会自动删除，`.trash` 回收站不随迁移复制；Markdown 笔记只是导出视图，JSON 才是数据源头；
-- 写入为「临时文件 + 原子重命名」，不会出现写一半的半截文件；
-- 覆盖前滚动备份（每 10 分钟最多一份，默认保留 10 份，可设置）；
-- 主文件损坏时自动从最新备份恢复，损坏文件留档为 `*.corrupt-*`；
-- 书籍在库内移动后按文件名唯一匹配自动找回数据；书架检测到改名/移动会自动迁移批注数据与个性化信息；
-- **保险副本**：命令「备份批注数据到库内」把全部批注 JSON、书架缓存、书单与自定义封面导出到库内《Grove Reader 数据备份》文件夹——普通库内文件，随库同步，删除/重装插件都不受影响，建议定期执行。
-- **回收站**：删除书籍时把原文件、笔记、批注 JSON、封面一起移到书库根目录的隐藏文件夹 `.trash/`，保留 30 天；设置 → 回收站可恢复或永久删除。即使 Obsidian 的删除设置是“永久删除”，插件内仍能救回来。
+Every generated note writes `grove_annotations`, `grove_format`, `grove_progress`, `grove_status`, `grove_seconds`, `grove_last_read`, `grove_publisher`, `grove_rating` and `grove_isbn` to its frontmatter.
 
-## 开发
+## Data safety
 
-```bash
-npm install
-npm run build     # 类型检查 + 打包 main.js（完整版）
-npm run build:community  # 社区版（不含 PDF，用于官方目录）
-npm run smoke     # 数据层 + 书架窗口数学冒烟测试 + 样式守卫（无需 Obsidian）
-npm run sample    # 生成示例 EPUB
-npm run dev       # watch 模式
-npm run foliate:check  # 本地基线 + 上游对比（网络不可用时自动跳过上游）
-npm run foliate:baseline  # 刻意修改 foliate-js 后更新 BASELINE.json
-npm run obsidian:eval "<js>"  # 在运行中的 Obsidian 里执行 JS（需以 --remote-debugging-port=9222 启动）
-node scripts/i18n-extract.mjs --missing  # 列出 t() 里还没翻译的键，应为 0
-node scripts/i18n-gaps.mjs               # 列出「源码有中文、词典没有」的字面量（含 t(变量) 与拼接）
-node scripts/toplevel-t.mjs src/*.ts     # 找出模块顶层的 t()：import 时求值会被语言冻结
-node scripts/i18n-extract.mjs --missing  # 列出 t() 里还没翻译的键，应为 0
-node scripts/i18n-gaps.mjs               # 列出「源码有中文、词典没有」的字面量（含 t(变量) 与拼接）
-node scripts/toplevel-t.mjs src/*.ts     # 找出模块顶层的 t()：import 时求值会被语言冻结
-```
+- One JSON file per book, by default under `data/` in the plugin folder; set a data folder to keep it inside the vault instead.
+- Writes are atomic (temporary file plus rename) and rotate a backup before overwriting; a corrupted file is restored from the newest backup and kept as `*.corrupt-*`.
+- Moving a book inside the vault is detected by file name; renaming a book is treated as a new book, with the old data still on disk.
+- Generated Markdown notes survive disabling or removing the plugin.
 
-**更新纪律**：本插件不做自动更新。`npm run build` 只产出构建物；写入库内插件目录必须 `npm run deploy -- --yes`（或 `GROVE_DEPLOY=1`），手机端同样只在明确要求后 adb push。视图头隐藏等关键样式由 `npm run smoke` 的样式守卫保护，误删选择器会直接构建失败。**版本号（package.json / manifest.json / versions.json）只在用户明确要求发版时修改**，功能做完可以先留在工作区。
-
-## 已知限制
-
-- 手机端：PDF ≤64MB（整文件读入内存）；扫描版 PDF（JBIG2 / JPEG2000）已支持（wasm 从库内读取）；
-- 批注 JSON → 笔记默认单向；笔记里的改动需用「从笔记同步批注…」手动回写，不会自动删批注；
-- PDF 批注按页码定位：PDF 文件本身被重新编辑（增删页）后，旧批注的页码可能错位（笔记里的双链会按「摘录原文 → 章节 → 百分比」降级兜底）；
-- PDF 自带批注（Acrobat/Preview 画的高亮、下划线、删除线、波浪线）只做只读显示：不进批注栏、不写回文件、点击不会选中；
-- TXT 批注按「字符偏移」定位：TXT 文件内容被改写（增删字）后旧批注会偏移，换编码阅读不受影响。
-
-## 本库目录约定
+## Vault layout
 
 ```
 Grove Reader/
-  书籍/       电子书文件（设置里的扫描文件夹）
-  阅读笔记/   生成的批注笔记
-  data/       批注 JSON、封面、书单、阅读统计
-  .trash/     插件回收站（隐藏，30 天自动清理）
+  书籍/       e-book files (a scan folder)
+  阅读笔记/   generated notes
+  data/       annotation JSON, covers, reading lists, stats
+  .trash/     plugin trash (hidden, purged after 30 days)
 ```
 
-## 更新记录
+## Development
 
-**0.36.7（2026-11-14）**：全局批注导出的 CSV 增加复习排期列（到期、间隔、难度、复习次数、忘记次数、上次复习），日期按本地时区，无排期留空。
+```bash
+npm install
+npm run build            # type check + bundle main.js (full build)
+npm run build:community  # community build without PDF (for the official directory)
+npm run smoke            # data layer, shelf maths and style guards, no Obsidian needed
+npm run dev              # watch mode
 
-**0.36.7（2026-11-14）**：全局批注导出的 CSV 增加复习排期列（到期、间隔、难度、复习次数、忘记次数、上次复习），日期按本地时区，无排期留空。
+node scripts/i18n-extract.mjs --missing  # t() keys still missing a translation, should be 0
+node scripts/i18n-gaps.mjs               # Chinese literals present in source but absent from the dictionary
+node scripts/toplevel-t.mjs src/*.ts     # module-level t() calls, which freeze at import time
+```
 
-**0.36.6（2026-11-14）**：「编辑书籍信息」新增评分（1–5 星）与 ISBN，随笔记写进 `grove_rating` / `grove_isbn`（空值不写），书架 Base 模板新增两列，方便按评分排序或筛 ISBN。
+`npm run build` only produces artefacts. Copying them into a vault goes through `npm run deploy -- --yes`. Version numbers in `package.json`, `manifest.json` and `versions.json` are bumped only when a release is requested.
 
-**0.36.6（2026-11-14）**：「编辑书籍信息」新增评分（1–5 星）与 ISBN，随笔记写进 `grove_rating` / `grove_isbn`（空值不写），书架 Base 模板新增两列，方便按评分排序或筛 ISBN。
+## Known limitations
 
-**0.36.5（2026-11-14）**：书架卡片在「批注 N」旁显示「想法 M」——只统计写了评论的批注，跟批注数开关联动，窄屏不换行。
+- Mobile: PDFs up to 64 MB (the whole file is read into memory).
+- Annotations flow one way by default: edits made inside a note must be written back with "Sync annotations from the note…", which never deletes annotations.
+- PDF annotations are keyed by page number; re-editing the PDF (adding or removing pages) shifts them. Backlinks fall back to excerpt → chapter → percentage.
+- PDF built-in annotations (highlights, underlines, strikeouts drawn in Acrobat or Preview) are display-only.
+- TXT annotations are keyed by character offset; rewriting the file shifts them. Changing the reading encoding does not.
 
-**0.36.5（2026-11-14）**：书架卡片在「批注 N」旁显示「想法 M」——只统计写了评论的批注，跟批注数开关联动，窄屏不换行。
+## Changelog
 
-**0.36.4（2026-11-14）**：新增命令「复习本书（间隔重复）」——在阅读视图里只刷当前这本书的划线，一次最多 20 条、不受每日上限拦截；弹窗标题与进度按本书显示。
+**0.36.9** — The interface is now bilingual (Chinese / English) with a switcher in Settings → Appearance; generated guides and the built-in note template follow the language. Adds a community build without PDF reading for the official directory, removes the last `innerHTML` uses, and documents `isDesktopOnly: false`.
 
-**0.36.4（2026-11-14）**：新增命令「复习本书（间隔重复）」——在阅读视图里只刷当前这本书的划线，一次最多 20 条、不受每日上限拦截；弹窗标题与进度按本书显示。
+**0.36.7** — The global annotation CSV gains review columns (due date, interval, ease, reviews, lapses, last review), with dates in local time.
 
-**0.36.3（2026-11-14）**：批注菜单新增「加入今日复习」——EPUB / TXT / PDF 的高亮菜单都能把这条立刻排进今天的复习队列（只改到期日，保留难度与复习次数，不计入今日已复习）；已排在今天时显示「已在今日复习」并禁用。
+**0.36.6** — "Edit book info" gains a 1–5 star rating and ISBN, written to `grove_rating` / `grove_isbn`; the shelf Base template gains both columns.
 
-**0.36.3（2026-11-14）**：批注菜单新增「加入今日复习」——EPUB / TXT / PDF 的高亮菜单都能把这条立刻排进今天的复习队列（只改到期日，保留难度与复习次数，不计入今日已复习）；已排在今天时显示「已在今日复习」并禁用。
+**0.36.5** — Shelf cards show a "with comments" count next to the annotation count.
 
-**0.36.2（2026-11-14）**：新增「每日页数目标」（设置 → 阅读与笔记，页/天，0 = 不设；统计页「今日页数」卡片按翻页 / 换节计数并带进度条）；「发送到 Canvas」支持按章 / 按颜色分组（生成带标题的分组框）与组内按顺序连线，追加到已有画布仍接在原有内容下方。
+**0.36.4** — New command "Review this book" drills only the current book, up to 20 cards, ignoring the daily cap.
 
-**0.36.1（2026-11-14）**：复习卡片支持「写想法 / 改想法」（E 键），保存后写回批注并刷新阅读笔记；书架复习徽标改为「今天实际会出的条数」（到期 + 旧划线，受每日额度限制），不再只算到期。
+**0.36.3** — Highlight menus gain "Add to review", which schedules a single highlight for today.
 
-**0.36.0（2026-11-14）**：新增「今日复习（间隔重复）」——划线 / 批注按本地 SM-2 简化算法排期（忘记 / 模糊 / 记住 / 简单四档），每日上限默认 5 条、按「今天已复习」扣减，跳过不计；到期最久的先考，昨天及更早的旧划线补位。入口是命令与书架右上角复习按钮（带到期数徽标），卡片显示书名 / 章节 / 摘录 / 评论，支持回原文与再来一批；排期写在批注 JSON 里，随批注一起同步、备份、删除，不新增文件。配套：阅读统计第 5 张卡「今日复习」、命令「清空全部复习排期」、数据体检「复习排期异常」坏值校验、设置两项（每日条数 / 是否包含旧划线）。
+**0.36.0** — Spaced repetition: highlights are scheduled with a simplified SM-2, four grades, a daily cap, and a review card in the stats page.
 
-**0.35.0（2026-11-14）**：在 0.34.0 基础上收口竞品整合四批与手机端回归——阅读刻度与剩余时间、导出前筛选预览、笔记增量同步、书架 Base 模板、年度目标与读完预测、查词生词本、外部标注导入（Kindle / Readwise / 微信读书）、侧栏改为书签 / 引用 / 全文搜索 / 批注四页签、PDF 分页模式下进度轨跳页修复；手机端补齐统计弹窗与表格适配、不支持 TTS 时隐藏朗读按钮。
+## Roadmap
 
-## 路线图
+Done: in-book and vault-wide search (including PDF), annotation multi-select, export and external highlight import, backlink fallbacks, PDF precise backlinks and page links, footnote popovers, excerpt cards, AI Q&A / chapter guides / metadata / semantic search, spaced repetition, daily page goal, Canvas grouping, ratings and ISBN, CSV review columns, and a full mobile pass.
 
-已完成（截至 0.36.7）：全书内搜索与全库正文搜索（含 PDF）、批注多选 / 导出 / 外部标注导入、双链三件套、PDF 精确回跳与页链接、脚注浮窗、书摘卡出图、AI 问答 / 按章导读 / 元数据补全 / 语义检索、今日复习（间隔重复，含写想法 / 加入今日复习 / 复习本书）、每日页数目标、Canvas 分组卡片墙、书架想法徽标、评分 / ISBN、CSV 复习列、手机端全量回归。
+Remaining, chosen by feedback: a sync-conflict diff panel, paragraph idea bubbles, a mobile PDF progress track, and mobile TTS (intentionally out of scope).
 
-剩余（按使用反馈挑）：同步冲突 diff 面板、段落想法气泡、手机 PDF 进度轨、手机 TTS（默认不做）。详细登记见知识库《Grove Reader 现状与路线图》第九节。
+## Feedback
+
+- Bugs and feature requests: <https://github.com/LLllCCC/grove-reader/issues>
+- Anything else: <abuse@yopo.ccwu.cc>
+
+Third-party code: [foliate-js](https://github.com/johnfactotum/foliate-js) (MIT, vendored in `lib/foliate-js`) renders EPUB; PDF reading and annotation are built directly on pdfjs-dist.
