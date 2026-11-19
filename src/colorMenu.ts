@@ -34,7 +34,7 @@ export function createColorControls(
 
 	const btn = parent.createEl('button', {
 		cls: 'clickable-icon grove-icon-btn grove-color-menu-btn',
-		attr: { 'aria-label': '选择高亮颜色' },
+		attr: { 'aria-label': t('选择高亮颜色') },
 	})
 	setIcon(btn, 'palette')
 

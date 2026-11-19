@@ -2,6 +2,7 @@ import { requestUrl } from 'obsidian'
 import type { PortraitChunk } from './portrait'
 import { buildAskPrompt } from './portrait'
 import { buildMultiBookPrompt, type MultiBookMaterial } from './multiBookPrompt'
+import { t } from './i18n'
 
 export { buildMultiBookPrompt } from './multiBookPrompt'
 export type { MultiBookMaterial } from './multiBookPrompt'
@@ -14,9 +15,12 @@ export interface AiConfig {
 	prompt?: string
 }
 
-const DEFAULT_PROMPT =
-	'你是一位中文阅读助手。请用简洁、准确的中文解释用户选中的文字：先说字面意思，' +
-	'如果它在书中有特定含义就点出来，不要复述原文，不要寒暄。总长度控制在 150 字以内。'
+function defaultPrompt(): string {
+	return (
+		t('你是一位中文阅读助手。请用简洁、准确的中文解释用户选中的文字：先说字面意思，') +
+		t('如果它在书中有特定含义就点出来，不要复述原文，不要寒暄。总长度控制在 150 字以内。')
+	)
+}
 
 export function isAiConfigured(cfg: AiConfig): boolean {
 	return !!cfg.apiKey.trim() && !!cfg.baseUrl.trim() && !!cfg.model.trim()
@@ -87,7 +91,7 @@ export type SelectionAiTask = 'explain' | 'translate' | 'summarize'
 /** 调用 AI 解释一段文字 */
 export async function explainSelection(cfg: AiConfig, text: string): Promise<string> {
 	return chatCompletion(cfg, [
-		{ role: 'system', content: (cfg.prompt || '').trim() || DEFAULT_PROMPT },
+		{ role: 'system', content: (cfg.prompt || '').trim() || defaultPrompt() },
 		{ role: 'user', content: `请解释这段文字：\n\n${text.trim()}` },
 	], { temperature: 0.3, maxTokens: 700 })
 }
@@ -96,8 +100,8 @@ export async function explainSelection(cfg: AiConfig, text: string): Promise<str
 export async function transformSelection(cfg: AiConfig, text: string, task: SelectionAiTask): Promise<string> {
 	if (task === 'explain') return explainSelection(cfg, text)
 	const system = task === 'translate'
-		? '你是一位翻译助手。把用户选中的文字翻译成简体中文；如果原文已经是中文，翻译成自然、准确的英文。只输出译文，不要解释、不要寒暄。'
-		: '你是一位阅读助手。用 3-5 句话概括用户选中文字的核心意思，保留关键人物、概念、结论和数字；不要复述原文、不要评价、不要寒暄。'
+		? t('你是一位翻译助手。把用户选中的文字翻译成简体中文；如果原文已经是中文，翻译成自然、准确的英文。只输出译文，不要解释、不要寒暄。')
+		: t('你是一位阅读助手。用 3-5 句话概括用户选中文字的核心意思，保留关键人物、概念、结论和数字；不要复述原文、不要评价、不要寒暄。')
 	return chatCompletion(cfg, [
 		{ role: 'system', content: system },
 		{ role: 'user', content: text.trim() },
@@ -109,9 +113,9 @@ export async function lookupWord(cfg: AiConfig, word: string, context = ''): Pro
 	return chatCompletion(cfg, [
 		{
 			role: 'system',
-			content: '你是一位词典助手。用简体中文解释用户给的单词或短语，结合原文语境判断它在句中的含义。'
-				+ '严格按三行输出，不要寒暄、不要 Markdown 标题：\n'
-				+ '释义：一句话说清\n词性：名词/动词/形容词等\n例句：一个简短例句（英文词给英文例句并附中文翻译）',
+			content: t('你是一位词典助手。用简体中文解释用户给的单词或短语，结合原文语境判断它在句中的含义。')
+				+ t('严格按三行输出，不要寒暄、不要 Markdown 标题：\n')
+				+ t('释义：一句话说清\n词性：名词/动词/形容词等\n例句：一个简短例句（英文词给英文例句并附中文翻译）'),
 		},
 		{
 			role: 'user',
@@ -133,8 +137,8 @@ export async function summarizePortraitChunk(
 		{
 			role: 'system',
 			content:
-				'你在为一本书建立问答索引。请用 1-3 句话概括用户给出的正文片段，' +
-				'保留关键人物、概念、结论和数字；只输出概括，不要评价、不要寒暄、不要复述原文。',
+				t('你在为一本书建立问答索引。请用 1-3 句话概括用户给出的正文片段，') +
+				t('保留关键人物、概念、结论和数字；只输出概括，不要评价、不要寒暄、不要复述原文。'),
 		},
 		{
 			role: 'user',
@@ -155,9 +159,9 @@ export async function summarizeGuideSection(
 		{
 			role: 'system',
 			content:
-				'你在为一本书写分章导读。请用 2-4 句话说明这一章讲了什么：' +
-				'关键人物、事件、概念与结论，最后可以给一句阅读提示。' +
-				'只输出导读，不要复述原文、不要评价、不要寒暄。',
+				t('你在为一本书写分章导读。请用 2-4 句话说明这一章讲了什么：') +
+				t('关键人物、事件、概念与结论，最后可以给一句阅读提示。') +
+				t('只输出导读，不要复述原文、不要评价、不要寒暄。'),
 		},
 		{
 			role: 'user',
@@ -203,7 +207,7 @@ export async function embedTexts(
 		}
 		const json = res.json as { data?: Array<{ embedding?: number[] }> }
 		const data = json?.data ?? []
-		if (data.length !== batch.length) return { error: '嵌入返回条数与请求不一致' }
+		if (data.length !== batch.length) return { error: t('嵌入返回条数与请求不一致') }
 		return { vectors: data.map(item => item.embedding ?? []) }
 	}
 	const out: number[][] = []
@@ -216,7 +220,7 @@ export async function embedTexts(
 		if (result.error && options.dimensions && /\b400\b|dimension/i.test(result.error)) {
 			result = await request(batch, false)
 		}
-		if (result.error || !result.vectors) throw new Error(result.error || '嵌入失败')
+		if (result.error || !result.vectors) throw new Error(result.error || t('嵌入失败'))
 		for (const vector of result.vectors) {
 			if (!vector.length) throw new Error('嵌入返回空向量')
 			out.push(vector)
@@ -236,7 +240,7 @@ export async function answerMultiBookQuestion(
 	const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
 		{
 			role: 'system',
-			content: '你是一位严谨的中文阅读助手。只根据用户提供的多本书材料回答，材料不足时明确说明，不要编造。',
+			content: t('你是一位严谨的中文阅读助手。只根据用户提供的多本书材料回答，材料不足时明确说明，不要编造。'),
 		},
 	]
 	for (const turn of history.slice(-HISTORY_TURNS)) {
@@ -277,8 +281,8 @@ export async function answerBookQuestion(
 	const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
 		{
 			role: 'system',
-			content: '你是一位严谨的中文阅读助手。只根据用户提供的书内材料回答，材料不足时明确说明，不要编造。'
-				+ '用户可能在前面的问答基础上继续追问，请结合上下文回答。',
+			content: t('你是一位严谨的中文阅读助手。只根据用户提供的书内材料回答，材料不足时明确说明，不要编造。')
+				+ t('用户可能在前面的问答基础上继续追问，请结合上下文回答。'),
 		},
 	]
 	for (const turn of history.slice(-HISTORY_TURNS)) {

@@ -273,7 +273,7 @@ export class GroveSettingTab extends PluginSettingTab {
 			.setName(t('默认高亮颜色'))
 			.setDesc(t('手机工具栏颜色菜单里的「默认色」按钮使用这个颜色；桌面 5 个色点不变'))
 			.addDropdown(dropdown => {
-				for (const c of HIGHLIGHT_COLORS) dropdown.addOption(c.key, c.name)
+				for (const c of HIGHLIGHT_COLORS) dropdown.addOption(c.key, t(c.name))
 				dropdown
 					.setValue(this.plugin.settings.defaultHighlightColor ?? 'yellow')
 					.onChange(async value => {

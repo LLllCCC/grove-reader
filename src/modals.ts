@@ -549,7 +549,7 @@ export class ReadingStatsModal extends Modal {
 		const todayCard = card(
 			t('今日阅读'),
 			formatDuration(todaySec),
-			goalSec ? (todaySec >= goalSec ? `已达成 ${goalMin} 分钟目标` : `目标 ${goalMin} 分钟`) : t('未设目标'),
+			goalSec ? (todaySec >= goalSec ? t('已达成 {n} 分钟目标', { n: goalMin }) : t('目标 {n} 分钟', { n: goalMin })) : t('未设目标'),
 		)
 		if (goalSec > 0) {
 			const goal = todayCard.createDiv('grove-stats-goal')
@@ -558,20 +558,20 @@ export class ReadingStatsModal extends Modal {
 		}
 		const todayPages = stats.dailyTotals().get(today)?.pages ?? 0
 		const pageGoal = Math.max(0, this.plugin.settings.dailyPageGoal || 0)
-		const pagesCard = card(t('今日页数'), `${todayPages} 页`, pageGoal ? `目标 ${pageGoal} 页` : t('未设目标'))
+		const pagesCard = card(t('今日页数'), t('{n} 页', { n: todayPages }), pageGoal ? t('目标 {n} 页', { n: pageGoal }) : t('未设目标'))
 		if (pageGoal > 0) {
 			const goal = pagesCard.createDiv('grove-stats-goal')
 			const fill = goal.createDiv('grove-stats-goal-fill')
 			fill.style.width = `${Math.min(100, Math.round((todayPages / pageGoal) * 100))}%`
 		}
-		card(t('连续阅读'), `${streak.current} 天`, `最长 ${streak.longest} 天`)
-		card(t('活跃天数'), `${streak.activeDays} 天`, t('有阅读记录的天数'))
-		card(t('累计阅读'), formatDuration(totalSec), `${books.length} 本书`)
+		card(t('连续阅读'), t('{n} 天', { n: streak.current }), t('最长 {n} 天', { n: streak.longest }))
+		card(t('活跃天数'), t('{n} 天', { n: streak.activeDays }), t('有阅读记录的天数'))
+		card(t('累计阅读'), formatDuration(totalSec), t('{n} 本书', { n: books.length }))
 		const review = this.plugin.reviewOverview()
 		card(
 			t('今日复习'),
-			review.cap ? `${review.today} / ${review.cap} 条` : t('已关闭'),
-			review.cap ? `到期 ${review.due} 条${this.plugin.settings.reviewIncludeNew !== false ? ` · 旧划线 ${review.fresh} 条` : ''}` : t('设置 → 每日复习条数'),
+			review.cap ? t('{a} / {b} 条', { a: review.today, b: review.cap }) : t('已关闭'),
+			review.cap ? t('到期 {n} 条', { n: review.due }) + (this.plugin.settings.reviewIncludeNew !== false ? t(' · 旧划线 {n} 条', { n: review.fresh }) : '') : t('设置 → 每日复习条数'),
 		)
 
 		// 年度目标方格 + 读完预测：状态直接读每本书的数据，预测按近 7 天速度
@@ -611,7 +611,7 @@ export class ReadingStatsModal extends Modal {
 			if (goalBooks > 0) {
 				const head = box.createDiv('grove-goal-head')
 				head.createSpan('grove-goal-title').setText(t('年度目标'))
-				head.createSpan('grove-goal-value').setText(`${finishedThisYear} / ${goalBooks} 本`)
+				head.createSpan('grove-goal-value').setText(t('{a} / {b} 本', { a: finishedThisYear, b: goalBooks }))
 				const grid = box.createDiv('grove-goal-grid')
 				const cells = Math.min(goalBooks, 120)
 				for (let i = 0; i < cells; i++) {
@@ -623,8 +623,8 @@ export class ReadingStatsModal extends Modal {
 				}
 				box.createDiv('grove-goal-sub').setText(
 					finishedThisYear > cells
-						? `今年读完 ${finishedThisYear} 本（方格最多显示 ${cells} 个）`
-						: `今年读完 ${finishedThisYear} 本 · 近 7 天日均 ${Math.round(weekSeconds / 7 / 60)} 分钟`,
+						? t('今年读完 {a} 本（方格最多显示 {b} 个）', { a: finishedThisYear, b: cells })
+						: t('今年读完 {a} 本 · 近 7 天日均 {b} 分钟', { a: finishedThisYear, b: Math.round(weekSeconds / 7 / 60) }),
 				)
 			}
 			if (forecasts.length) {
@@ -632,8 +632,8 @@ export class ReadingStatsModal extends Modal {
 				list.createDiv('grove-forecast-title').setText(t('读完预测（按近 7 天速度）'))
 				for (const item of forecasts) {
 					const row = list.createDiv('grove-forecast-row')
-					row.createSpan('grove-forecast-book').setText(`《${item.title}》`)
-					row.createSpan('grove-forecast-days').setText(`约 ${item.days} 天后`)
+					row.createSpan('grove-forecast-book').setText(t('《{t}》', { t: item.title }))
+					row.createSpan('grove-forecast-days').setText(t('约 {n} 天后', { n: item.days ?? 0 }))
 					row.createSpan('grove-forecast-progress').setText(`${Math.round(item.fraction * 100)}%`)
 				}
 			}
@@ -652,7 +652,7 @@ export class ReadingStatsModal extends Modal {
 			new Notice(t('Grove Reader：今日打卡成功'))
 			this.onOpen()
 		})
-		checkRow.createSpan('grove-stats-checkin-count').setText(`累计打卡 ${stats.checkinCount()} 天`)
+		checkRow.createSpan('grove-stats-checkin-count').setText(t('累计打卡 {n} 天', { n: stats.checkinCount() }))
 		const posterBtn = checkRow.createEl('button', { text: t('生成阅读海报') })
 		posterBtn.addEventListener('click', () => void this.#savePoster())
 
@@ -662,7 +662,7 @@ export class ReadingStatsModal extends Modal {
 		const heatHead = this.contentEl.createDiv('grove-stats-chart-head')
 		heatHead.createSpan('grove-stats-chart-title').setText(t('最近 12 周'))
 		heatHead.createSpan('grove-stats-chart-total').setText(
-			`合计 ${formatDuration(heatTotal)}${heatPages ? ` · ${heatPages} 页` : ''}`,
+			t('合计 {t}', { t: formatDuration(heatTotal) }) + (heatPages ? t(' · {n} 页', { n: heatPages }) : ''),
 		)
 		const heat = this.contentEl.createDiv('grove-stats-heatmap')
 		for (const d of heatDays) {
@@ -671,8 +671,8 @@ export class ReadingStatsModal extends Modal {
 			cell.addClass(`is-level-${level}`)
 			if (d.day === today) cell.addClass('is-today')
 			const label = d.seconds > 0
-				? `${d.day}：${formatDuration(d.seconds)}${d.pages ? ` · ${d.pages} 页` : ''}`
-				: `${d.day}：未阅读`
+				? `${d.day} · ${formatDuration(d.seconds)}` + (d.pages ? t(' · {n} 页', { n: d.pages }) : '')
+				: `${d.day} · ` + t('未阅读')
 			cell.title = label
 			cell.setAttr('aria-label', label)
 		}

@@ -838,7 +838,7 @@ export class BookshelfView extends ItemView {
 		if (this.filteredPaths.length === 0 && this.allPaths.length > 0) {
 			this.#showEmpty(this.statusFilter === 'all'
 				? t('没有匹配的书。试试只输书名或作者里的关键词。')
-				: `没有标记为「${READING_STATUS_LABELS[this.statusFilter]}」的书。右键书籍卡片可以设置阅读状态。`)
+				: t('没有标记为「{s}」的书。右键书籍卡片可以设置阅读状态。', { s: t(READING_STATUS_LABELS[this.statusFilter]) }))
 		} else {
 			this.emptyEl.addClass('grove-hidden')
 		}
@@ -1127,7 +1127,7 @@ export class BookshelfView extends ItemView {
 		// 已生成的笔记里 grove_status 跟着变
 		this.plugin.refreshNoteForBook(path)
 		new Notice(status
-			? `Grove Reader：已标记为「${READING_STATUS_LABELS[status]}」`
+			? t('Grove Reader：已标记为「{s}」', { s: t(READING_STATUS_LABELS[status]) })
 			: t('Grove Reader：已清除手动阅读状态'))
 		void this.refresh()
 	}
@@ -1310,14 +1310,14 @@ export class BookshelfView extends ItemView {
 			const done = fraction >= 0.995
 			const progress = meta.createSpan('grove-shelf-progress')
 			progress.setText(done ? t('已读') : `${Math.round(fraction * 100)}%`)
-			progress.title = done ? t('已读完') : `读至 ${Math.round(fraction * 100)}%`
+			progress.title = done ? t('已读完') : t('读至 {n}%', { n: Math.round(fraction * 100) })
 		}
 		if (display.showAnnotationCount && info && info.annotations > 0) {
-			meta.createSpan('grove-shelf-badge').setText(`批注 ${info.annotations}`)
+			meta.createSpan('grove-shelf-badge').setText(t('批注 {n}', { n: info.annotations }))
 			if ((info.thoughts ?? 0) > 0) {
 				const thoughts = meta.createSpan('grove-shelf-badge grove-thought-badge')
-				thoughts.setText(`想法 ${info.thoughts}`)
-				thoughts.title = `${info.thoughts} 条批注写了想法`
+				thoughts.setText(t('想法 {n}', { n: info.thoughts ?? 0 }))
+				thoughts.title = t('{n} 条批注写了想法', { n: info.thoughts ?? 0 })
 			}
 		}
 		if (display.showLastRead && info?.lastRead) {
@@ -1389,7 +1389,7 @@ export class BookshelfView extends ItemView {
 			const currentStatus = plugin.store.load(path).readingStatus
 			for (const key of READING_STATUS_ORDER) {
 				menu.addItem(item => item
-					.setTitle(t("标记为{p0}", { p0: READING_STATUS_LABELS[key] }))
+					.setTitle(t('标记为{p0}', { p0: t(READING_STATUS_LABELS[key]) }))
 					.setIcon(currentStatus === key ? 'check' : 'circle')
 					.onClick(() => this.#setReadingStatus(path, key)))
 			}

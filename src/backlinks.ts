@@ -6,6 +6,7 @@ import { App, LinkCache, setIcon } from 'obsidian'
 import { basenameOf, compareCfi } from './util'
 import { parseGroveHref } from './wikilink'
 import type { GroveLinkTarget } from './wikilink'
+import { t } from './i18n'
 export { filterBacklinkGroupsByCfi } from './backlinkFilter'
 
 /** 一条引用：某笔记里的一个摘录双链 */
@@ -121,7 +122,7 @@ export function createCitationSection(
 ): CitationSectionHandle {
 	const startCollapsed = opts.startCollapsed ?? false
 	const title = opts.title ?? '引用'
-	const emptyText = opts.emptyText ?? '还没有笔记引用这本书。在笔记里写一条 [[书#grove-cfi=…]] 摘录双链，这里就会列出来。'
+	const emptyText = opts.emptyText ?? t('还没有笔记引用这本书。在笔记里写一条 [[书#grove-cfi=…]] 摘录双链，这里就会列出来。')
 	const el = parent.createDiv('grove-bm-section grove-cite-section')
 	const head = el.createDiv('grove-bm-head')
 	const chev = head.createSpan('grove-bm-chev')
@@ -163,7 +164,7 @@ export function createCitationSection(
 					snippet.addEventListener('click', () => handlers.onJump(row))
 				}
 				const actions = item.createDiv('grove-bm-actions')
-				const jump = actions.createEl('button', { cls: 'clickable-icon grove-mini-btn', attr: { 'aria-label': '打开这条笔记' } })
+				const jump = actions.createEl('button', { cls: 'clickable-icon grove-mini-btn', attr: { 'aria-label': t('打开这条笔记') } })
 				setIcon(jump, 'arrow-up-left')
 				jump.addEventListener('click', () => handlers.onJump(row))
 			}

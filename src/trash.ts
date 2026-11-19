@@ -2,6 +2,7 @@ import { isAbsolutePath, randomId } from './util'
 import { dirName, joinPath, readJsonFile, PlatformIO } from './platformIO'
 import type { ShelfEntry } from './bookshelf'
 import type { StatsBook } from './stats'
+import { t } from './i18n'
 
 export interface TrashEntry {
 	id: string
@@ -166,16 +167,16 @@ export class TrashStore {
 	async restore(id: string): Promise<TrashEntry> {
 		const dir = joinPath(this.root, id)
 		const entry = await readJsonFile<TrashEntry>(this.io, joinPath(dir, 'manifest.json'))
-		if (!entry) throw new Error('回收站记录已损坏，无法恢复')
+		if (!entry) throw new Error(t('回收站记录已损坏，无法恢复'))
 		const bookTarget = this.resolve(entry.bookPath)
 		const noteTarget = entry.notePath ? this.resolve(entry.notePath) : ''
 		const dataTarget = entry.dataFile ? joinPath(this.dataRoot, 'data', 'books', entry.dataFile) : ''
 		const coverTarget = entry.cover ? joinPath(this.dataRoot, 'data', 'covers', entry.cover) : ''
 		const portraitTarget = entry.portrait ? joinPath(this.dataRoot, 'portraits', `${entry.portrait}.json`) : ''
 
-		if (entry.files.book && (await this.io.exists(bookTarget))) throw new Error('原位置已有同名书籍文件，请先移走再恢复')
-		if (entry.files.note && noteTarget && (await this.io.exists(noteTarget))) throw new Error('原位置已有同名笔记，请先移走再恢复')
-		if (entry.files.data && dataTarget && (await this.io.exists(dataTarget))) throw new Error('这本书已有新的批注数据，请先备份再恢复')
+		if (entry.files.book && (await this.io.exists(bookTarget))) throw new Error(t('原位置已有同名书籍文件，请先移走再恢复'))
+		if (entry.files.note && noteTarget && (await this.io.exists(noteTarget))) throw new Error(t('原位置已有同名笔记，请先移走再恢复'))
+		if (entry.files.data && dataTarget && (await this.io.exists(dataTarget))) throw new Error(t('这本书已有新的批注数据，请先备份再恢复'))
 
 		const moved: Array<[string, string]> = []
 		let coverRestored = false

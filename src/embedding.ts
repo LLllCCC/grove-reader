@@ -68,7 +68,7 @@ export async function embedForSearch(
 ): Promise<number[][]> {
 	if (!texts.length) return []
 	if (runtime.provider === 'local') return texts.map(text => Array.from(localVector(text)))
-	if (!runtime.apiKey.trim()) throw new Error('没有嵌入 API Key（设置 → AI 解释 → 向量服务）')
+	if (!runtime.apiKey.trim()) throw new Error(t('没有嵌入 API Key（设置 → AI 解释 → 向量服务）'))
 	return embedTexts(
 		{ baseUrl: runtime.baseUrl, apiKey: runtime.apiKey, model: runtime.model },
 		texts,

@@ -1,5 +1,6 @@
 import { cleanBookTitle, isAbsolutePath, stripTitleAuthor } from './util'
 import { joinPath, PlatformIO, readJsonFile } from './platformIO'
+import { t } from './i18n'
 
 export interface MissingBook {
 	file: string
@@ -61,14 +62,14 @@ export interface HealthReport {
 /** 检查一条批注的 review 字段，返回问题描述；没问题或没有该字段时返回 null */
 function reviewProblem(raw: unknown): string | null {
 	if (raw === undefined) return null
-	if (!raw || typeof raw !== 'object') return 'review 字段不是对象'
+	if (!raw || typeof raw !== 'object') return t('review 字段不是对象')
 	const rev = raw as Record<string, unknown>
 	const due = rev.due
 	const interval = rev.interval
 	const ease = rev.ease
-	if (typeof due !== 'number' || !Number.isFinite(due) || due <= 0) return '到期时间无效'
-	if (typeof interval !== 'number' || !Number.isFinite(interval) || interval <= 0 || interval > 3650) return '间隔无效'
-	if (typeof ease !== 'number' || !Number.isFinite(ease) || ease < 1.29 || ease > 3.01) return '难度系数越界'
+	if (typeof due !== 'number' || !Number.isFinite(due) || due <= 0) return t('到期时间无效')
+	if (typeof interval !== 'number' || !Number.isFinite(interval) || interval <= 0 || interval > 3650) return t('间隔无效')
+	if (typeof ease !== 'number' || !Number.isFinite(ease) || ease < 1.29 || ease > 3.01) return t('难度系数越界')
 	return null
 }
 

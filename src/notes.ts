@@ -114,7 +114,7 @@ function quoteBlockOf(text: string): string {
 		.split(/\r?\n/)
 		.map(l => l.trim())
 		.filter(l => l.length > 0)
-	return (lines.length ? lines : ['（空摘录）']).map(l => `> ${l}`).join('\n>\n')
+	return (lines.length ? lines : [t('（空摘录）')]).map(l => `> ${l}`).join('\n>\n')
 }
 
 function sortAnnotations(list: Annotation[]): Annotation[] {
@@ -160,7 +160,7 @@ export function buildTemplateContext(data: BookData, bookId: string, opts: NoteL
 					// PDF 带上框选矩形，回跳能精确到句；电子书没有 pdf 字段
 					pdfRects: a.pdf?.rects,
 				},
-				'↩ 回原文',
+				t('↩ 回原文'),
 			)
 			: ''
 		group.annotations.push({
@@ -174,7 +174,7 @@ export function buildTemplateContext(data: BookData, bookId: string, opts: NoteL
 			jumpLink: style === 'wikilink' && wiki ? wiki : protocol,
 			protocolLink: protocol,
 			wikiLink: wiki,
-			excerptHeading: cleanHeading(a.text || '（空摘录）', 30),
+			excerptHeading: cleanHeading(a.text || t('（空摘录）'), 30),
 			blockId: `grove-${a.id}`,
 			date: new Date(a.createdAt || Date.now()).toLocaleDateString('zh-CN'),
 			page: a.pdf?.page ?? null,
@@ -189,7 +189,7 @@ export function buildTemplateContext(data: BookData, bookId: string, opts: NoteL
 				? wikilinkFor(
 					data.bookPath,
 					{ cfi: b.cfi, text: snippetOf(b.text ?? ''), chapter: b.label },
-					'↩ 回原文',
+					t('↩ 回原文'),
 				)
 				: ''
 			return {
@@ -230,7 +230,7 @@ const TAG_SOURCE = /\{\{\s*(#each\s+([A-Za-z_][\w.]*)|\/(each|if)|#if\s+([A-Za-z
 
 export function parseTemplate(src: string): Token[] {
 	const { tokens, closed } = parseSegment(src, undefined)
-	if (!closed) throw new Error('模板存在未闭合的标签')
+	if (!closed) throw new Error(t('模板存在未闭合的标签'))
 	return tokens
 }
 
@@ -251,12 +251,12 @@ function parseSegment(src: string, stop: 'each' | 'if' | undefined): { tokens: T
 		const tag = m[1]
 		if (tag.startsWith('#each')) {
 			const inner = parseSegment(rest, 'each')
-			if (!inner.closed) throw new Error('模板存在未闭合的 {{#each}}')
+			if (!inner.closed) throw new Error(t('模板存在未闭合的 {{#each}}'))
 			tokens.push({ type: 'each', arg: m[2]!, children: inner.tokens })
 			rest = inner.rest
 		} else if (tag.startsWith('#if')) {
 			const inner = parseSegment(rest, 'if')
-			if (!inner.closed) throw new Error('模板存在未闭合的 {{#if}}')
+			if (!inner.closed) throw new Error(t('模板存在未闭合的 {{#if}}'))
 			tokens.push({ type: 'if', arg: m[4]!, children: inner.tokens })
 			rest = inner.rest
 		} else if (tag.startsWith('/')) {

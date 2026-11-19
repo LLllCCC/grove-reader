@@ -989,9 +989,9 @@ export default class GroveReaderPlugin extends Plugin {
 						answer = await chatCompletion(cfg, [
 							{
 								role: 'system',
-								content: '你是图书管理员。把用户给出的书按主题分组，每组 3-12 本；' +
-									'组名用简洁中文（不超过 8 字），不要「其他」「杂项」这类兜底组。' +
-									'只输出 JSON 数组，格式：[{"name":"组名","books":[1,3,5]}]，不要解释。',
+								content: t('你是图书管理员。把用户给出的书按主题分组，每组 3-12 本；') +
+									t('组名用简洁中文（不超过 8 字），不要「其他」「杂项」这类兜底组。') +
+									t('只输出 JSON 数组，格式：[{"name":"组名","books":[1,3,5]}]，不要解释。'),
 							},
 							{ role: 'user', content: lines.join('\n') },
 						], { temperature: 0.2, maxTokens: 900 })

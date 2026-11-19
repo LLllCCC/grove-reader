@@ -3,6 +3,7 @@
 import { setIcon } from 'obsidian'
 import type { Bookmark } from './types'
 import { randomId } from './util'
+import { t } from './i18n'
 
 export interface BookmarkHandlers {
 	onJump: (b: Bookmark) => void
@@ -77,7 +78,7 @@ export function createBookmarkSection(parent: HTMLElement, options: BookmarkSect
 		count.setText(String(list.length))
 		body.empty()
 		if (!list.length) {
-			body.createDiv('grove-ann-empty').setText('暂无书签。点工具栏的书签按钮记下当前位置。')
+			body.createDiv('grove-ann-empty').setText(t('暂无书签。点工具栏的书签按钮记下当前位置。'))
 			return
 		}
 		// 新加的排前面

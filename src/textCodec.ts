@@ -1,3 +1,5 @@
+import { t } from './i18n'
+
 /** TXT 编码识别与分页（纯函数，便于脱离 Obsidian 测试） */
 
 export const VIEW_TYPE_GROVE_TEXT = 'grove-reader-text'
@@ -71,7 +73,7 @@ export function decodeTextBuffer(buffer: ArrayBuffer, preferred = 'auto'): Decod
 	return {
 		text: new TextDecoder('utf-8').decode(bytes).replace(/^\uFEFF/, ''),
 		encoding: 'utf-8',
-		warning: '无法严格识别编码，已按 UTF-8 替换非法字符显示',
+		warning: t('无法严格识别编码，已按 UTF-8 替换非法字符显示'),
 	}
 }
 

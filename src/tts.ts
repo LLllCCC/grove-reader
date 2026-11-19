@@ -7,6 +7,7 @@
  */
 import { Notice } from 'obsidian'
 import { applyTtsHighlight, type TtsSentence } from './ttsText'
+import { t } from './i18n'
 
 export { applyTtsHighlight, scrollRangeIntoView, sentenceRanges, splitSentenceSpans } from './ttsText'
 export type { TtsSentence } from './ttsText'
@@ -52,7 +53,7 @@ export class TtsController {
 	async start(): Promise<void> {
 		const synth = window.speechSynthesis
 		if (!synth || typeof SpeechSynthesisUtterance === 'undefined') {
-			new Notice('Grove Reader：当前环境不支持系统朗读')
+			new Notice(t('Grove Reader：当前环境不支持系统朗读'))
 			return
 		}
 		this.cancel()
@@ -64,7 +65,7 @@ export class TtsController {
 			this.index = 0
 		}
 		if (!this.queue.length) {
-			new Notice('Grove Reader：当前页没有可朗读的文字')
+			new Notice(t('Grove Reader：当前页没有可朗读的文字'))
 			this.cancel()
 			return
 		}

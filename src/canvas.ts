@@ -1,5 +1,6 @@
 import { Annotation } from './types'
 import { randomId, truncate } from './util'
+import { t } from './i18n'
 
 /**
  * Obsidian Canvas 文件（.canvas）是一份 JSON：nodes + edges。
@@ -43,7 +44,7 @@ export function emptyCanvas(): CanvasDoc {
 /** 解析已有画布；格式不对就抛错，由调用方给可读提示，不要静默清空 */
 export function parseCanvas(raw: string): CanvasDoc {
 	const parsed = JSON.parse(raw) as Partial<CanvasDoc>
-	if (!parsed || typeof parsed !== 'object') throw new Error('不是有效的画布文件')
+	if (!parsed || typeof parsed !== 'object') throw new Error(t('不是有效的画布文件'))
 	return {
 		nodes: Array.isArray(parsed.nodes) ? (parsed.nodes as CanvasNode[]) : [],
 		edges: Array.isArray(parsed.edges) ? parsed.edges : [],

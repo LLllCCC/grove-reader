@@ -5,6 +5,7 @@
 import { colorCss } from './types'
 import { shortTitle } from './canvas'
 import { truncate } from './util'
+import { t } from './i18n'
 
 export interface QuoteCardInput {
 	text: string
@@ -141,7 +142,7 @@ export function renderQuoteCard(input: QuoteCardInput): HTMLCanvasElement {
 	const family = getComputedStyle(body).fontFamily || 'sans-serif'
 
 	const meter = document.createElement('canvas').getContext('2d')
-	if (!meter) throw new Error('无法创建画布')
+	if (!meter) throw new Error(t('无法创建画布'))
 	const quoteSize = 22
 	const quoteLine = 36
 	const noteSize = 16
@@ -172,7 +173,7 @@ export function renderQuoteCard(input: QuoteCardInput): HTMLCanvasElement {
 	canvas.width = CARD_WIDTH * SCALE
 	canvas.height = Math.round(height * SCALE)
 	const ctx = canvas.getContext('2d')
-	if (!ctx) throw new Error('无法创建画布')
+	if (!ctx) throw new Error(t('无法创建画布'))
 	ctx.scale(SCALE, SCALE)
 
 	ctx.fillStyle = bg

@@ -8,7 +8,7 @@ import { hintFor, isAiConfigured, lookupWord, type AiConfig } from './ai'
 import { appendVocabEntry, vocabAnkiCsv, vocabFilePath, type VocabEntry } from './vocab'
 import { t } from './i18n'
 
-const NOT_CONFIGURED = '还没有配置 AI。请到 设置 → 阅读与笔记 → AI 解释 填入接口地址、模型与 API Key（推荐智谱 GLM-4-Flash，免费）'
+const NOT_CONFIGURED = t('还没有配置 AI。请到 设置 → 阅读与笔记 → AI 解释 填入接口地址、模型与 API Key（推荐智谱 GLM-4-Flash，免费）')
 
 export interface WordLookupContext {
 	bookTitle: string
