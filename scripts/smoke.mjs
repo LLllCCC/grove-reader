@@ -14,6 +14,9 @@ await build({
 	platform: 'node',
 	outfile: path.join(tmp, 'smoke.cjs'),
 	logLevel: 'warning',
+	// 与主构建同一个开关：GROVE_COMMUNITY=1 时按社区版（无 PDF）编译，
+	// 用来验证社区版的代码路径也能跑通，而不是只测完整版。
+	define: { __COMMUNITY_BUILD__: process.env.GROVE_COMMUNITY === '1' ? 'true' : 'false' },
 })
 // ------------------------------------------------------------------
 // 样式守卫：四个 Grove 视图都必须隐藏 Obsidian 自带的视图头（← → / 标题 / ⋮）。
