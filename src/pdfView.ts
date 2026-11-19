@@ -2465,7 +2465,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 				void this.#changeColor(a, next.key)
 			})
 			head.createSpan('grove-ann-chapter').setText(a.chapter || '')
-			if (a.source) head.createSpan('grove-ann-source').setText(IMPORT_SOURCE_LABELS[a.source] ?? a.source)
+			if (a.source) head.createSpan('grove-ann-source').setText(IMPORT_SOURCE_LABELS[a.source] ? tr(IMPORT_SOURCE_LABELS[a.source]) : a.source)
 			const text = item.createDiv('grove-ann-text')
 			setHighlightedText(text, truncate(a.text.trim(), 160), this.sidebarQuery)
 			text.addEventListener('click', () => this.#jumpToCfi(a.cfi, true, { text: a.text, chapter: a.chapter }))

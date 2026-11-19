@@ -2263,7 +2263,7 @@ export default class GroveReaderPlugin extends Plugin {
 		const progress = typeof fraction === 'number' ? Math.max(0, Math.min(1, fraction)) * 100 : 0
 		const stat = this.stats.book(data.bookPath)
 		const status = data.readingStatus
-			? READING_STATUS_LABELS[data.readingStatus]
+			? t(READING_STATUS_LABELS[data.readingStatus])
 			: progress >= 99 ? t('读完') : progress > 0 ? t('在读') : t('想读')
 		// 阅读统计按本地日期分桶：最早一天是开始读，最后一天在「读完」时当作完成日
 		const days = Object.keys(stat.days ?? {}).sort()

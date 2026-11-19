@@ -160,7 +160,7 @@ export class ReviewModal extends Modal {
 		src.createSpan({ cls: 'grove-review-book', text: `《${item.bookTitle}》` })
 		if (a.chapter) src.createSpan({ cls: 'grove-review-chapter', text: a.chapter })
 		if (a.source && IMPORT_SOURCE_LABELS[a.source]) {
-			src.createSpan({ cls: 'grove-review-source', text: IMPORT_SOURCE_LABELS[a.source] })
+			src.createSpan({ cls: 'grove-review-source', text: t(IMPORT_SOURCE_LABELS[a.source]) })
 		}
 		card.createDiv({ cls: 'grove-review-text', text: a.text.trim() })
 		const note = (a.note ?? '').trim()

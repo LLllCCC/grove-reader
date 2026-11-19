@@ -334,7 +334,7 @@ export class GroveSettingTab extends PluginSettingTab {
 		order.forEach((name, index) => {
 			const row = orderBox.createDiv('grove-order-row')
 			row.createSpan('grove-order-index').setText(String(index + 1))
-			row.createSpan('grove-order-name').setText(name)
+			row.createSpan('grove-order-name').setText(t(name))
 			const up = row.createEl('button', { cls: 'clickable-icon', attr: { 'aria-label': t('上移'), title: t('上移') } })
 			setIcon(up, 'chevron-up')
 			up.disabled = index === 0

@@ -9,6 +9,7 @@
 import type GroveReaderPlugin from './main'
 import { embedTexts } from './ai'
 import { LOCAL_EMBED_DIMS, localVector } from './localEmbed'
+import { t } from './i18n'
 
 export type EmbeddingProvider = 'local' | 'zhipu' | 'siliconflow' | 'custom'
 
@@ -83,12 +84,12 @@ export async function embedForSearch(
 export function embeddingProviderLabel(provider: EmbeddingProvider): string {
 	switch (provider) {
 		case 'local':
-			return '本地（离线，词法向量）'
+			return t('本地（离线，词法向量）')
 		case 'zhipu':
-			return '智谱（embedding-3）'
+			return t('智谱（embedding-3）')
 		case 'siliconflow':
-			return '硅基流动（BAAI/bge-m3，有免费额度）'
+			return t('硅基流动（BAAI/bge-m3，有免费额度）')
 		default:
-			return '自定义 OpenAI 兼容'
+			return t('自定义 OpenAI 兼容')
 	}
 }

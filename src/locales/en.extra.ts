@@ -234,4 +234,25 @@ export const EN_EXTRA: Record<string, string> = {
 	"夜间": "Night",
 
 	// —— 颜色与背景名 ——
+
+	// —— 标志、来源与向量服务 ——
+	"本地（离线，词法向量）": "Local (offline, lexical)",
+	"智谱（embedding-3）": "Zhipu (embedding-3)",
+	"硅基流动（BAAI/bge-m3，有免费额度）": "SiliconFlow (BAAI/bge-m3, free quota)",
+	"自定义 OpenAI 兼容": "Custom OpenAI-compatible",
+	"彩叶字标": "Autumn wordmark",
+	"五个字母各用一种林间色，最活泼的一版": "Each letter a different forest colour — the liveliest version",
+	"森林牌": "Forest plaque",
+	"深绿底、米白字母，稳重，适合长时间看": "Deep green with cream letters — calm, good for long sessions",
+	"灰绿字标": "Sage wordmark",
+	"单色低饱和，藏在界面里不抢戏": "Muted monochrome that stays out of the way",
+	"印章": "Seal",
+	"方形印章 + 字标，适合当头像或缩略标志": "Square seal with wordmark — works as an avatar or thumbnail",
+	"未读": "Unread",
+	"微信读书": "WeRead",
+
+	// —— 跳转与缩略图 ——
+	"返回": "Back",
+	"页缩略图": "Page thumbnails",
+	"已跳转": "Jumped",
 }

@@ -2,6 +2,7 @@
 // 只在"明确跳转"（目录、批注、搜索命中、笔记回跳）时调用，
 // 翻页/滚动不调用——否则每翻一页都挂一条提示。
 import { setIcon } from 'obsidian'
+import { t } from './i18n'
 
 export interface JumpReturnOptions {
 	/** 起点章节名之类的短标签，没有就显示「已跳转」 */
@@ -27,8 +28,8 @@ export class JumpReturnBar {
 		const icon = bar.createSpan('grove-jump-return-icon')
 		setIcon(icon, 'corner-up-left')
 		const label = options.label?.trim()
-		bar.createSpan('grove-jump-return-text').setText(label ? `从「${label}」跳过来` : '已跳转')
-		const back = bar.createEl('button', { cls: 'grove-jump-return-btn', text: '返回' })
+		bar.createSpan('grove-jump-return-text').setText(label ? `从「${label}」跳过来` : t('已跳转'))
+		const back = bar.createEl('button', { cls: 'grove-jump-return-btn', text: t('返回') })
 		back.addEventListener('click', () => {
 			this.hide()
 			options.back()

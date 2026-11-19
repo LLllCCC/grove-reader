@@ -543,7 +543,7 @@ export class BookshelfView extends ItemView {
 		const statusSelect = statusWrap.createEl('select', { cls: 'dropdown' })
 		statusSelect.createEl('option', { value: 'all', text: t('全部') })
 		for (const key of READING_STATUS_ORDER) {
-			statusSelect.createEl('option', { value: key, text: READING_STATUS_LABELS[key] })
+			statusSelect.createEl('option', { value: key, text: t(READING_STATUS_LABELS[key]) })
 		}
 		statusSelect.value = this.statusFilter
 		statusSelect.addEventListener('change', () => {

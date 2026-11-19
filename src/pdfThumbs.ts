@@ -5,6 +5,7 @@
  * 几百页的扫描件也不会一打开就全量解码。
  */
 import { App, Modal } from 'obsidian'
+import { t } from './i18n'
 
 export interface PdfThumbDoc {
 	numPages: number
@@ -37,7 +38,7 @@ export class PdfThumbnailsModal extends Modal {
 	onOpen(): void {
 		this.modalEl.addClass('grove-pdf-thumbs-modal')
 		this.contentEl.empty()
-		this.contentEl.createEl('h3', { text: '页缩略图' })
+		this.contentEl.createEl('h3', { text: t('页缩略图') })
 		const grid = this.contentEl.createDiv('grove-pdf-thumbs')
 		const observer = new IntersectionObserver(entries => {
 			for (const entry of entries) {
