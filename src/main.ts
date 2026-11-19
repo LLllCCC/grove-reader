@@ -712,7 +712,7 @@ export default class GroveReaderPlugin extends Plugin {
 					}
 					if (changed) this.store.save(data)
 				}
-				this.oplog.add(t('清空复习排期'), `${cleared} 条`)
+				this.oplog.add(t('清空复习排期'), t('{n} 条', { n: cleared }))
 				this.refreshShelfReviewBadges()
 				new Notice(t("{p0}：已清空 {p1} 条复习排期", { p0: APP_NAME, p1: cleared }))
 			},
@@ -1150,7 +1150,7 @@ export default class GroveReaderPlugin extends Plugin {
 		this.settings.hiddenBooks = []
 		await this.saveSettings()
 		this.refreshShelfViews()
-		this.oplog.add(t('恢复隐藏书籍'), `${count} 本`)
+		this.oplog.add(t('恢复隐藏书籍'), t('{n} 本', { n: count }))
 		new Notice(t("{p0}：已恢复 {p1} 本", { p0: APP_NAME, p1: count }))
 	}
 
@@ -1178,7 +1178,7 @@ export default class GroveReaderPlugin extends Plugin {
 					this.store.save(fresh)
 					this.refreshNoteForBook(bookPath)
 					this.refreshShelfViews()
-					this.oplog.add(t('清空批注'), `《${title}》；${count} 条`)
+					this.oplog.add(t('清空批注'), t('《{title}》；{n} 条', { title, n: count }))
 					this.debug('annotations', 'clear', { bookPath, count })
 					new Notice(t("已清空 {p0} 条批注", { p0: count }))
 				}

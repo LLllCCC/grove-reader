@@ -2377,7 +2377,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 	}
 
 	#refreshSelectBar(): void {
-		if (this.selectMode) this.selectCountEl.setText(`已选 ${this.selectedIds.size} 条`)
+		if (this.selectMode) this.selectCountEl.setText(tr('已选 {n} 条', { n: this.selectedIds.size }))
 	}
 
 	#toggleSelected(id: string): void {

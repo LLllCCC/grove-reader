@@ -13,7 +13,7 @@ import {
 	saveGuide,
 	type GuideDoc,
 } from './guide'
-import { t } from './i18n'
+import { t, currentLocale } from './i18n'
 
 const NOT_CONFIGURED = '还没有配置 AI。请到 设置 → 阅读 → AI 解释 填入接口地址、模型与 API Key（推荐智谱 GLM-4-Flash，免费）'
 
@@ -77,7 +77,7 @@ export class GuideModal extends Modal {
 		else if (!this.doc) status.setText(t('还没有生成导读。生成后会按章节各写 2-4 句，点其中一章可以跳回原文。'))
 		else {
 			const when = new Date(this.doc.updatedAt || this.doc.createdAt)
-				.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+				.toLocaleString(currentLocale() === 'en' ? 'en-US' : 'zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 			const state = this.doc.status === 'ready' ? '' : t('（上次未完成）')
 			status.setText(`已生成 ${this.doc.items.length} 章导读${state} · 更新于 ${when}`)
 		}

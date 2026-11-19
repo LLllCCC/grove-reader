@@ -58,7 +58,7 @@ export function createBookmarkSection(parent: HTMLElement, options: BookmarkSect
 	head.createSpan('grove-bm-title').setText('书签')
 	const count = head.createSpan('grove-bm-count')
 	count.setText('0')
-	const add = head.createEl('button', { cls: 'clickable-icon grove-mini-btn grove-bm-add', attr: { 'aria-label': '把当前位置加为书签' } })
+	const add = head.createEl('button', { cls: 'clickable-icon grove-mini-btn grove-bm-add', attr: { 'aria-label': t('把当前位置加为书签') } })
 	setIcon(add, 'plus')
 	add.addEventListener('click', e => {
 		e.stopPropagation()

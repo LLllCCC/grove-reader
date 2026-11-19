@@ -81,7 +81,7 @@ export async function chatCompletion(
 		choices?: Array<{ message?: { content?: string } }>
 	}
 	const answer = json?.choices?.[0]?.message?.content?.trim()
-	if (!answer) throw new Error('返回内容为空')
+	if (!answer) throw new Error(t('返回内容为空'))
 	return answer
 }
 

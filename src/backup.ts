@@ -107,7 +107,7 @@ export async function exportDataBackup(input: BackupInput): Promise<BackupResult
 		const entries = await listNames(io, root)
 		let legacy = false
 		try {
-			legacy = (await io.read(joinPath(root, t('说明.md')))).includes('由 Grove Reader')
+			legacy = (await io.read(joinPath(root, t('说明.md')))).includes(t('由 Grove Reader'))
 		} catch {
 			legacy = false
 		}

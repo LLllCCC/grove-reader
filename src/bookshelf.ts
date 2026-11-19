@@ -11,7 +11,7 @@ import { BookMetaModal } from './bookMetaModal'
 import type { BookInfoValues } from './modals'
 import type { BookList } from './lists'
 import { computeShelfWindow, estimateRowHeight, spacerHeight } from './shelfWindow'
-import { t } from './i18n'
+import { t, currentLocale } from './i18n'
 
 export const VIEW_TYPE_GROVE_BOOKSHELF = 'grove-bookshelf-view'
 
@@ -56,11 +56,16 @@ async function downloadImageFromUrl(url: string): Promise<{ buffer: ArrayBuffer;
 			res = await Promise.race([
 				requestUrl({ url, method: 'GET', headers }),
 				new Promise<never>((_, reject) =>
-					window.setTimeout(() => reject(new Error(t('下载超时（20 秒）'))), 20_000),
+					window.setTimeout(() => {
+						const err = new Error(t('下载超时（20 秒）'))
+						err.name = 'GroveTimeout'
+						reject(err)
+					}, 20_000),
 				),
 			])
 		} catch (e) {
-			if (e instanceof Error && e.message.includes('超时')) throw e
+			// 用错误类型判断，不能匹配消息文本——消息会随界面语言变化
+			if (e instanceof Error && e.name === 'GroveTimeout') throw e
 			continue
 		}
 		if (res.status >= 200 && res.status < 300) {
@@ -1269,18 +1274,18 @@ export class BookshelfView extends ItemView {
 			const track = coverWrap.createDiv('grove-cover-progress')
 			const pct = Math.min(100, Math.max(1, Math.round(fraction * 100)))
 			track.createDiv('grove-cover-progress-fill').style.width = `${pct}%`
-			track.title = fraction >= 0.995 ? t('已读完') : `读至 ${pct}%`
+			track.title = fraction >= 0.995 ? t('已读完') : t('读至 {n}%', { n: pct })
 		}
 
 		// 悬浮/键盘聚焦：只保留一个自定义提示，整合书名、文件名、大小与阅读信息
 		const detailLines = [title]
 		if (author) detailLines.push(author)
-		if (entry?.category) detailLines.push(`分类：${entry.category}`)
+		if (entry?.category) detailLines.push(t('分类：{v}', { v: entry.category }))
 		if (entry?.intro) detailLines.push(truncate(entry.intro, 80))
-		detailLines.push(`文件：${basenameOf(path)}`)
-		if (size != null) detailLines.push(`大小：${formatBytes(size)}`)
-		if (info?.seconds) detailLines.push(`累计阅读：${formatDuration(info.seconds)}`)
-		if (info?.lastRead) detailLines.push(`最近阅读：${new Date(info.lastRead).toLocaleString('zh-CN', { hour12: false })}`)
+		detailLines.push(t('文件：{v}', { v: basenameOf(path) }))
+		if (size != null) detailLines.push(t('大小：{v}', { v: formatBytes(size) }))
+		if (info?.seconds) detailLines.push(t('累计阅读：{v}', { v: formatDuration(info.seconds) }))
+		if (info?.lastRead) detailLines.push(t('最近阅读：{v}', { v: new Date(info.lastRead).toLocaleString(currentLocale() === 'en' ? 'en-US' : 'zh-CN', { hour12: false }) }))
 		const detail = detailLines.join('\n')
 		card.addEventListener('mouseenter', () => this.#scheduleTooltip(card, detail))
 		card.addEventListener('mouseleave', () => this.#hideTooltip())

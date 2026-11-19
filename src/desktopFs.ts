@@ -10,7 +10,7 @@ import fsp from 'node:fs/promises'
 import pathModule from 'node:path'
 import { LEGACY_LIBRARY_ROOT, LIBRARY_ROOT, isShelfExt } from './types'
 import { isAbsolutePath } from './util'
-import { t } from './i18n'
+import { t, currentLocale } from './i18n'
 
 /** 库外（或库内但没进 Obsidian 索引）的绝对路径：同步判断存在性 */
 export function pathExists(absPath: string): boolean {
@@ -205,7 +205,7 @@ export async function exportDataBackup(input: BackupInput): Promise<BackupResult
 		t('3. 把 data.json 放回 <库>/.obsidian/plugins/grove-reader/（插件根目录）；'),
 		t('4. 重新打开 Obsidian。'),
 		'',
-		`最近备份时间：${new Date().toLocaleString('zh-CN', { hour12: false })}`,
+		t('最近备份时间：{v}', { v: new Date().toLocaleString(currentLocale() === 'en' ? 'en-US' : 'zh-CN', { hour12: false }) }),
 	].join('\n')
 	await fsp.writeFile(pathModule.join(root, t('说明.md')), guide, 'utf-8')
 

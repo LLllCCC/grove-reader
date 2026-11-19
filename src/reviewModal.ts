@@ -128,7 +128,7 @@ export class ReviewModal extends Modal {
 		contentEl.addClass('grove-review')
 		const item = this.#current()
 		if (!item) this.#finished = true
-		const capText = this.data.dailyCap ? ` / 目标 ${this.data.dailyCap} 条` : ''
+		const capText = this.data.dailyCap ? t(' / 目标 {n} 条', { n: this.data.dailyCap }) : ''
 		const doneToday = this.data.reviewedToday + this.#graded
 		const scope = this.data.scopeTitle
 		const scopeLabel = scope ? (scope.startsWith('《') ? scope : `《${scope}》`) : ''
@@ -137,10 +137,10 @@ export class ReviewModal extends Modal {
 			cls: 'grove-review-meta',
 			text: scope
 				? (this.#finished
-					? `${scopeLabel} · 本轮复习 ${this.#graded} 条`
-					: `${scopeLabel} · 第 ${Math.min(this.#index + 1, this.#items.length)} / ${this.#items.length} 条`)
+					? t('{s} · 本轮复习 {n} 条', { s: scopeLabel, n: this.#graded })
+					: t('{s} · 第 {i} / {total} 条', { s: scopeLabel, i: Math.min(this.#index + 1, this.#items.length), total: this.#items.length }))
 				: (this.#finished
-					? `今天已复习 ${doneToday} 条${capText}`
+					? t('今天已复习 {n} 条{cap}', { n: doneToday, cap: capText })
 					: t('第 {i} / {total} 条 · 今天已复习 {done} 条{cap}', { i: Math.min(this.#index + 1, this.#items.length), total: this.#items.length, done: doneToday, cap: capText })),
 		})
 

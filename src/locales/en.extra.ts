@@ -463,4 +463,27 @@ export const EN_EXTRA: Record<string, string> = {
 	"PDF 文件读取提前结束（{a}/{b}）": "PDF read ended early ({a}/{b})",
 
 	// —— 计数与括号文案 ——
+
+	// —— 卡片悬浮提示与复习进度 ——
+	" / 目标 {n} 条": " / goal {n}",
+	"大小：{v}": "Size: {v}",
+	"分类：{v}": "Category: {v}",
+	"今天已复习 {n} 条{cap}": "{n} reviewed today{cap}",
+	"累计阅读：{v}": "Total reading: {v}",
+	"文件：{v}": "File: {v}",
+	"最近阅读：{v}": "Last read: {v}",
+
+	// —— 操作日志与选择计数 ——
+	"已选 {n} 条": "{n} selected",
+	"{n} 条": "{n}",
+	"{n} 本": "{n}",
+	"《{title}》；{n} 条": "\"{title}\"; {n} annotations",
+	"{s} · 本轮复习 {n} 条": "{s} · {n} reviewed this round",
+	"{s} · 第 {i} / {total} 条": "{s} · {i} of {total}",
+	"最近备份时间：{v}": "Last backup: {v}",
+
+	// —— 书签按钮与接口错误 ——
+	"把当前位置加为书签": "Bookmark this position",
+	"返回内容为空": "The response was empty",
+	"由 Grove Reader": "by Grove Reader",
 }

@@ -14,7 +14,7 @@ import { filterGlobalBookmarks } from './globalBookmarks'
 import type { GlobalBookmarkRow } from './globalBookmarks'
 import { posterFileName, renderReadingPoster } from './poster'
 import { AnnotationExportModal } from './exportModal'
-import { t } from './i18n'
+import { t, currentLocale } from './i18n'
 
 export class BookPickerModal extends FuzzySuggestModal<TFile> {
 	constructor(app: App, private onPick: (file: TFile) => void) {
@@ -501,10 +501,11 @@ export class FolderSuggest extends AbstractInputSuggest<TFolder> {
 	}
 }
 
+/** 统计弹窗内的时长显示（与 util.formatDuration 分开：这里不显示“天”） */
 function formatDuration(seconds: number): string {
-	if (seconds < 60) return `${Math.round(seconds)} 秒`
-	if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟`
-	return `${(seconds / 3600).toFixed(1)} 小时`
+	if (seconds < 60) return t('{n} 秒', { n: Math.round(seconds) })
+	if (seconds < 3600) return t('{n} 分钟', { n: Math.round(seconds / 60) })
+	return t('{n} 小时', { n: (seconds / 3600).toFixed(1) })
 }
 
 function formatLastRead(ts: number): string {
@@ -512,8 +513,8 @@ function formatLastRead(ts: number): string {
 	const days = Math.floor((Date.now() - ts) / 86_400_000)
 	if (days <= 0) return t('今天')
 	if (days === 1) return t('昨天')
-	if (days < 30) return `${days} 天前`
-	return new Date(ts).toLocaleDateString('zh-CN')
+	if (days < 30) return t('{n} 天前', { n: days })
+	return new Date(ts).toLocaleDateString(currentLocale() === 'en' ? 'en-US' : 'zh-CN')
 }
 
 /** 阅读/翻页累计统计：按书 + 最近 14 天 */
