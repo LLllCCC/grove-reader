@@ -1548,7 +1548,7 @@ export class CanvasExportModal extends Modal {
 			const body = item.createDiv('grove-sync-body')
 			const head = body.createDiv('grove-sync-head')
 			head.createSpan('grove-sync-field').setText(a.chapter || t('未分章'))
-			head.createSpan('grove-canvas-page').setText(a.pdf?.page ? `第 ${a.pdf.page} 页` : '')
+			head.createSpan('grove-canvas-page').setText(a.pdf?.page ? t('第 {n} 页', { n: a.pdf.page }) : '')
 			body.createDiv('grove-canvas-excerpt').setText(truncate(a.text.replace(/\s+/g, ' '), 100))
 		}
 

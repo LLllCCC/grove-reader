@@ -380,7 +380,7 @@ export class TextView extends ItemView implements ReaderEngine {
 			this.encoding = this.encodingSelect.value
 			const fraction = this.pages.length > 1 ? this.page / (this.pages.length - 1) : 0
 			this.#decodeAndRender(fraction)
-			new Notice(`${this.plugin.manifest.name}：编码已切换为 ${this.encoding === 'auto' ? t('自动') : this.encoding}`)
+			new Notice(t('{app}：编码已切换为 {enc}', { app: this.plugin.manifest.name, enc: this.encoding === 'auto' ? t('自动') : this.encoding }))
 		})
 
 		// 编码识别结果：短标签放末尾，鼠标悬停看完整信息
@@ -741,7 +741,7 @@ export class TextView extends ItemView implements ReaderEngine {
 	#buildToc(): void {
 		if (!this.tocBtn) return
 		this.currentChapterOffset = -1
-		this.tocBtn.setText(this.chapters.length ? `目录（${this.chapters.length}）` : t('目录'))
+		this.tocBtn.setText(this.chapters.length ? t('目录（{n}）', { n: this.chapters.length }) : t('目录'))
 		this.tocBtn.title = this.chapters.length ? t('打开目录（可搜索）') : t('没有识别到章节')
 	}
 

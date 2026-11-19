@@ -138,7 +138,7 @@ export default class GroveReaderPlugin extends Plugin {
 			.purgeExpired()
 			.then(purged => {
 				if (!purged) return
-				this.oplog?.add(t('回收站清理'), `自动清理 ${purged} 项`)
+				this.oplog?.add(t('回收站清理'), t('自动清理 {n} 项', { n: purged }))
 				this.debug('trash', 'purge expired', { count: purged })
 			})
 			.catch(() => {
@@ -437,7 +437,7 @@ export default class GroveReaderPlugin extends Plugin {
 		this.shelfCache.saveNow()
 		this.lists.saveNow()
 		this.stats.saveNow()
-		this.oplog.add(t('数据体检清理'), `移除失效引用 ${removed} 项`)
+		this.oplog.add(t('数据体检清理'), t('移除失效引用 {n} 项', { n: removed }))
 		this.debug('health', 'cleanup', { removed })
 		this.refreshShelfViews()
 		new Notice(t("{p0}：已清理 {p1} 项失效引用", { p0: APP_NAME, p1: removed }))
@@ -500,7 +500,7 @@ export default class GroveReaderPlugin extends Plugin {
 	async emptyTrash(): Promise<void> {
 		if (!this.trash) return
 		const count = await this.trash.empty()
-		this.oplog.add(t('清空回收站'), `${count} 项`)
+		this.oplog.add(t('清空回收站'), t('{n} 项', { n: count }))
 		this.debug('trash', 'empty', { count })
 		new Notice(t("{p0}：已清空回收站（{p1} 项）", { p0: APP_NAME, p1: count }))
 	}
@@ -724,7 +724,7 @@ export default class GroveReaderPlugin extends Plugin {
 		data.bookmarks = (data.bookmarks ?? []).filter(b => b.id !== row.bookmark.id)
 		this.store.save(data)
 		this.refreshNoteForBook(row.bookPath)
-		new Notice(`${APP_NAME}：已删除书签「${row.bookmark.label || t('未命名位置')}」`)
+		new Notice(t('{p0}：已删除书签「{v}」', { p0: APP_NAME, v: row.bookmark.label || t('未命名位置') }))
 	}
 
 	loadSearchIndex(): SearchDoc[] {
@@ -804,7 +804,7 @@ export default class GroveReaderPlugin extends Plugin {
 				return
 			}
 		}
-		this.oplog.add(t('导出批注检索'), `${docs.length} 条 → ${target}`)
+		this.oplog.add(t('导出批注检索'), t('{n} 条 → {target}', { n: docs.length, target }))
 		this.debug('search', 'export', { count: docs.length, target, format })
 		new Notice(t("{p0}：已导出 {p1} 条到 {p2}", { p0: APP_NAME, p1: docs.length, p2: target }))
 	}
@@ -1026,7 +1026,7 @@ export default class GroveReaderPlugin extends Plugin {
 						new Notice(t('Grove Reader：AI 没有给出可用的分组'))
 						return
 					}
-					this.oplog.add(t('AI 整理书单'), `${created} 个书单 / ${assigned} 本书`)
+					this.oplog.add(t('AI 整理书单'), t('{a} 个书单 / {b} 本书', { a: created, b: assigned }))
 					new Notice(t("Grove Reader：已整理出 {p0} 个书单，归入 {p1} 本书", { p0: created, p1: assigned }))
 					for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_BOOKSHELF)) {
 						const view = leaf.view
@@ -2132,7 +2132,7 @@ export default class GroveReaderPlugin extends Plugin {
 			const n = applySync(data, changes)
 			this.store.save(data)
 			view.refreshAnnotations()
-			this.oplog.add(t('从笔记回写批注'), `《${data.title || data.bookPath}》 ${n} 项`)
+			this.oplog.add(t('从笔记回写批注'), t('《{title}》 {n} 项', { title: data.title || data.bookPath, n }))
 			new Notice(t("Grove Reader：已从笔记回写 {p0} 项，笔记未改动", { p0: n }))
 		}).open()
 	}
@@ -2529,7 +2529,7 @@ export default class GroveReaderPlugin extends Plugin {
 						const result = await migrateDataFolder(this.io, sourceRoot, targetRoot)
 						this.settings.dataFolder = folder
 						await this.saveSettings()
-						this.oplog.add(t('迁移数据文件夹'), `${sourceRoot} → ${targetRoot}；${result.books} 份批注`)
+						this.oplog.add(t('迁移数据文件夹'), t('{from} → {to}；{n} 份批注', { from: sourceRoot, to: targetRoot, n: result.books }))
 						this.debug('data', 'migrate', { from: sourceRoot, to: targetRoot, files: result.files, books: result.books })
 						new Notice(t("{p0}：已复制 {p1} 个文件。请重启 Obsidian 生效；旧数据确认无误后再删。", { p0: APP_NAME, p1: result.files }))
 					} catch (e) {
@@ -2598,7 +2598,7 @@ export default class GroveReaderPlugin extends Plugin {
 				new Notice(t("Grove Reader：目标文件夹「{p0}」里已有同名文件，为避免误删已中止。请换一个空文件夹，或清空后重试", { p0: rel }))
 				return
 			}
-			this.oplog?.add(t('备份数据'), `${result.bookCount} 本书；库内「${rel}」`)
+			this.oplog?.add(t('备份数据'), t('{n} 本书；库内「{rel}」', { n: result.bookCount, rel }))
 			this.debug('backup', 'export', { rel, bookCount: result.bookCount })
 			new Notice(t("Grove Reader：已备份 {p0} 本书的批注数据到库内「{p1}」{p2}", { p0: result.bookCount, p1: rel, p2: result.extra }))
 		} catch (e) {

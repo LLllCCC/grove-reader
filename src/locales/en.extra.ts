@@ -486,4 +486,30 @@ export const EN_EXTRA: Record<string, string> = {
 	"把当前位置加为书签": "Bookmark this position",
 	"返回内容为空": "The response was empty",
 	"由 Grove Reader": "by Grove Reader",
+
+	// —— 书单菜单、操作日志与检索摘要 ——
+	"、": ", ",
+	"{a} 个书单 / {b} 本书": "{a} lists / {b} books",
+	"{from} → {to}；{n} 份批注": "{from} → {to}; {n} annotation files",
+	"{n} 本书；库内「{rel}」": "{n} books; in the vault at \"{rel}\"",
+	"{n} 条 → {target}": "{n} annotations → {target}",
+	"{n} 项": "{n} items",
+	"{p0}：已删除书签「{v}」": "{p0}: bookmark \"{v}\" deleted",
+	"{pages} 页中命中 {total} 处": "{total} matches on {pages} pages",
+	"《{title}》 {n} 项": "\"{title}\" · {n} items",
+	"参考：{list}": "References: {list}",
+	"移除失效引用 {n} 项": "Removed {n} stale references",
+	"移入书单（当前：{name}）": "Move to reading list (current: {name})",
+	"自动清理 {n} 项": "Auto-cleaned {n} items",
+
+	// —— 目录、编码与删除日志 ——
+	"{app}：编码已切换为 {enc}": "{app}: encoding switched to {enc}",
+	"《{title}》；{where}；阅读笔记 {note}": "\"{title}\"; {where}; reading note {note}",
+	"《{title}》；仅移出书架；阅读笔记 {note}": "\"{title}\"; removed from shelf only; reading note {note}",
+	"第 {n} 章": "Chapter {n}",
+	"目录（{n}）": "Contents ({n})",
+	"已完成 {n} 本": "Finished {n} books",
+	"正在搜索 {i} / {total} · {title}": "Searching {i} / {total} · {title}",
+
+	// —— 目录、编码与删除日志 ——
 }

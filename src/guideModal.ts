@@ -131,7 +131,7 @@ export class GuideModal extends Modal {
 		for (const item of this.doc.items) {
 			const row = list.createDiv('grove-guide-item')
 			const top = row.createDiv('grove-guide-item-head')
-			top.createSpan('grove-guide-item-label').setText(item.label || `第 ${item.index + 1} 章`)
+			top.createSpan('grove-guide-item-label').setText(item.label || t('第 {n} 章', { n: item.index + 1 }))
 			const jump = top.createSpan('grove-guide-item-jump')
 			jump.setText(t('回到原文'))
 			row.createDiv('grove-guide-item-text').setText(item.summary || t('（这一章还没生成）'))

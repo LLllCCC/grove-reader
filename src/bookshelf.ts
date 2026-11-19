@@ -1212,7 +1212,11 @@ export class BookshelfView extends ItemView {
 				const hidden = this.plugin.settings.hiddenBooks ?? []
 				this.plugin.settings.hiddenBooks = hidden.filter(p => p !== path)
 				await this.plugin.saveSettings()
-				this.plugin.oplog.add(t('删除书籍'), `《${title}》；${trashed ? t('移入回收站') : t('已删除原文件')}；阅读笔记${deleteNote ? (trashed ? t('一并移入') : t('一并删除')) : t('保留')}`)
+				this.plugin.oplog.add(t('删除书籍'), t('《{title}》；{where}；阅读笔记 {note}', {
+					title,
+					where: trashed ? t('移入回收站') : t('已删除原文件'),
+					note: deleteNote ? (trashed ? t('一并移入') : t('一并删除')) : t('保留'),
+				}))
 				new Notice(trashed ? t('已移入回收站，可在 设置 → 回收站 恢复') : t('已删除书籍文件'))
 			} else {
 				const hidden = this.plugin.settings.hiddenBooks ?? []
@@ -1227,7 +1231,7 @@ export class BookshelfView extends ItemView {
 					this.plugin.store.save(fresh)
 				}
 				await this.plugin.saveSettings()
-				this.plugin.oplog.add(t('删除书籍'), `《${title}》；仅移出书架；阅读笔记${deleteNote ? t('已删除') : t('保留')}`)
+				this.plugin.oplog.add(t('删除书籍'), t('《{title}》；仅移出书架；阅读笔记 {note}', { title, note: deleteNote ? t('已删除') : t('保留') }))
 				new Notice(t('已从书架移除，原文件与批注数据都保留'))
 			}
 			await this.refresh({ rescan: true })
@@ -1388,7 +1392,7 @@ export class BookshelfView extends ItemView {
 			menu.addItem(item => {
 				const lid = plugin.lists.listIdOf(path)
 				const name = plugin.lists.lists().find(l => l.id === lid)?.name
-				item.setTitle(name ? `移入书单（当前：${name}）` : t('移入书单…')).setIcon('list').onClick(() => this.#pickList(path))
+				item.setTitle(name ? t('移入书单（当前：{name}）', { name }) : t('移入书单…')).setIcon('list').onClick(() => this.#pickList(path))
 			})
 			// 阅读状态：手动标记后覆盖按进度自动判断的状态
 			const currentStatus = plugin.store.load(path).readingStatus

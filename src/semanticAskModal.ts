@@ -123,7 +123,7 @@ export class SemanticAskModal extends Modal {
 			for (const para of ex.answer.split(/\n+/).map(s => s.trim()).filter(Boolean)) {
 				body.createEl('p', { text: para })
 			}
-			block.createDiv('grove-ask-refs-label').setText(`参考：${ex.books.join('、')}`)
+			block.createDiv('grove-ask-refs-label').setText(t('参考：{list}', { list: ex.books.join(t('、')) }))
 		}
 		if (this.asking) this.answerEl.createDiv('grove-ask-loading').setText(t('正在根据这些段落生成回答…'))
 	}

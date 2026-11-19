@@ -429,7 +429,7 @@ export class LibrarySearchModal extends Modal {
 				shouldStop: () => token !== this.token,
 				onProgress: (done, total, title) => {
 					if (token !== this.token) return
-					this.statusEl.setText(title ? `正在搜索 ${done + 1} / ${total} · ${title}` : `已完成 ${total} 本`)
+					this.statusEl.setText(title ? t('正在搜索 {i} / {total} · {title}', { i: done + 1, total, title }) : t('已完成 {n} 本', { n: total }))
 				},
 			})
 		}

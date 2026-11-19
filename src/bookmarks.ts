@@ -86,7 +86,7 @@ export function createBookmarkSection(parent: HTMLElement, options: BookmarkSect
 			const item = body.createDiv('grove-bm-item')
 			const main = item.createDiv('grove-bm-main')
 			const label = main.createDiv('grove-bm-label')
-			label.setText(b.label || '未命名位置')
+			label.setText(b.label || t('未命名位置'))
 			label.addEventListener('click', () => handlers.onJump(b))
 			if (b.text) {
 				const snippet = main.createDiv('grove-bm-text')

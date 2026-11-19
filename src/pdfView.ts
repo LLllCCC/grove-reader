@@ -2300,7 +2300,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 		this.searchResultsEl.empty()
 		const pages = [...this.pageMatches.keys()].sort((a, b) => a - b)
 		const total = pages.reduce((s, n) => s + this.pageMatches.get(n)!.length, 0)
-		this.searchCountEl.setText(total ? `${pages.length} 页中命中 ${total} 处` : tr('没有找到，试试更短的关键词'))
+		this.searchCountEl.setText(total ? tr('{pages} 页中命中 {total} 处', { pages: pages.length, total }) : tr('没有找到，试试更短的关键词'))
 		if (!total) return
 		for (const n of pages) {
 			const group = this.searchResultsEl.createDiv('grove-search-group')
