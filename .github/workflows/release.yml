@@ -21,25 +21,37 @@ jobs:
         with:
           node-version: "22.x"
 
-      - name: Build plugin
+      - name: Install deps
+        run: npm install --no-audit --no-fund
+
+      # 社区版：不含 PDF 阅读。Obsidian 官方目录安装时只下载
+      # main.js / manifest.json / styles.css，pdfjs 的 5.9 MB 运行时资源
+      # 拿不到，所以目录分发的主资产必须是这个构建。
+      - name: Build community (no PDF)
         run: |
-          npm install --no-audit --no-fund
+          npm run build:community
+          mkdir -p dist-community
+          cp main.js dist-community/main.js
+          cp manifest.json dist-community/manifest.json
+          cp styles.css dist-community/styles.css
+
+      # 完整版：含 PDF 阅读。作为附加资产提供给需要 PDF 的用户。
+      - name: Build full (with PDF)
+        run: |
           npm run build
+          mkdir -p dist-full
+          cp main.js dist-full/main.full.js
+          (cd pdfjs && zip -qr ../dist-full/grove-reader-pdfjs-assets.zip .)
 
-      # PDF 运行时资源单独打包：Obsidian 安装器只取 main.js / manifest.json / styles.css，
-      # 这份 zip 是给需要 PDF 功能的用户手动解压进插件目录用的。
-      - name: Pack PDF assets
-        run: |
-          cd pdfjs && zip -qr ../grove-reader-pdfjs-assets.zip . && cd ..
-
-      - name: Generate artifact attestation
+      - name: Attest assets
         uses: actions/attest@v4
         with:
           subject-path: |
-            main.js
-            manifest.json
-            styles.css
-            grove-reader-pdfjs-assets.zip
+            dist-community/main.js
+            dist-community/manifest.json
+            dist-community/styles.css
+            dist-full/main.full.js
+            dist-full/grove-reader-pdfjs-assets.zip
 
       - name: Create release
         env:
@@ -49,4 +61,9 @@ jobs:
           gh release create "$tag" \
             --title="$tag" \
             --draft \
-            main.js manifest.json styles.css grove-reader-pdfjs-assets.zip
+            --generate-notes \
+            dist-community/main.js \
+            dist-community/manifest.json \
+            dist-community/styles.css \
+            dist-full/main.full.js \
+            dist-full/grove-reader-pdfjs-assets.zip

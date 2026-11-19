@@ -141,9 +141,9 @@ async function extractPdf(plugin: GroveReaderPlugin, bytes: ArrayBuffer): Promis
 	let worker: InstanceType<typeof pdfjsLib.PDFWorker> | null = null
 	let doc: PdfTextDoc | null = null
 	try {
-		// 社区版不含 PDF：不解析正文，也不把 pdfjs 打进产物
-		const lib: typeof import('pdfjs-dist') | null = __COMMUNITY_BUILD__ ? null : await import('pdfjs-dist')
-		if (!lib) return { kind: 'pdf', sections: [] }
+		// 社区版不含 PDF：先 return，让打包器把下面的 pdfjs 分支当作死代码删掉
+		if (__COMMUNITY_BUILD__) return { kind: 'pdf', sections: [] }
+		const lib = await import('pdfjs-dist')
 		const workerSrc = await plugin.resolvePdfWorkerSrc()
 		if (workerSrc) (lib.GlobalWorkerOptions as unknown as { workerSrc: string }).workerSrc = workerSrc
 		worker = new lib.PDFWorker()

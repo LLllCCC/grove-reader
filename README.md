@@ -10,10 +10,20 @@
 
 ## 安装
 
-1. 把 `main.js`、`manifest.json`、`styles.css` 复制到 `<库>/.obsidian/plugins/grove-reader/`。
-2. 需要 PDF 时，再把 Release 页的 `grove-reader-pdfjs-assets.zip` 解压到同一目录，得到 `pdfjs/`（含 `wasm/`、`cmaps/`、`standard_fonts/`、`pdf.worker.mjs`）。不做这一步 EPUB 等格式照常可用，只是打开 PDF 会提示缺少解码资源。
-3. Obsidian 设置 → 第三方插件 → 启用 **Grove Reader**。
-4. 把 EPUB（也支持 mobi / azw3 / fb2 / cbz / txt）放进库里任意位置，点左侧栏书本图标或执行命令「打开书籍…」。
+Release 提供**两种构建**，按需选择：
+
+| 构建 | 资产 | PDF 阅读 | 适用 |
+| --- | --- | --- | --- |
+| 社区版（默认） | `main.js` + `manifest.json` + `styles.css` | 不含 | 从 Obsidian 官方目录安装，或只要 EPUB / TXT |
+| 完整版 | 把 `main.js` 换成 `main.full.js`，再加 `pdfjs/` | 含 | 需要 PDF 划线批注 |
+
+**社区版**：把 `main.js`、`manifest.json`、`styles.css` 复制到 `<库>/.obsidian/plugins/grove-reader/`。
+
+**完整版**：把 `main.full.js` 改名成 `main.js` 覆盖进去，再把 `grove-reader-pdfjs-assets.zip` 解压到同一目录得到 `pdfjs/`（含 `wasm/`、`cmaps/`、`standard_fonts/`、`pdf.worker.mjs`）。两者版本号相同，直接覆盖即可。
+
+启用：Obsidian 设置 → 第三方插件 → 启用 **Grove Reader**。之后把 EPUB（也支持 mobi / azw3 / fb2 / cbz / txt）放进库里任意位置，点左侧栏书本图标或执行命令「打开书籍…」。
+
+社区版点开 PDF 不会报错：会提示「PDF 阅读需要完整版」，并交给系统默认程序打开。
 
 ## 网络与隐私
 
@@ -207,6 +217,12 @@ npm run dev       # watch 模式
 npm run foliate:check  # 本地基线 + 上游对比（网络不可用时自动跳过上游）
 npm run foliate:baseline  # 刻意修改 foliate-js 后更新 BASELINE.json
 npm run obsidian:eval "<js>"  # 在运行中的 Obsidian 里执行 JS（需以 --remote-debugging-port=9222 启动）
+node scripts/i18n-extract.mjs --missing  # 列出 t() 里还没翻译的键，应为 0
+node scripts/i18n-gaps.mjs               # 列出「源码有中文、词典没有」的字面量（含 t(变量) 与拼接）
+node scripts/toplevel-t.mjs src/*.ts     # 找出模块顶层的 t()：import 时求值会被语言冻结
+node scripts/i18n-extract.mjs --missing  # 列出 t() 里还没翻译的键，应为 0
+node scripts/i18n-gaps.mjs               # 列出「源码有中文、词典没有」的字面量（含 t(变量) 与拼接）
+node scripts/toplevel-t.mjs src/*.ts     # 找出模块顶层的 t()：import 时求值会被语言冻结
 ```
 
 **更新纪律**：本插件不做自动更新。`npm run build` 只产出构建物；写入库内插件目录必须 `npm run deploy -- --yes`（或 `GROVE_DEPLOY=1`），手机端同样只在明确要求后 adb push。视图头隐藏等关键样式由 `npm run smoke` 的样式守卫保护，误删选择器会直接构建失败。**版本号（package.json / manifest.json / versions.json）只在用户明确要求发版时修改**，功能做完可以先留在工作区。
