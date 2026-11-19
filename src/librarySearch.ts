@@ -373,7 +373,7 @@ export class LibrarySearchModal extends Modal {
 		this.semanticEl = semantic.createEl('input', { type: 'checkbox' })
 		const runtime = resolveEmbedding(this.plugin)
 		semantic.createSpan({
-			text: `语义检索（向量 · ${embeddingProviderLabel(runtime.provider)}）`,
+			text: t("语义检索（向量 · {p0}）", { p0: embeddingProviderLabel(runtime.provider) }),
 		})
 		if (!isLocalEmbedding(runtime) && (!runtime.baseUrl || !runtime.apiKey)) {
 			this.semanticEl.disabled = true
@@ -414,7 +414,7 @@ export class LibrarySearchModal extends Modal {
 					? ''
 					: t('；可在 设置 → AI 解释 → 向量服务 切到「本地（离线）」直接使用')
 				this.statusEl.setText(`语义检索失败：${msg}${hintFor(msg)}${localHint}`)
-				new Notice(`Grove Reader：语义检索失败（${msg}${hintFor(msg)}${localHint}）`, 8000)
+				new Notice(t("Grove Reader：语义检索失败（{p0}{p1}{p2}）", { p0: msg, p1: hintFor(msg), p2: localHint }), 8000)
 				return
 			}
 			if (!books) {
@@ -492,7 +492,7 @@ export class LibrarySearchModal extends Modal {
 				done++
 			}
 			if (failed.length) {
-				new Notice(`Grove Reader：${failed.length} 本书索引失败（${failed.slice(0, 3).join('、')}）`, 8000)
+				new Notice(t("Grove Reader：{p0} 本书索引失败（{p1}）", { p0: failed.length, p1: failed.slice(0, 3).join('、') }), 8000)
 			}
 			if (token !== this.token) return null
 			this.statusEl.setText(t('索引就绪，正在检索…'))

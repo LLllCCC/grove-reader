@@ -280,10 +280,10 @@ export class BookAskModal extends Modal {
 			doc.status = 'ready'
 			doc.updatedAt = Date.now()
 			await savePortrait(this.plugin.io, this.plugin.getDataRoot(), this.#bookId, doc)
-			new Notice(`Grove Reader：要点索引已建立（${doc.chunks.length} 段）`)
+			new Notice(t("Grove Reader：要点索引已建立（{p0} 段）", { p0: doc.chunks.length }))
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e)
-			new Notice(`Grove Reader：建立索引失败（${msg}${hintFor(msg)}）`, 8000)
+			new Notice(t("Grove Reader：建立索引失败（{p0}{p1}）", { p0: msg, p1: hintFor(msg) }), 8000)
 			if (this.portrait) {
 				this.portrait.status = 'partial'
 				this.portrait.updatedAt = Date.now()
@@ -392,10 +392,10 @@ export class BookAskModal extends Modal {
 			await this.app.vault.create(target, lines.join('\n'))
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e)
-			new Notice(`Grove Reader：保存失败（${msg}）`)
+			new Notice(t("Grove Reader：保存失败（{p0}）", { p0: msg }))
 			return
 		}
-		new Notice(`Grove Reader：已存为笔记 ${target}`)
+		new Notice(t("Grove Reader：已存为笔记 {p0}", { p0: target }))
 	}
 
 	async #deleteIndex(): Promise<void> {

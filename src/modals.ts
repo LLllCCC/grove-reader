@@ -319,7 +319,7 @@ export class DeleteBookModal extends Modal {
 		this.contentEl.createEl('p', { text: `《${this.bookTitle}》` })
 		this.contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: `这本书有 ${this.annotationCount} 条批注。勾选删除原文件时，书籍、阅读数据（批注、阅读位置、书单归属）会一起移入插件回收站；只移出书架则全部保留。`,
+			text: t("这本书有 {p0} 条批注。勾选删除原文件时，书籍、阅读数据（批注、阅读位置、书单归属）会一起移入插件回收站；只移出书架则全部保留。", { p0: this.annotationCount }),
 		})
 		const row = this.contentEl.createDiv('grove-delete-check')
 		const checkbox = row.createEl('input', { type: 'checkbox' })
@@ -392,7 +392,7 @@ export class DangerConfirmModal extends Modal {
 		this.contentEl.createEl('p', { text: this.message })
 		this.contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: `此操作不可在插件内撤销。请输入「${this.word}」以确认。`,
+			text: t("此操作不可在插件内撤销。请输入「{p0}」以确认。", { p0: this.word }),
 		})
 		const input = this.contentEl.createEl('input', { type: 'text', cls: 'grove-folder-input' })
 		input.placeholder = this.word
@@ -784,9 +784,9 @@ export class ReadingStatsModal extends Modal {
 			if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder)
 			const path = normalizePath(`${folder}/${posterFileName()}`)
 			await this.app.vault.createBinary(path, await blob.arrayBuffer())
-			new Notice(`Grove Reader：阅读海报已保存到 ${path}`)
+			new Notice(t("Grove Reader：阅读海报已保存到 {p0}", { p0: path }))
 		} catch (e) {
-			new Notice(`Grove Reader：保存海报失败（${e instanceof Error ? e.message : String(e)}）`)
+			new Notice(t("Grove Reader：保存海报失败（{p0}）", { p0: e instanceof Error ? e.message : String(e) }))
 		}
 	}
 
@@ -892,7 +892,7 @@ export class HealthReportModal extends Modal {
 			+ report.staleShelf.length + report.staleLists.length + report.staleStats.length + report.brokenNoteIds.length
 			+ report.orphanPortraits.length + report.vectorIssues.length + report.reviewIssues.length
 		this.contentEl.createEl('p', {
-			text: `批注数据 ${report.jsonCount} 份 / ${report.annotationCount} 条；发现 ${issueCount} 项需要关注。`,
+			text: t("批注数据 {p0} 份 / {p1} 条；发现 {p2} 项需要关注。", { p0: report.jsonCount, p1: report.annotationCount, p2: issueCount }),
 		})
 		if (!issueCount) {
 			this.contentEl.createEl('p', { text: t('没有发现结构性问题：书籍路径、笔记、书架、书单、统计、AI 要点索引和语义索引都能对上。') })
@@ -903,7 +903,7 @@ export class HealthReportModal extends Modal {
 				body.createEl('h4', { text: `${title}（${items.length}）` })
 				const list = body.createEl('ul', { cls: 'grove-health-list' })
 				for (const item of items.slice(0, 8)) list.createEl('li', { text: item })
-				if (items.length > 8) list.createEl('li', { text: `…还有 ${items.length - 8} 项`, cls: 'grove-health-more' })
+				if (items.length > 8) list.createEl('li', { text: t("…还有 {p0} 项", { p0: items.length - 8 }), cls: 'grove-health-more' })
 			}
 			section(t('找不到原文件的批注'), report.missingBooks.map(b =>
 				`《${b.title || t('未命名')}》 · ${b.annotations} 条 · ${b.bookPath || t('无路径')}`))
@@ -944,7 +944,7 @@ export class HealthReportModal extends Modal {
 		})
 		const cleanupable = this.cleanupCount
 		if (cleanupable) {
-			const cleanup = buttons.createEl('button', { text: `清理 ${cleanupable} 项失效引用`, cls: 'mod-warning' })
+			const cleanup = buttons.createEl('button', { text: t("清理 {p0} 项失效引用", { p0: cleanupable }), cls: 'mod-warning' })
 			cleanup.addEventListener('click', () => {
 				this.close()
 				this.onCleanup()
@@ -1004,13 +1004,13 @@ export class TrashModal extends Modal {
 		const entries = await trash.list()
 		contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: `删除的书籍、笔记、批注和封面会先放在这里，保留 ${trash.retentionDays()} 天。恢复会放回原路径；原位置已有同名文件时会拒绝恢复。`,
+			text: t("删除的书籍、笔记、批注和封面会先放在这里，保留 {p0} 天。恢复会放回原路径；原位置已有同名文件时会拒绝恢复。", { p0: trash.retentionDays() }),
 		})
 		if (!entries.length) {
 			contentEl.createEl('p', { text: t('回收站是空的。') })
 		} else {
 			const total = entries.reduce((sum, entry) => sum + entry.size, 0)
-			contentEl.createEl('p', { text: `共 ${entries.length} 项，占用 ${formatSize(total)}。` })
+			contentEl.createEl('p', { text: t("共 {p0} 项，占用 {p1}。", { p0: entries.length, p1: formatSize(total) }) })
 			const list = contentEl.createDiv('grove-trash-list')
 			for (const entry of entries) {
 				const row = list.createDiv('grove-trash-row')
@@ -1129,7 +1129,7 @@ export class SearchModal extends Modal {
 		rebuild.addEventListener('click', () => {
 			this.docs = this.plugin.loadSearchIndex()
 			this.runSearch()
-			new Notice(`已重新索引 ${this.docs.length} 条批注`)
+			new Notice(t("已重新索引 {p0} 条批注", { p0: this.docs.length }))
 		})
 
 		this.resultsEl = contentEl.createDiv('grove-search-results')
@@ -1207,7 +1207,7 @@ export class SearchModal extends Modal {
 			}
 		}
 		if (this.results.length > this.limit) {
-			const more = resultsEl.createEl('button', { cls: 'grove-search-more', text: `显示更多（还有 ${this.results.length - this.limit} 条）` })
+			const more = resultsEl.createEl('button', { cls: 'grove-search-more', text: t("显示更多（还有 {p0} 条）", { p0: this.results.length - this.limit }) })
 			more.addEventListener('click', () => {
 				this.limit += 80
 				this.renderResults()
@@ -1262,7 +1262,7 @@ export class TemplatePickerModal extends Modal {
 		const data = this.plugin.store.load(this.bookPath)
 		this.contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: `《${data.title || basenameOf(this.bookPath)}》使用哪一套模板生成阅读笔记。切换后已存在的笔记会按新模板重写生成区。`,
+			text: t("《{p0}》使用哪一套模板生成阅读笔记。切换后已存在的笔记会按新模板重写生成区。", { p0: data.title || basenameOf(this.bookPath) }),
 		})
 		const list = this.plugin.templateList()
 		const current = data.templateId ?? ''
@@ -1523,7 +1523,7 @@ export class CanvasExportModal extends Modal {
 		this.contentEl.createEl('h3', { text: t('发送批注到 Canvas') })
 		this.contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: `从《${this.bookTitle}》选择要导出的批注：卡片含摘录、评论、回笔记与回原文链接。`,
+			text: t("从《{p0}》选择要导出的批注：卡片含摘录、评论、回笔记与回原文链接。", { p0: this.bookTitle }),
 		})
 
 		const selected = new Set(this.annotations.map(a => a.id))
@@ -1554,7 +1554,7 @@ export class CanvasExportModal extends Modal {
 		const targetRow = this.contentEl.createDiv('grove-canvas-target')
 		const select = targetRow.createEl('select', { cls: 'dropdown' })
 		select.createEl('option', { value: '__new__', text: t('新建画布') })
-		for (const c of this.canvases) select.createEl('option', { value: c.path, text: `追加到：${c.name}` })
+		for (const c of this.canvases) select.createEl('option', { value: c.path, text: t("追加到：{p0}", { p0: c.name }) })
 		const nameInput = targetRow.createEl('input', { type: 'text', cls: 'grove-folder-input' })
 		nameInput.value = this.defaultName
 		nameInput.placeholder = t('画布名称')

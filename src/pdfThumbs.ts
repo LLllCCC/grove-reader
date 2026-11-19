@@ -54,7 +54,7 @@ export class PdfThumbnailsModal extends Modal {
 		for (let n = 1; n <= this.pdfDoc.numPages; n++) {
 			const btn = grid.createEl('button', {
 				cls: `grove-pdf-thumb${n === this.current ? ' is-current' : ''}`,
-				attr: { type: 'button', 'data-page': String(n), 'aria-label': `第 ${n} 页` },
+				attr: { type: 'button', 'data-page': String(n), 'aria-label': t("第 {p0} 页", { p0: n }) },
 			})
 			btn.createEl('canvas')
 			btn.createSpan('grove-pdf-thumb-label').setText(String(n))

@@ -36,7 +36,7 @@ export class VectorIndexModal extends Modal {
 		const embed = resolveEmbedding(this.plugin)
 		this.contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: `当前服务：${embeddingProviderLabel(embed.provider)} · ${embed.model}。索引按书建立，正文改过或换模型后会失效；建立索引会调用嵌入接口，使用你自己的 API Key。`,
+			text: t("当前服务：{p0} · {p1}。索引按书建立，正文改过或换模型后会失效；建立索引会调用嵌入接口，使用你自己的 API Key。", { p0: embeddingProviderLabel(embed.provider), p1: embed.model }),
 		})
 		this.#summaryEl = this.contentEl.createDiv('grove-vector-summary')
 		this.#listEl = this.contentEl.createDiv('grove-vector-list')
@@ -129,18 +129,18 @@ export class VectorIndexModal extends Modal {
 					})
 				} catch (e) {
 					console.error(t('[Grove Reader] 建语义索引失败'), row.path, e)
-					new Notice(`Grove Reader：${row.title} 索引失败（${e instanceof Error ? e.message : String(e)}）`, 8000)
+					new Notice(t("Grove Reader：{p0} 索引失败（{p1}）", { p0: row.title, p1: e instanceof Error ? e.message : String(e) }), 8000)
 					continue
 				}
 				done++
 			}
 			const reuseText = reusedTotal ? `，复用 ${reusedTotal} / ${chunksTotal} 块` : ''
 			this.#status(`已重建 ${done} 本书的索引${reuseText}`)
-			new Notice(`Grove Reader：已重建 ${done} 本书的语义索引${reuseText}`)
+			new Notice(t("Grove Reader：已重建 {p0} 本书的语义索引{p1}", { p0: done, p1: reuseText }))
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e)
 			this.#status(`建立索引失败：${msg}`)
-			new Notice(`Grove Reader：建立索引失败（${msg}）`, 8000)
+			new Notice(t("Grove Reader：建立索引失败（{p0}）", { p0: msg }), 8000)
 		} finally {
 			this.#busy = false
 			await this.#refresh()
@@ -203,7 +203,7 @@ export class VectorIndexModal extends Modal {
 				// 删不掉就留着，下次再清
 			}
 		}
-		new Notice(`Grove Reader：已清理 ${stale.length + orphans.length} 个索引`)
+		new Notice(t("Grove Reader：已清理 {p0} 个索引", { p0: stale.length + orphans.length }))
 		await this.#refresh()
 	}
 }

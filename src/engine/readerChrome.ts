@@ -131,7 +131,7 @@ export function createReaderSidebar(parent: HTMLElement, options: ReaderSidebarO
 		for (const c of HIGHLIGHT_COLORS) {
 			const dot = filterRow.createEl('button', {
 				cls: 'grove-filter-dot',
-				attr: { 'aria-label': `只看${c.name}色批注`, title: `只看${c.name}色` },
+				attr: { 'aria-label': t("只看{p0}色批注", { p0: c.name }), title: t("只看{p0}色", { p0: c.name }) },
 			})
 			dot.style.backgroundColor = c.css
 			dot.addEventListener('click', () => hooks.onColorFilter?.(c.key))
@@ -200,7 +200,7 @@ export function createReaderSidebar(parent: HTMLElement, options: ReaderSidebarO
 	for (const [key, label] of tabDefs) {
 		const btn = tabsEl.createEl('button', {
 			cls: 'grove-sidebar-tab',
-			attr: { 'aria-label': `显示${label}` },
+			attr: { 'aria-label': t("显示{p0}", { p0: label }) },
 		})
 		btn.createSpan({ text: label })
 		if (key === 'annotations') {

@@ -226,10 +226,10 @@ export class GuideModal extends Modal {
 			doc.status = 'ready'
 			doc.updatedAt = Date.now()
 			await saveGuide(this.plugin.io, this.plugin.getDataRoot(), this.#bookId, doc)
-			new Notice(`Grove Reader：导读已生成（${doc.items.length} 章）`)
+			new Notice(t("Grove Reader：导读已生成（{p0} 章）", { p0: doc.items.length }))
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : String(e)
-			new Notice(`Grove Reader：生成导读失败（${msg}${hintFor(msg)}）`, 8000)
+			new Notice(t("Grove Reader：生成导读失败（{p0}{p1}）", { p0: msg, p1: hintFor(msg) }), 8000)
 			if (this.doc) {
 				this.doc.status = 'partial'
 				this.doc.updatedAt = Date.now()

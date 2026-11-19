@@ -1389,7 +1389,7 @@ export class BookshelfView extends ItemView {
 			const currentStatus = plugin.store.load(path).readingStatus
 			for (const key of READING_STATUS_ORDER) {
 				menu.addItem(item => item
-					.setTitle(`标记为${READING_STATUS_LABELS[key]}`)
+					.setTitle(t("标记为{p0}", { p0: READING_STATUS_LABELS[key] }))
 					.setIcon(currentStatus === key ? 'check' : 'circle')
 					.onClick(() => this.#setReadingStatus(path, key)))
 			}
@@ -1419,7 +1419,7 @@ export class BookshelfView extends ItemView {
 						const { shell } = require('electron') as typeof import('electron')
 						shell.showItemInFolder(this.#absPath(path))
 					} catch (e) {
-						new Notice(`无法在文件夹中显示：${e instanceof Error ? e.message : String(e)}`)
+						new Notice(t("无法在文件夹中显示：{p0}", { p0: e instanceof Error ? e.message : String(e) }))
 					}
 				}))
 			}
@@ -1756,8 +1756,8 @@ export class BookshelfView extends ItemView {
 						failed.push(file.name)
 					}
 				}
-				if (done) new Notice(`Grove Reader：已导入 ${done} 本书到 ${target}`)
-				if (failed.length) new Notice(`Grove Reader：${failed.length} 个文件导入失败（${failed.slice(0, 3).join('、')}）`, 8000)
+				if (done) new Notice(t("Grove Reader：已导入 {p0} 本书到 {p1}", { p0: done, p1: target }))
+				if (failed.length) new Notice(t("Grove Reader：{p0} 个文件导入失败（{p1}）", { p0: failed.length, p1: failed.slice(0, 3).join('、') }), 8000)
 				if (done) await this.refresh({ rescan: true })
 			})()
 		})

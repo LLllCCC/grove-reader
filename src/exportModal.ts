@@ -103,7 +103,7 @@ export class AnnotationExportModal extends Modal {
 		for (const color of HIGHLIGHT_COLORS) {
 			const chip = chips.createEl('button', {
 				cls: 'grove-export-color',
-				attr: { type: 'button', 'aria-pressed': 'true', title: `只看${color.name}色` },
+				attr: { type: 'button', 'aria-pressed': 'true', title: t("只看{p0}色", { p0: color.name }) },
 			})
 			chip.createSpan('grove-export-color-dot').style.background = color.css
 			chip.createSpan({ text: color.name })
@@ -250,7 +250,7 @@ export class AnnotationExportModal extends Modal {
 		}
 		const bookOptions = [...books.entries()].sort((a, b) => a[1].localeCompare(b[1], 'zh-CN'))
 		this.bookSelect.empty()
-		this.bookSelect.createEl('option', { value: '', text: `全部书籍（${books.size}）` })
+		this.bookSelect.createEl('option', { value: '', text: t("全部书籍（{p0}）", { p0: books.size }) })
 		for (const [path, title] of bookOptions) this.bookSelect.createEl('option', { value: path, text: title })
 		if (this.bookPath && !books.has(this.bookPath)) this.bookPath = ''
 		this.bookSelect.value = this.bookPath
@@ -263,7 +263,7 @@ export class AnnotationExportModal extends Modal {
 		}
 		const sorted = [...chapters].sort((a, b) => a.localeCompare(b, 'zh-CN'))
 		this.chapterSelect.empty()
-		this.chapterSelect.createEl('option', { value: '', text: `全部章节（${sorted.length}）` })
+		this.chapterSelect.createEl('option', { value: '', text: t("全部章节（{p0}）", { p0: sorted.length }) })
 		for (const chapter of sorted) this.chapterSelect.createEl('option', { value: chapter, text: chapter })
 		if (this.chapter && !chapters.has(this.chapter)) this.chapter = ''
 		this.chapterSelect.value = this.chapter
@@ -316,7 +316,7 @@ export class AnnotationExportModal extends Modal {
 			await this.plugin.exportSearchResults(docs, this.src.query, this.format, this.#options())
 			this.close()
 		} catch (e) {
-			new Notice(`导出失败：${e instanceof Error ? e.message : String(e)}`)
+			new Notice(t("导出失败：{p0}", { p0: e instanceof Error ? e.message : String(e) }))
 			this.exportBtn.disabled = false
 		}
 	}

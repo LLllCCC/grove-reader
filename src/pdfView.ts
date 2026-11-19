@@ -937,7 +937,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 		menu.addItem(item => item.setTitle(tr('导出本页为图片')).setIcon('image-down').onClick(() => void this.#exportCurrentPageImage()))
 		menu.addSeparator()
 		for (const rotation of [0, 90, 180, 270] as const) {
-			menu.addItem(item => item.setTitle(`旋转 ${rotation}°`).setChecked(this.rotation === rotation).onClick(() => this.#setRotation(rotation)))
+			menu.addItem(item => item.setTitle(tr("旋转 {p0}°", { p0: rotation })).setChecked(this.rotation === rotation).onClick(() => this.#setRotation(rotation)))
 		}
 		const rect = anchor.getBoundingClientRect()
 		menu.showAtPosition({ x: rect.left, y: rect.bottom + 4 })
@@ -996,9 +996,9 @@ export class PdfView extends ItemView implements ReaderEngine {
 			const safe = (this.bookTitle || 'PDF').replace(/[\\/:*?"<>|]/g, '_').slice(0, 80)
 			const path = joinPath(folder, `${safe}-第${n}页.png`)
 			await vault.adapter.writeBinary(path, await blob.arrayBuffer())
-			new Notice(`Grove Reader：已导出 ${path}`)
+			new Notice(tr("Grove Reader：已导出 {p0}", { p0: path }))
 		} catch (e) {
-			new Notice(`Grove Reader：导出页图失败（${e instanceof Error ? e.message : String(e)}）`)
+			new Notice(tr("Grove Reader：导出页图失败（{p0}）", { p0: e instanceof Error ? e.message : String(e) }))
 		}
 	}
 
@@ -1239,7 +1239,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 		console.error(`[Grove Reader] 渲染第 ${n} 页失败`, e)
 		if (this.#renderErrorReported) return
 		this.#renderErrorReported = true
-		new Notice(`Grove Reader：PDF 页面渲染失败：${e instanceof Error ? e.message : String(e)}（详见控制台）`)
+		new Notice(tr("Grove Reader：PDF 页面渲染失败：{p0}（详见控制台）", { p0: e instanceof Error ? e.message : String(e) }))
 	}
 
 	async #drawTextLayer(page: PdfPageProxy, p: PageEntry, n: number): Promise<boolean> {
@@ -1999,7 +1999,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 		popup.style.background = dark ? '#26262b' : '#ffffff'
 		popup.style.borderColor = dark ? '#3f3f46' : '#d0d0d6'
 		for (const c of HIGHLIGHT_COLORS) {
-			const dot = popup.createEl('button', { cls: 'grove-color-dot', attr: { 'aria-label': `高亮（${c.name}）` } })
+			const dot = popup.createEl('button', { cls: 'grove-color-dot', attr: { 'aria-label': tr("高亮（{p0}）", { p0: c.name }) } })
 			dot.style.backgroundColor = c.css
 			dot.addEventListener('click', () => void this.#createHighlightFromPending(c.key))
 		}
@@ -2027,10 +2027,10 @@ export class PdfView extends ItemView implements ReaderEngine {
 					link,
 					mode,
 				}).then(path => {
-					new Notice(`Grove Reader：已存到 ${path}`)
+					new Notice(tr("Grove Reader：已存到 {p0}", { p0: path }))
 					this.#clearPending()
 				}).catch(err => {
-					new Notice(`Grove Reader：保存失败（${err instanceof Error ? err.message : String(err)}）`)
+					new Notice(tr("Grove Reader：保存失败（{p0}）", { p0: err instanceof Error ? err.message : String(err) }))
 				})
 			}
 			const rect = saveBtn.getBoundingClientRect()
@@ -2415,7 +2415,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 			const p = this.pages.get(n)
 			if (p) this.#drawHighlightsOf(p.wrap)
 		}
-		new Notice(`Grove Reader：已删除 ${ids.length} 条批注（历史备份仍保留在插件数据目录中）`)
+		new Notice(tr("Grove Reader：已删除 {p0} 条批注（历史备份仍保留在插件数据目录中）", { p0: ids.length }))
 	}
 
 	// ------------------------------------------------------------------

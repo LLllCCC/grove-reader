@@ -1264,10 +1264,10 @@ export class ReaderView extends ItemView implements ReaderEngine {
 					link,
 					mode,
 				}).then(path => {
-					new Notice(`Grove Reader：已存到 ${path}`)
+					new Notice(t("Grove Reader：已存到 {p0}", { p0: path }))
 					this.#clearPending()
 				}).catch(err => {
-					new Notice(`Grove Reader：保存失败（${err instanceof Error ? err.message : String(err)}）`)
+					new Notice(t("Grove Reader：保存失败（{p0}）", { p0: err instanceof Error ? err.message : String(err) }))
 				})
 			}
 			const rect = saveBtn.getBoundingClientRect()
@@ -1783,7 +1783,7 @@ export class ReaderView extends ItemView implements ReaderEngine {
 		this.selectedIds.clear()
 		this.#refreshSelectBar()
 		this.#renderSidebar()
-		new Notice(`Grove Reader：已删除 ${ids.length} 条批注（历史备份仍保留在插件数据目录中）`)
+		new Notice(t("Grove Reader：已删除 {p0} 条批注（历史备份仍保留在插件数据目录中）", { p0: ids.length }))
 	}
 
 	#filterKey(): string {

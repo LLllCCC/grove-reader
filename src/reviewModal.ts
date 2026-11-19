@@ -197,7 +197,7 @@ export class ReviewModal extends Modal {
 	#renderSummary(contentEl: HTMLElement): void {
 		this.#finished = true
 		const box = contentEl.createDiv('grove-review-summary')
-		box.createEl('h4', { text: `本轮复习完成：${this.#graded} 条` })
+		box.createEl('h4', { text: t("本轮复习完成：{p0} 条", { p0: this.#graded }) })
 		const parts: string[] = []
 		for (const grade of GRADES) {
 			if (this.#tally[grade]) parts.push(`${t(REVIEW_GRADE_LABELS[grade])} ${this.#tally[grade]}`)
@@ -207,14 +207,14 @@ export class ReviewModal extends Modal {
 		if (this.#nextDue) {
 			box.createEl('p', {
 				cls: 'grove-review-meta',
-				text: `最早下次到期：${dueLabel(this.#nextDue, Date.now())}。间隔会随「记住 / 简单」逐步拉长。`,
+				text: t("最早下次到期：{p0}。间隔会随「记住 / 简单」逐步拉长。", { p0: dueLabel(this.#nextDue, Date.now()) }),
 			})
 		}
 
 		const next = this.handlers.getNext()
 		const actions = contentEl.createDiv('grove-review-summary-actions')
 		if (next.length) {
-			const more = actions.createEl('button', { cls: 'mod-cta', text: `再来一批（${next.length} 条）`, attr: { type: 'button' } })
+			const more = actions.createEl('button', { cls: 'mod-cta', text: t("再来一批（{p0} 条）", { p0: next.length }), attr: { type: 'button' } })
 			more.addEventListener('click', () => {
 				this.#items = next
 				this.#index = 0

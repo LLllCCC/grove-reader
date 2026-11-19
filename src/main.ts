@@ -338,11 +338,11 @@ export default class GroveReaderPlugin extends Plugin {
 
 	async openDebugLog(): Promise<void> {
 		if (this.isMobile) {
-			new Notice(`${APP_NAME}：手机端暂不支持打开调试日志文件`)
+			new Notice(t("{p0}：手机端暂不支持打开调试日志文件", { p0: APP_NAME }))
 			return
 		}
 		if (!this.settings.debugMode) {
-			new Notice(`${APP_NAME}：请先开启调试模式`)
+			new Notice(t("{p0}：请先开启调试模式", { p0: APP_NAME }))
 			return
 		}
 		this.debug('app', 'open debug log')
@@ -351,7 +351,7 @@ export default class GroveReaderPlugin extends Plugin {
 			const { shell } = require('electron') as typeof import('electron')
 			await shell.openPath(this.debugLog.path())
 		} catch (e) {
-			new Notice(`${APP_NAME}：无法打开日志文件（${e instanceof Error ? e.message : String(e)}）`)
+			new Notice(t("{p0}：无法打开日志文件（{p1}）", { p0: APP_NAME, p1: e instanceof Error ? e.message : String(e) }))
 		}
 	}
 
@@ -387,7 +387,7 @@ export default class GroveReaderPlugin extends Plugin {
 		const { healthCleanupCount } = await import('./health')
 		const count = healthCleanupCount(report)
 		if (!count) {
-			new Notice(`${APP_NAME}：没有可清理的失效引用`)
+			new Notice(t("{p0}：没有可清理的失效引用", { p0: APP_NAME }))
 			return
 		}
 		new ConfirmModal(
@@ -440,7 +440,7 @@ export default class GroveReaderPlugin extends Plugin {
 		this.oplog.add(t('数据体检清理'), `移除失效引用 ${removed} 项`)
 		this.debug('health', 'cleanup', { removed })
 		this.refreshShelfViews()
-		new Notice(`${APP_NAME}：已清理 ${removed} 项失效引用`)
+		new Notice(t("{p0}：已清理 {p1} 项失效引用", { p0: APP_NAME, p1: removed }))
 	}
 
 	/**
@@ -485,7 +485,7 @@ export default class GroveReaderPlugin extends Plugin {
 		this.refreshShelfViews()
 		this.oplog.add(t('恢复回收站'), `《${entry.title}》`)
 		this.debug('trash', 'restore', { id, bookPath: entry.bookPath })
-		new Notice(`${APP_NAME}：已恢复《${entry.title}》`)
+		new Notice(t("{p0}：已恢复《{p1}》", { p0: APP_NAME, p1: entry.title }))
 	}
 
 	async purgeTrash(id: string): Promise<void> {
@@ -494,7 +494,7 @@ export default class GroveReaderPlugin extends Plugin {
 		await this.trash.purge(id)
 		this.oplog.add(t('回收站永久删除'), entry ? `《${entry.title}》` : id)
 		this.debug('trash', 'purge', { id })
-		new Notice(`${APP_NAME}：已永久删除`)
+		new Notice(t("{p0}：已永久删除", { p0: APP_NAME }))
 	}
 
 	async emptyTrash(): Promise<void> {
@@ -502,7 +502,7 @@ export default class GroveReaderPlugin extends Plugin {
 		const count = await this.trash.empty()
 		this.oplog.add(t('清空回收站'), `${count} 项`)
 		this.debug('trash', 'empty', { count })
-		new Notice(`${APP_NAME}：已清空回收站（${count} 项）`)
+		new Notice(t("{p0}：已清空回收站（{p1} 项）", { p0: APP_NAME, p1: count }))
 	}
 
 	showTrash(): void {
@@ -570,7 +570,7 @@ export default class GroveReaderPlugin extends Plugin {
 	openReview(scope?: { bookPath: string; title?: string }): void {
 		const cap = Math.max(0, Math.floor(this.settings.reviewDailyCap ?? 0))
 		if (!cap) {
-			new Notice(`${APP_NAME}：复习功能已关闭（设置 → 每日复习条数）`)
+			new Notice(t("{p0}：复习功能已关闭（设置 → 每日复习条数）", { p0: APP_NAME }))
 			return
 		}
 		const now = Date.now()
@@ -578,14 +578,14 @@ export default class GroveReaderPlugin extends Plugin {
 		const all = this.reviewCandidates()
 		const candidates = scope ? all.filter(i => i.bookPath === scope.bookPath) : all
 		if (scope && !candidates.length) {
-			new Notice(`${APP_NAME}：${bookLabel}还没有可复习的划线`)
+			new Notice(t("{p0}：{p1}还没有可复习的划线", { p0: APP_NAME, p1: bookLabel }))
 			return
 		}
 		const stats = reviewStats(candidates, now)
 		// 本书模式是主动深挖：不受每日上限拦截，一次最多 20 条；全局模式的额度照旧
 		const limit = scope ? 20 : Math.max(0, cap - stats.today)
 		if (!scope && !limit) {
-			new Notice(`${APP_NAME}：今天的复习目标已完成（${stats.today}/${cap} 条），明天再来`)
+			new Notice(t("{p0}：今天的复习目标已完成（{p1}/{p2} 条），明天再来", { p0: APP_NAME, p1: stats.today, p2: cap }))
 			return
 		}
 		const includeNew = this.settings.reviewIncludeNew !== false
@@ -664,7 +664,7 @@ export default class GroveReaderPlugin extends Plugin {
 		if (!a) return
 		const now = Date.now()
 		if (isDue(a, now)) {
-			new Notice(`${APP_NAME}：这条已经在今天的复习里`)
+			new Notice(t("{p0}：这条已经在今天的复习里", { p0: APP_NAME }))
 			return
 		}
 		const base = normalizeReview(a.review)
@@ -678,7 +678,7 @@ export default class GroveReaderPlugin extends Plugin {
 		a.updatedAt = now
 		this.store.save(data)
 		this.refreshShelfReviewBadges()
-		new Notice(`${APP_NAME}：已加入今日复习`)
+		new Notice(t("{p0}：已加入今日复习", { p0: APP_NAME }))
 	}
 
 	/** 清空全部复习排期（不动划线、评论与笔记）；清完这些划线会重新按「旧划线」进队列 */
@@ -689,7 +689,7 @@ export default class GroveReaderPlugin extends Plugin {
 			for (const a of data.annotations ?? []) if (a.review) scheduled++
 		}
 		if (!scheduled) {
-			new Notice(`${APP_NAME}：还没有任何复习排期`)
+			new Notice(t("{p0}：还没有任何复习排期", { p0: APP_NAME }))
 			return
 		}
 		new DangerConfirmModal(
@@ -714,7 +714,7 @@ export default class GroveReaderPlugin extends Plugin {
 				}
 				this.oplog.add(t('清空复习排期'), `${cleared} 条`)
 				this.refreshShelfReviewBadges()
-				new Notice(`${APP_NAME}：已清空 ${cleared} 条复习排期`)
+				new Notice(t("{p0}：已清空 {p1} 条复习排期", { p0: APP_NAME, p1: cleared }))
 			},
 		).open()
 	}
@@ -764,15 +764,15 @@ export default class GroveReaderPlugin extends Plugin {
 			if (existing instanceof TFile) await this.app.vault.modify(existing, content)
 			else await this.app.vault.create(path, content)
 			this.oplog.add(t('生成书架 Base'), path)
-			new Notice(`${APP_NAME}：已生成 ${path}（重新生成会覆盖）`)
+			new Notice(t("{p0}：已生成 {p1}（重新生成会覆盖）", { p0: APP_NAME, p1: path }))
 		} catch (e) {
-			new Notice(`${APP_NAME}：生成书架 Base 失败（${e instanceof Error ? e.message : String(e)}）`)
+			new Notice(t("{p0}：生成书架 Base 失败（{p1}）", { p0: APP_NAME, p1: e instanceof Error ? e.message : String(e) }))
 		}
 	}
 
 	async exportSearchResults(docs: SearchDoc[], query: string, format: 'md' | 'csv', options?: ExportOptions): Promise<void> {
 		if (!docs.length) {
-			new Notice(`${APP_NAME}：没有可导出的结果`)
+			new Notice(t("{p0}：没有可导出的结果", { p0: APP_NAME }))
 			return
 		}
 		const baseFolder = (this.settings.notesFolder?.trim() || '阅读笔记').replace(/\\/g, '/').replace(/\/+$/, '')
@@ -800,13 +800,13 @@ export default class GroveReaderPlugin extends Plugin {
 			try {
 				await this.app.vault.adapter.write(target, content)
 			} catch (e) {
-				new Notice(`${APP_NAME}：导出失败（${e instanceof Error ? e.message : String(e)}）`)
+				new Notice(t("{p0}：导出失败（{p1}）", { p0: APP_NAME, p1: e instanceof Error ? e.message : String(e) }))
 				return
 			}
 		}
 		this.oplog.add(t('导出批注检索'), `${docs.length} 条 → ${target}`)
 		this.debug('search', 'export', { count: docs.length, target, format })
-		new Notice(`${APP_NAME}：已导出 ${docs.length} 条到 ${target}`)
+		new Notice(t("{p0}：已导出 {p1} 条到 {p2}", { p0: APP_NAME, p1: docs.length, p2: target }))
 	}
 
 	/**
@@ -996,7 +996,7 @@ export default class GroveReaderPlugin extends Plugin {
 							{ role: 'user', content: lines.join('\n') },
 						], { temperature: 0.2, maxTokens: 900 })
 					} catch (e) {
-						new Notice(`Grove Reader：整理失败（${e instanceof Error ? e.message : String(e)}）`, 8000)
+						new Notice(t("Grove Reader：整理失败（{p0}）", { p0: e instanceof Error ? e.message : String(e) }), 8000)
 						return
 					}
 					let groups: Array<{ name?: unknown; books?: unknown }> = []
@@ -1027,7 +1027,7 @@ export default class GroveReaderPlugin extends Plugin {
 						return
 					}
 					this.oplog.add(t('AI 整理书单'), `${created} 个书单 / ${assigned} 本书`)
-					new Notice(`Grove Reader：已整理出 ${created} 个书单，归入 ${assigned} 本书`)
+					new Notice(t("Grove Reader：已整理出 {p0} 个书单，归入 {p1} 本书", { p0: created, p1: assigned }))
 					for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_GROVE_BOOKSHELF)) {
 						const view = leaf.view
 						if (view instanceof BookshelfView) void view.refresh()
@@ -1144,14 +1144,14 @@ export default class GroveReaderPlugin extends Plugin {
 	async restoreHiddenBooks(): Promise<void> {
 		const count = this.settings.hiddenBooks?.length ?? 0
 		if (!count) {
-			new Notice(`${APP_NAME}：没有隐藏的书`)
+			new Notice(t("{p0}：没有隐藏的书", { p0: APP_NAME }))
 			return
 		}
 		this.settings.hiddenBooks = []
 		await this.saveSettings()
 		this.refreshShelfViews()
 		this.oplog.add(t('恢复隐藏书籍'), `${count} 本`)
-		new Notice(`${APP_NAME}：已恢复 ${count} 本`)
+		new Notice(t("{p0}：已恢复 {p1} 本", { p0: APP_NAME, p1: count }))
 	}
 
 	/** 清空一本书的全部批注/评论（保留阅读位置），需要输入确认词 */
@@ -1159,7 +1159,7 @@ export default class GroveReaderPlugin extends Plugin {
 		const data = this.store.load(bookPath)
 		const count = data.annotations?.length ?? 0
 		if (!count) {
-			new Notice(`${APP_NAME}：这本书还没有批注`)
+			new Notice(t("{p0}：这本书还没有批注", { p0: APP_NAME }))
 			return
 		}
 		const title = data.title || bookPath.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || t('这本书')
@@ -1180,7 +1180,7 @@ export default class GroveReaderPlugin extends Plugin {
 					this.refreshShelfViews()
 					this.oplog.add(t('清空批注'), `《${title}》；${count} 条`)
 					this.debug('annotations', 'clear', { bookPath, count })
-					new Notice(`已清空 ${count} 条批注`)
+					new Notice(t("已清空 {p0} 条批注", { p0: count }))
 				}
 				if (closed) window.setTimeout(finish, 300)
 				else finish()
@@ -1295,7 +1295,7 @@ export default class GroveReaderPlugin extends Plugin {
 				;(this.app as unknown as { openWithDefaultApp(path: string): void }).openWithDefaultApp(bookPath)
 			} catch (e) {
 				console.error(t('[Grove Reader] 打开外部文件失败'), e)
-				new Notice(`Grove Reader：请在文件管理器中打开该文件（${bookPath}）`)
+				new Notice(t("Grove Reader：请在文件管理器中打开该文件（{p0}）", { p0: bookPath }))
 			}
 			return
 		}
@@ -1473,7 +1473,7 @@ export default class GroveReaderPlugin extends Plugin {
 		const { vaultPath, target } = link
 		const file = this.app.vault.getAbstractFileByPath(vaultPath)
 		if (!(file instanceof TFile)) {
-			new Notice(`${APP_NAME}：找不到这本书（${vaultPath}）`)
+			new Notice(t("{p0}：找不到这本书（{p1}）", { p0: APP_NAME, p1: vaultPath }))
 			return
 		}
 		await this.openBookByPath(vaultPath, target.cfi, target)
@@ -1488,7 +1488,7 @@ export default class GroveReaderPlugin extends Plugin {
 	async openCitation(row: ExcerptBacklinkRow): Promise<void> {
 		const file = this.app.vault.getAbstractFileByPath(row.sourcePath)
 		if (!(file instanceof TFile)) {
-			new Notice(`${APP_NAME}：笔记不存在（${row.sourcePath}）`)
+			new Notice(t("{p0}：笔记不存在（{p1}）", { p0: APP_NAME, p1: row.sourcePath }))
 			return
 		}
 		// 不用 getLeaf('tab') + openFile：工作区里若残留游离叶子（detach 过的），
@@ -1497,7 +1497,7 @@ export default class GroveReaderPlugin extends Plugin {
 		try {
 			await this.app.workspace.openLinkText(file.path, '', false)
 		} catch {
-			new Notice(`${APP_NAME}：打不开笔记（${row.noteTitle}）`)
+			new Notice(t("{p0}：打不开笔记（{p1}）", { p0: APP_NAME, p1: row.noteTitle }))
 			return
 		}
 		const link = row.links[0]
@@ -1771,7 +1771,7 @@ export default class GroveReaderPlugin extends Plugin {
 					return
 				}
 				if (!(v instanceof ReaderView)) {
-					new Notice(`${APP_NAME}：PDF 请用阅读器内的全文搜索`)
+					new Notice(t("{p0}：PDF 请用阅读器内的全文搜索", { p0: APP_NAME }))
 					return
 				}
 				new PromptModal(this.app, t('搜索当前书全文'), t('输入关键词，在当前书正文里搜索'), query => v.searchFullText(query)).open()
@@ -1812,7 +1812,7 @@ export default class GroveReaderPlugin extends Plugin {
 			name: t('清空调试日志'),
 			callback: () => {
 				this.debugLog.clear()
-				new Notice(`${APP_NAME}：调试日志已清空`)
+				new Notice(t("{p0}：调试日志已清空", { p0: APP_NAME }))
 			},
 		})
 		this.addCommand({
@@ -1876,7 +1876,7 @@ export default class GroveReaderPlugin extends Plugin {
 				color: a.color,
 			})
 		} catch (e) {
-			new Notice(`Grove Reader：生成书摘卡失败（${e instanceof Error ? e.message : String(e)}）`)
+			new Notice(t("Grove Reader：生成书摘卡失败（{p0}）", { p0: e instanceof Error ? e.message : String(e) }))
 			return
 		}
 		const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
@@ -1897,10 +1897,10 @@ export default class GroveReaderPlugin extends Plugin {
 		try {
 			await this.app.vault.createBinary(path, await blob.arrayBuffer())
 		} catch (e) {
-			new Notice(`Grove Reader：保存书摘卡失败（${e instanceof Error ? e.message : String(e)}）`)
+			new Notice(t("Grove Reader：保存书摘卡失败（{p0}）", { p0: e instanceof Error ? e.message : String(e) }))
 			return
 		}
-		new Notice(`Grove Reader：书摘卡已保存到 ${path}`)
+		new Notice(t("Grove Reader：书摘卡已保存到 {p0}", { p0: path }))
 	}
 
 	// ------------------------------------------------------------------
@@ -1994,7 +1994,7 @@ export default class GroveReaderPlugin extends Plugin {
 			written = appendCardWall(doc, groups, wall).cards
 			await this.app.vault.create(target, serializeCanvas(doc))
 		}
-		new Notice(`Grove Reader：已把 ${written} 条批注写入画布`)
+		new Notice(t("Grove Reader：已把 {p0} 条批注写入画布", { p0: written }))
 		const file = this.app.vault.getAbstractFileByPath(target)
 		if (file instanceof TFile) await this.app.workspace.getLeaf('split').openFile(file)
 	}
@@ -2133,7 +2133,7 @@ export default class GroveReaderPlugin extends Plugin {
 			this.store.save(data)
 			view.refreshAnnotations()
 			this.oplog.add(t('从笔记回写批注'), `《${data.title || data.bookPath}》 ${n} 项`)
-			new Notice(`Grove Reader：已从笔记回写 ${n} 项，笔记未改动`)
+			new Notice(t("Grove Reader：已从笔记回写 {p0} 项，笔记未改动", { p0: n }))
 		}).open()
 	}
 
@@ -2219,7 +2219,7 @@ export default class GroveReaderPlugin extends Plugin {
 
 		data.notePath = noteFile.path
 		this.store.save(data)
-		new Notice(`Grove Reader：阅读笔记已生成（${data.annotations.length} 条批注）`)
+		new Notice(t("Grove Reader：阅读笔记已生成（{p0} 条批注）", { p0: data.annotations.length }))
 
 		const target = noteFile
 		const openLeaf = this.app.workspace
@@ -2483,7 +2483,7 @@ export default class GroveReaderPlugin extends Plugin {
 		this.oplog.add(t('切换笔记模板'), `《${data.title || bookPath}》 → ${label}`)
 		this.debug('template', 'set', { bookPath, templateId })
 		this.refreshNoteForBook(bookPath)
-		new Notice(`${APP_NAME}：笔记模板已切换为「${label}」`)
+		new Notice(t("{p0}：笔记模板已切换为「{p1}」", { p0: APP_NAME, p1: label }))
 	}
 
 	promptMigrateDataFolder(): void {
@@ -2499,15 +2499,15 @@ export default class GroveReaderPlugin extends Plugin {
 	async migrateDataFolder(targetFolder: string): Promise<void> {
 		const folder = targetFolder.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
 		if (!folder) {
-			new Notice(`${APP_NAME}：请填写库内文件夹路径`)
+			new Notice(t("{p0}：请填写库内文件夹路径", { p0: APP_NAME }))
 			return
 		}
 		if (isAbsolutePath(folder)) {
-			new Notice(`${APP_NAME}：数据文件夹请填库内相对路径（例如 Grove Reader）`)
+			new Notice(t("{p0}：数据文件夹请填库内相对路径（例如 Grove Reader）", { p0: APP_NAME }))
 			return
 		}
 		if (folder.split('/').includes('..')) {
-			new Notice(`${APP_NAME}：数据文件夹不能包含 ..`)
+			new Notice(t("{p0}：数据文件夹不能包含 ..", { p0: APP_NAME }))
 			return
 		}
 		const sourceRoot = this.dataRoot
@@ -2525,15 +2525,15 @@ export default class GroveReaderPlugin extends Plugin {
 			() => {
 				void (async () => {
 					try {
-						new Notice(`${APP_NAME}：正在复制数据…`)
+						new Notice(t("{p0}：正在复制数据…", { p0: APP_NAME }))
 						const result = await migrateDataFolder(this.io, sourceRoot, targetRoot)
 						this.settings.dataFolder = folder
 						await this.saveSettings()
 						this.oplog.add(t('迁移数据文件夹'), `${sourceRoot} → ${targetRoot}；${result.books} 份批注`)
 						this.debug('data', 'migrate', { from: sourceRoot, to: targetRoot, files: result.files, books: result.books })
-						new Notice(`${APP_NAME}：已复制 ${result.files} 个文件。请重启 Obsidian 生效；旧数据确认无误后再删。`)
+						new Notice(t("{p0}：已复制 {p1} 个文件。请重启 Obsidian 生效；旧数据确认无误后再删。", { p0: APP_NAME, p1: result.files }))
 					} catch (e) {
-						new Notice(`${APP_NAME}：迁移失败（${e instanceof Error ? e.message : String(e)}）。目标目录可能有残留文件，请检查后重试。`)
+						new Notice(t("{p0}：迁移失败（{p1}）。目标目录可能有残留文件，请检查后重试。", { p0: APP_NAME, p1: e instanceof Error ? e.message : String(e) }))
 					}
 				})()
 			},
@@ -2565,7 +2565,7 @@ export default class GroveReaderPlugin extends Plugin {
 		const file = this.app.vault.getAbstractFileByPath(path)
 		if (file instanceof TFile) await this.app.vault.modify(file, markdown)
 		else await this.app.vault.create(path, markdown)
-		new Notice(`${APP_NAME}：使用指南已更新`)
+		new Notice(t("{p0}：使用指南已更新", { p0: APP_NAME }))
 	}
 
 	/** 库内备份文件夹（设置里可改；空/异常时回退默认名） */
@@ -2595,15 +2595,15 @@ export default class GroveReaderPlugin extends Plugin {
 				target: this.settings.backupTargetDir?.trim() || undefined,
 			})
 			if (result.status === 'blocked') {
-				new Notice(`Grove Reader：目标文件夹「${rel}」里已有同名文件，为避免误删已中止。请换一个空文件夹，或清空后重试`)
+				new Notice(t("Grove Reader：目标文件夹「{p0}」里已有同名文件，为避免误删已中止。请换一个空文件夹，或清空后重试", { p0: rel }))
 				return
 			}
 			this.oplog?.add(t('备份数据'), `${result.bookCount} 本书；库内「${rel}」`)
 			this.debug('backup', 'export', { rel, bookCount: result.bookCount })
-			new Notice(`Grove Reader：已备份 ${result.bookCount} 本书的批注数据到库内「${rel}」${result.extra}`)
+			new Notice(t("Grove Reader：已备份 {p0} 本书的批注数据到库内「{p1}」{p2}", { p0: result.bookCount, p1: rel, p2: result.extra }))
 		} catch (e) {
 			console.error(t('[Grove Reader] 备份批注数据失败'), e)
-			new Notice(`Grove Reader：备份失败（${e instanceof Error ? e.message : String(e)}）`)
+			new Notice(t("Grove Reader：备份失败（{p0}）", { p0: e instanceof Error ? e.message : String(e) }))
 		}
 	}
 
@@ -2613,9 +2613,9 @@ export default class GroveReaderPlugin extends Plugin {
 		const { moveBackupFolder } = await import('./desktopFs')
 		const result = await moveBackupFolder({ vaultBase: this.vaultBase, from, to })
 		if (result.status === 'moved') {
-			new Notice(`Grove Reader：库内备份已转移到「${to}」`)
+			new Notice(t("Grove Reader：库内备份已转移到「{p0}」", { p0: to }))
 		} else if (result.status === 'failed') {
-			new Notice(`Grove Reader：转移备份文件夹失败（${result.error ?? ''}），已保留原路径`)
+			new Notice(t("Grove Reader：转移备份文件夹失败（{p0}），已保留原路径", { p0: result.error ?? '' }))
 		}
 	}
 

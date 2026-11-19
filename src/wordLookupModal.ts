@@ -47,7 +47,7 @@ export class WordLookupModal extends Modal {
 		this.contentEl.createEl('h3', { text: t('查词') })
 		this.contentEl.createEl('p', {
 			cls: 'setting-item-description',
-			text: `结合《${this.ctx.bookTitle}》里的原文语境查词；释义可以直接修改，再存入这本书的生词本。`,
+			text: t("结合《{p0}》里的原文语境查词；释义可以直接修改，再存入这本书的生词本。", { p0: this.ctx.bookTitle }),
 		})
 
 		const row = this.contentEl.createDiv('grove-vocab-word-row')
@@ -159,7 +159,7 @@ export class WordLookupModal extends Modal {
 			}
 			if (file instanceof TFile) await this.app.vault.modify(file, result.markdown)
 			else await this.app.vault.create(path, result.markdown)
-			new Notice(`Grove Reader：已加入 ${path}`)
+			new Notice(t("Grove Reader：已加入 {p0}", { p0: path }))
 			this.close()
 		} catch (e) {
 			this.#status(`保存失败：${e instanceof Error ? e.message : String(e)}`)

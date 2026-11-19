@@ -702,7 +702,7 @@ export class GroveSettingTab extends PluginSettingTab {
 		}
 		new Setting(containerEl)
 			.setName(t('使用指南'))
-			.setDesc(`在笔记文件夹生成《${APP_NAME} 使用指南》；已存在时可直接打开，或用「重新生成」覆盖为当前版本`)
+			.setDesc(t("在笔记文件夹生成《{p0} 使用指南》；已存在时可直接打开，或用「重新生成」覆盖为当前版本", { p0: APP_NAME }))
 			.addButton(button =>
 				button.setButtonText(t('生成 / 打开')).onClick(() => void this.plugin.openUsageDoc()))
 			.addButton(button =>
@@ -824,11 +824,11 @@ export class GroveSettingTab extends PluginSettingTab {
 			containerEl.createEl('h3', { text: t('回收站') })
 			const trashSetting = new Setting(containerEl)
 				.setName(t('已删除的书籍'))
-				.setDesc(`删书时把原文件、笔记、批注和封面移到这里，保留 ${trash.retentionDays()} 天；可恢复或永久删除`)
+				.setDesc(t("删书时把原文件、笔记、批注和封面移到这里，保留 {p0} 天；可恢复或永久删除", { p0: trash.retentionDays() }))
 				.addButton(button =>
 					button.setButtonText(t('打开')).onClick(() => this.plugin.showTrash()))
 			void trash.list().then(entries => {
-				if (entries.length) trashSetting.setDesc(`已删除 ${entries.length} 项；可恢复或永久删除，保留 ${trash.retentionDays()} 天`)
+				if (entries.length) trashSetting.setDesc(t("已删除 {p0} 项；可恢复或永久删除，保留 {p1} 天", { p0: entries.length, p1: trash.retentionDays() }))
 			})
 		}
 

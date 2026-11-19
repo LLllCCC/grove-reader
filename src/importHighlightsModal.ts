@@ -261,7 +261,7 @@ export class ImportHighlightsModal extends Modal {
 			`${IMPORT_SOURCE_LABELS[plan.format] ?? plan.format}；${written} 条 / ${touched.length} 本`,
 		)
 		this.plugin.refreshOpenReaders(touched)
-		new Notice(`Grove Reader：已导入 ${written} 条标注（${touched.length} 本书）`)
+		new Notice(t("Grove Reader：已导入 {p0} 条标注（{p1} 本书）", { p0: written, p1: touched.length }))
 		this.close()
 	}
 }

@@ -8,6 +8,7 @@
  */
 import { Platform, setIcon } from 'obsidian'
 import { HIGHLIGHT_COLORS } from './types'
+import { t } from './i18n'
 
 /**
  * 在工具栏里创建颜色入口。
@@ -23,7 +24,7 @@ export function createColorControls(
 		for (const c of HIGHLIGHT_COLORS) {
 			const dot = parent.createEl('button', {
 				cls: 'clickable-icon grove-color-dot',
-				attr: { 'aria-label': `高亮（${c.name}）` },
+				attr: { 'aria-label': t("高亮（{p0}）", { p0: c.name }) },
 			})
 			dot.style.backgroundColor = c.css
 			dot.addEventListener('click', () => onPick(c.key))
@@ -72,7 +73,7 @@ export function createColorControls(
 			onPick(fallback.key)
 		})
 		for (const c of HIGHLIGHT_COLORS) {
-			const dot = menu.createEl('button', { cls: 'grove-color-dot', attr: { 'aria-label': `高亮（${c.name}）` } })
+			const dot = menu.createEl('button', { cls: 'grove-color-dot', attr: { 'aria-label': t("高亮（{p0}）", { p0: c.name }) } })
 			dot.style.backgroundColor = c.css
 			dot.addEventListener('click', ev => {
 				ev.stopPropagation()
