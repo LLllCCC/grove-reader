@@ -5,7 +5,7 @@ import os from 'node:os'
 import assert from 'node:assert'
 import { BookStore } from '../src/store'
 import { DesktopIO } from '../src/desktopIO'
-import { appendAnnotationBlocks, buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, NOTE_BEGIN, NOTE_END, renderNoteTemplate, resolveExcerptLinkStyle } from '../src/notes'
+import { appendAnnotationBlocks, buildNote, buildTemplateContext, defaultNoteTemplate, NOTE_BEGIN, NOTE_END, renderNoteTemplate, resolveExcerptLinkStyle } from '../src/notes'
 import { STATS_IDLE_MS, STATS_TICK_MS, StatsStore, accrueTick, forecastFinishDays, recentSecondsFor, todayKey } from '../src/stats'
 import { BookData, type Annotation, type Bookmark } from '../src/types'
 import { READING_STATUS_LABELS, READING_STATUS_ORDER, normalizeToolbarOrder } from '../src/types'
@@ -206,7 +206,7 @@ assert.ok(appended.includes('GROVE:BEGIN'))
 
 // 6. 默认模板：书名 → 章节 → 摘录标题 + 引用块 + 评论 + 回跳 + block id
 const ctx = buildTemplateContext(data, 'id123')
-const rendered = renderNoteTemplate(DEFAULT_NOTE_TEMPLATE, ctx)
+const rendered = renderNoteTemplate(defaultNoteTemplate(), ctx)
 assert.ok(rendered.includes('# 测试书'))
 assert.ok(rendered.includes('## 第一章'))
 assert.ok(rendered.includes('### 高亮一'), '摘录首行应成为批注标题')

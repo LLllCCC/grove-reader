@@ -35,7 +35,7 @@ import type { CardGroup, CardSpec } from './canvas'
 import { quoteCardFileName, renderQuoteCard } from './cardImage'
 import { buildShelfBase, SHELF_BASE_NAME } from './baseTemplate'
 import { GroveSettingTab } from './settings'
-import { appendAnnotationBlocks, buildNote, buildTemplateContext, DEFAULT_NOTE_TEMPLATE, DEFAULT_TEMPLATE_PATH, renderNoteTemplate, resolveExcerptLinkStyle } from './notes'
+import { appendAnnotationBlocks, buildNote, buildTemplateContext, defaultNoteTemplate, DEFAULT_TEMPLATE_PATH, renderNoteTemplate, resolveExcerptLinkStyle } from './notes'
 import type { NoteExtraFields, NoteLinkOptions } from './notes'
 import { collectExcerptBacklinks, type ExcerptBacklinkRow } from './backlinks'
 import { BookAskModal } from './bookAskModal'
@@ -56,7 +56,7 @@ import type { GroveLinkTarget, ParsedGroveLink } from './wikilink'
 import type { ReaderEngine } from './engine/types'
 import { bookIdFor, basenameOf, cleanBookTitle, isAbsolutePath, sanitizeFileName, stripNumericTitlePrefix } from './util'
 import { isReaderExt, isShelfExt } from './types'
-import { usageDocMarkdown, USAGE_DOC_NAME } from './usageDoc'
+import { USAGE_DOC_CANDIDATES, usageDocMarkdown, usageDocName } from './usageDoc'
 import { LOGO_OPTIONS, logoById } from './logos'
 import { OpLog } from './oplog'
 import { createPlatformIO } from './platformFactory'
@@ -2408,9 +2408,21 @@ export default class GroveReaderPlugin extends Plugin {
 		if (dir && !(await this.app.vault.adapter.exists(dir))) await this.app.vault.createFolder(dir)
 	}
 
+	/**
+	 * 定位使用指南：当前语言的正式名优先，其次另一种语言的旧名。
+	 * 切换界面语言后继续复用已有文件，不会凭空多生成一份。
+	 */
+	private usageDocPath(folder: string): string {
+		for (const name of USAGE_DOC_CANDIDATES) {
+			const candidate = normalizePath(`${folder}/${name}`)
+			if (this.app.vault.getAbstractFileByPath(candidate)) return candidate
+		}
+		return normalizePath(`${folder}/${usageDocName()}`)
+	}
+
 	/** 在笔记文件夹生成使用指南（已存在则跳过） */
 	private async ensureUsageDoc(folder: string): Promise<void> {
-		const path = normalizePath(`${folder}/${USAGE_DOC_NAME}`)
+		const path = this.usageDocPath(folder)
 		if (this.app.vault.getAbstractFileByPath(path)) return
 		try {
 			await this.app.vault.create(path, usageDocMarkdown())
@@ -2425,7 +2437,7 @@ export default class GroveReaderPlugin extends Plugin {
 		let f = this.app.vault.getAbstractFileByPath(tplPath)
 		if (!(f instanceof TFile)) {
 			await this.ensureFolderOf(tplPath)
-			f = await this.app.vault.create(tplPath, DEFAULT_NOTE_TEMPLATE)
+			f = await this.app.vault.create(tplPath, defaultNoteTemplate())
 			new Notice(t('Grove Reader：已创建笔记模板文件，可直接编辑'))
 		}
 		if (f instanceof TFile) await this.app.workspace.getLeaf('tab').openFile(f)
@@ -2531,7 +2543,7 @@ export default class GroveReaderPlugin extends Plugin {
 	/** 生成（如缺失）并打开使用指南 */	async openUsageDoc(): Promise<void> {
 		const folder = normalizePath(this.settings.notesFolder?.trim() || '阅读笔记')
 		if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder)
-		const path = normalizePath(`${folder}/${USAGE_DOC_NAME}`)
+		const path = this.usageDocPath(folder)
 		let f = this.app.vault.getAbstractFileByPath(path)
 		if (!(f instanceof TFile)) f = await this.app.vault.create(path, usageDocMarkdown())
 		if (f instanceof TFile) await this.app.workspace.getLeaf('tab').openFile(f)
@@ -2548,7 +2560,7 @@ export default class GroveReaderPlugin extends Plugin {
 	async regenerateUsageDoc(): Promise<void> {
 		const folder = normalizePath(this.settings.notesFolder?.trim() || '阅读笔记')
 		if (!(await this.app.vault.adapter.exists(folder))) await this.app.vault.createFolder(folder)
-		const path = normalizePath(`${folder}/${USAGE_DOC_NAME}`)
+		const path = this.usageDocPath(folder)
 		const markdown = usageDocMarkdown()
 		const file = this.app.vault.getAbstractFileByPath(path)
 		if (file instanceof TFile) await this.app.vault.modify(file, markdown)

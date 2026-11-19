@@ -1,7 +1,19 @@
-export const USAGE_DOC_NAME = 'Grove Reader 使用指南.md'
+import { currentLocale } from './i18n'
+import { USAGE_DOC_EN } from './locales/guide.en'
 
-export function usageDocMarkdown(): string {
-	return `---
+/** 中文版文件名（历史文件名，查找时始终作为候选保留） */
+export const USAGE_DOC_NAME_ZH = 'Grove Reader 使用指南.md'
+/** 英文版文件名 */
+export const USAGE_DOC_NAME_EN = 'Grove Reader User Guide.md'
+/** 查找顺序：两种语言都认，避免切换界面语言后凭空多出一份指南 */
+export const USAGE_DOC_CANDIDATES = [USAGE_DOC_NAME_EN, USAGE_DOC_NAME_ZH]
+
+/** 当前语言下新建指南用的文件名 */
+export function usageDocName(): string {
+	return currentLocale() === 'en' ? USAGE_DOC_NAME_EN : USAGE_DOC_NAME_ZH
+}
+
+const ZH_DOC = `---
 title: Grove Reader 使用指南
 tags:
   - Grove-Reader
@@ -174,4 +186,8 @@ tags:
 - **支持 PDF 吗？** 支持：可阅读、划线高亮、评论、生成笔记（批注按页组织，笔记里章节显示为「第 N 页」，模板可用 \`{{page}}\`）。要求 PDF 带文字层（原生文字版或 OCR 版）；纯扫描图片版只能阅读不能划选。
 - **批注丢了？** 先看 \`data/books/\` 下对应 JSON 是否存在，再看 \`data/backups/<bookId>/\` 里的备份。
 `
+
+/** 按当前界面语言返回指南正文 */
+export function usageDocMarkdown(): string {
+	return currentLocale() === 'en' ? USAGE_DOC_EN : ZH_DOC
 }

@@ -1,6 +1,7 @@
 import { Annotation, BookData, colorName } from './types'
 import { compareCfi, encodeParam, truncate } from './util'
 import { canLinkBook, snippetOf, wikilinkFor } from './wikilink'
+import { currentLocale, t } from './i18n'
 
 export const NOTE_BEGIN = '<!-- GROVE:BEGIN 由 Grove Reader 生成，重新生成时会覆盖此区间内的内容 -->'
 export const NOTE_END = '<!-- GROVE:END -->'
@@ -311,18 +312,26 @@ export function renderNoteTemplate(template: string, ctx: TemplateContext): stri
 // 内置默认模板：书名 → 章节 → 摘录（每条批注一个三级标题，可在大纲中显示）
 // ------------------------------------------------------------------
 
-export const DEFAULT_NOTE_TEMPLATE = `# {{title}}
+/**
+ * 内置笔记模板。按当前界面语言生成，{{...}} 占位符由模板引擎解析，
+ * 因此这里不能用 t() 的 {name} 插值写法，只能拼在占位符两侧。
+ */
+export function defaultNoteTemplate(): string {
+	const en = currentLocale() === 'en'
+	const open = en ? '(' : '（'
+	const close = en ? ')' : '）'
+	return `# {{title}}
 
-> [!info] 阅读信息
-> - 作者：{{author}}
-> - 高亮批注：{{count}} 条
-> - 最近更新：{{date}}
+> [!info] ${t('阅读信息')}
+> - ${t('作者：')}{{author}}
+> - ${t('高亮批注：')}{{count}}${t(' 条')}
+> - ${t('最近更新：')}{{date}}
 
 {{#if bookmarkCount}}
-## 书签
+## ${t('书签')}
 
 {{#each bookmarks}}
-- {{label}}{{#if text}} — {{text}}{{/if}}（{{date}}）{{jumpLink}}
+- {{label}}{{#if text}} — {{text}}{{/if}}${open}{{date}}${close}{{jumpLink}}
 {{/each}}
 
 {{/if}}
@@ -343,6 +352,7 @@ export const DEFAULT_NOTE_TEMPLATE = `# {{title}}
 
 {{/each}}
 {{/each}}`
+}
 
 // ------------------------------------------------------------------
 // 笔记组装：模板只负责标记区间内的内容，区间外（用户手写）原样保留
@@ -477,13 +487,13 @@ export function buildNote(
 	extra?: NoteExtraFields,
 	link: NoteLinkOptions = {},
 ): string {
-	const tpl = template && template.trim() ? template : DEFAULT_NOTE_TEMPLATE
+	const tpl = template && template.trim() ? template : defaultNoteTemplate()
 	let body: string
 	try {
 		body = renderNoteTemplate(tpl, buildTemplateContext(data, bookId, link))
 	} catch (e) {
 		console.error('[Grove Reader] 笔记模板渲染失败，使用默认模板', e)
-		body = renderNoteTemplate(DEFAULT_NOTE_TEMPLATE, buildTemplateContext(data, bookId, link))
+		body = renderNoteTemplate(defaultNoteTemplate(), buildTemplateContext(data, bookId, link))
 	}
 	const inner = `${NOTE_BEGIN}\n\n${body}\n\n${NOTE_END}`
 

@@ -146,4 +146,11 @@ export const EN_EXTRA: Record<string, string> = {
 	'{n} 年前': '{n} years ago',
 
 	// —— 时间格式 ——
+
+	// —— 笔记模板 ——
+	'阅读信息': 'Reading info',
+	'作者：': 'Author: ',
+	'高亮批注：': 'Highlights: ',
+	' 条': '',
+	'最近更新：': 'Last updated: ',
 }
