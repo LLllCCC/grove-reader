@@ -35,14 +35,8 @@ jobs:
           cp manifest.json dist-community/manifest.json
           cp styles.css dist-community/styles.css
 
-      # 完整版：含 PDF 阅读。作为附加资产提供给需要 PDF 的用户。
-      - name: Build full (with PDF)
-        run: |
-          npm run build
-          mkdir -p dist-full
-          cp main.js dist-full/main.full.js
-          (cd pdfjs && zip -qr ../dist-full/grove-reader-pdfjs-assets.zip .)
-
+      # 目录站要求 Release 只包含 main.js / manifest.json / styles.css；
+      # 完整版（含 PDF）发布到配套仓库 LLllCCC/grove-reader-full，见 scripts/publish-full.mjs。
       - name: Attest assets
         uses: actions/attest@v4
         with:
@@ -50,8 +44,6 @@ jobs:
             dist-community/main.js
             dist-community/manifest.json
             dist-community/styles.css
-            dist-full/main.full.js
-            dist-full/grove-reader-pdfjs-assets.zip
 
       - name: Create release
         env:
@@ -64,6 +56,4 @@ jobs:
             --generate-notes \
             dist-community/main.js \
             dist-community/manifest.json \
-            dist-community/styles.css \
-            dist-full/main.full.js \
-            dist-full/grove-reader-pdfjs-assets.zip
+            dist-community/styles.css

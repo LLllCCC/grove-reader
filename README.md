@@ -29,6 +29,8 @@ Then enable **Grove Reader** under Settings → Community plugins. Drop a book a
 
 The community build does not fail on PDFs: it tells you PDF reading requires the full build and hands the file to your default program.
 
+Because the directory only allows the three core files in a release, **the full build is distributed from the companion repository [LLllCCC/grove-reader-full](https://github.com/LLllCCC/grove-reader-full/releases)** — grab `main.full.js` and `grove-reader-pdfjs-assets.zip` from its latest release.
+
 ## Interface language
 
 Settings → Appearance → Interface language: **Follow Obsidian / 中文 / English**. The default follows Obsidian's own language. Reopen views or restart Obsidian for the change to apply everywhere (command names keep the old language until restart).

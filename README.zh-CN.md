@@ -23,6 +23,8 @@ Release 提供**两种构建**，按需选择：
 
 社区版点开 PDF 不会报错：会提示「PDF 阅读需要完整版」，并交给系统默认程序打开。
 
+由于目录站要求 Release 只能包含三个核心文件，**完整版发布在配套仓库 [LLllCCC/grove-reader-full](https://github.com/LLllCCC/grove-reader-full/releases)**——从其最新 Release 下载 `main.full.js` 与 `grove-reader-pdfjs-assets.zip` 即可。
+
 ## 网络与隐私
 
 插件**默认不联网**，所有阅读数据、批注、笔记都只写进当前库。只有你主动使用下面两项功能时才会发起外部请求：
