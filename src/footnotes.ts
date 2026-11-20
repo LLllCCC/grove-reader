@@ -38,7 +38,7 @@ export function hasFragment(href?: string | null): boolean {
 export function isMarkerLikeText(text?: string | null): boolean {
 	const t = (text ?? '').replace(/\s+/g, '')
 	if (!t) return false
-	if (/^[\[(（【〔]\s*\d{1,3}(?:[-–—]\d{1,3})?\s*[\]）】〕]$/.test(t)) return true
+	if (/^[[(（【〔]\s*\d{1,3}(?:[-–—]\d{1,3})?\s*[\]）】〕]$/.test(t)) return true
 	if (/^\d{1,3}[.、]?$/.test(t)) return true
 	if (/^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]$/.test(t)) return true
 	return /^[*＊†‡§¶]+$/.test(t)

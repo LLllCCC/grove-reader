@@ -265,7 +265,7 @@ export class ReaderView extends ItemView implements ReaderEngine {
 	}
 
 	getState(): Record<string, unknown> {
-		const base = super.getState() as Record<string, unknown>
+		const base = super.getState()
 		return { ...base, bookPath: this.bookPath || undefined }
 	}
 
@@ -550,7 +550,7 @@ export class ReaderView extends ItemView implements ReaderEngine {
 	async #ttsNext(): Promise<boolean> {
 		const before = this.data?.lastLocation?.cfi ?? ''
 		try {
-			await this.foliate?.goRight()
+			this.foliate?.goRight()
 		} catch {
 			return false
 		}
@@ -588,12 +588,12 @@ export class ReaderView extends ItemView implements ReaderEngine {
 			const name = basenameOf(target)
 			const foliate = document.createElement('foliate-view') as unknown as FoliateView
 			this.foliate = foliate
-			foliate.addEventListener('load', this.#onLoad as EventListener)
-			foliate.addEventListener('relocate', this.#onRelocate as EventListener)
-			foliate.addEventListener('draw-annotation', this.#onDrawAnnotation as EventListener)
-			foliate.addEventListener('create-overlay', this.#onCreateOverlay as EventListener)
-			foliate.addEventListener('show-annotation', this.#onShowAnnotation as EventListener)
-			foliate.addEventListener('link', this.#onLink as EventListener)
+			foliate.addEventListener('load', this.#onLoad)
+			foliate.addEventListener('relocate', this.#onRelocate)
+			foliate.addEventListener('draw-annotation', this.#onDrawAnnotation)
+			foliate.addEventListener('create-overlay', this.#onCreateOverlay)
+			foliate.addEventListener('show-annotation', this.#onShowAnnotation)
+			foliate.addEventListener('link', this.#onLink)
 
 			await foliate.open(new File([buf], name))
 			// 手机端关掉「拖选到页边自动翻页」：会把跨页拖选手势当成 swipe，直接跳页并冲掉选区
@@ -1055,7 +1055,7 @@ export class ReaderView extends ItemView implements ReaderEngine {
 			draw: (func: typeof Overlayer.highlight, options?: Record<string, unknown>) => void
 			annotation: { color?: string }
 		}>).detail
-		draw(drawEpubHighlight as unknown as typeof Overlayer.highlight, {
+		draw(drawEpubHighlight, {
 			color: annotation.color ?? '#ffe066',
 			style: this.plugin.settings.epubHighlightStyle ?? 'wash',
 			vertical: this.plugin.settings.appearance?.epubVertical === true,
@@ -2101,7 +2101,7 @@ export class ReaderView extends ItemView implements ReaderEngine {
 	/** CFI 的章节号是否落在当前 spine 里（foliate 自己 Resolve 失败时不抛错，只能先探） */
 	#cfiLooksValid(cfi: string): boolean {
 		try {
-			const resolved = this.foliate?.resolveNavigation(cfi) as { index?: number } | undefined
+			const resolved = this.foliate?.resolveNavigation(cfi)
 			if (!resolved || typeof resolved.index !== 'number') return false
 			const total = this.foliate?.book?.sections?.length ?? 0
 			if (!total) return true

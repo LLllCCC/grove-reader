@@ -66,7 +66,7 @@ async function doReadPdfShelfInfo(
 			params.cMapPacked = true
 			params.standardFontDataUrl = assetUrlGetter?.('standard_fonts/')
 		}
-		doc = (await pdfjsLib.getDocument(params as Parameters<typeof pdfjsLib.getDocument>[0]).promise) as unknown as ThumbDoc
+		doc = (await pdfjsLib.getDocument(params).promise) as unknown as ThumbDoc
 
 		const [page, meta] = await Promise.all([
 			doc.getPage(1),

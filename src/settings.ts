@@ -530,7 +530,7 @@ export class GroveSettingTab extends PluginSettingTab {
 			})
 		// —— 语义检索（向量） ——
 		containerEl.createEl('h3', { text: t('语义检索（向量）') })
-		const provider = (this.plugin.settings.aiEmbeddingProvider ?? 'local') as EmbeddingProvider
+		const provider = (this.plugin.settings.aiEmbeddingProvider ?? 'local')
 		new Setting(containerEl)
 			.setName(t('向量服务'))
 			.setDesc(t('本地＝离线词法向量，不联网不花钱（同义说法未必命中）；智谱 embedding-3 需要资源包；硅基流动 bge-m3 有免费额度但需要单独填 Key。换服务后旧索引会失效，需重建'))

@@ -24,7 +24,7 @@ export function pathExists(absPath: string): boolean {
 /** 按绝对路径读文件字节（readBookBytes 的库外兜底） */
 export function readBytes(absPath: string): ArrayBuffer {
 	const buf = fs.readFileSync(absPath)
-	return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
+	return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
 }
 
 export interface AdoptInput {

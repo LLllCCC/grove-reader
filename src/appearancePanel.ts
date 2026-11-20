@@ -148,7 +148,7 @@ export function renderAppearancePanel(panel: HTMLElement, host: AppearancePanelH
 		range.addEventListener('input', () => {
 			const value = Number.parseFloat(range.value)
 			valueEl.setText(item.fmt(value))
-			host.patch({ [item.key]: value } as Partial<ReaderAppearance>)
+			host.patch({ [item.key]: value })
 		})
 	}
 

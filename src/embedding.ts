@@ -27,7 +27,7 @@ export { LOCAL_EMBED_DIMS, localVector }
 
 export function resolveEmbedding(plugin: GroveReaderPlugin): EmbeddingRuntime {
 	const s = plugin.settings
-	const provider = (s.aiEmbeddingProvider ?? 'local') as EmbeddingProvider
+	const provider = (s.aiEmbeddingProvider ?? 'local')
 	if (provider === 'local') {
 		return {
 			provider,

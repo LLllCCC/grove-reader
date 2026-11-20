@@ -198,7 +198,8 @@ export class BookInfoModal extends Modal {
 		const mk = (text: string, key: keyof BookInfoValues, ai = false): HTMLInputElement => {
 			label(text, ai)
 			const input = this.contentEl.createEl('input', { type: 'text', cls: 'grove-folder-input' })
-			input.value = String(this.values[key] ?? '')
+			const raw = this.values[key]
+			input.value = typeof raw === 'string' ? raw : ''
 			return input
 		}
 		const title = mk(t('书名'), 'title')

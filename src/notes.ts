@@ -252,12 +252,12 @@ function parseSegment(src: string, stop: 'each' | 'if' | undefined): { tokens: T
 		if (tag.startsWith('#each')) {
 			const inner = parseSegment(rest, 'each')
 			if (!inner.closed) throw new Error(t('模板存在未闭合的 {{#each}}'))
-			tokens.push({ type: 'each', arg: m[2]!, children: inner.tokens })
+			tokens.push({ type: 'each', arg: m[2], children: inner.tokens })
 			rest = inner.rest
 		} else if (tag.startsWith('#if')) {
 			const inner = parseSegment(rest, 'if')
 			if (!inner.closed) throw new Error(t('模板存在未闭合的 {{#if}}'))
-			tokens.push({ type: 'if', arg: m[4]!, children: inner.tokens })
+			tokens.push({ type: 'if', arg: m[4], children: inner.tokens })
 			rest = inner.rest
 		} else if (tag.startsWith('/')) {
 			const kind = m[3] as 'each' | 'if'
@@ -265,7 +265,7 @@ function parseSegment(src: string, stop: 'each' | 'if' | undefined): { tokens: T
 			if (kind !== stop) throw new Error(`模板标签不匹配：{{/${kind}}}`)
 			return { tokens, rest, closed: true }
 		} else {
-			tokens.push({ type: 'var', path: m[5]! })
+			tokens.push({ type: 'var', path: m[5] })
 		}
 	}
 }
@@ -284,7 +284,7 @@ function evalTokens(tokens: Token[], scopes: Record<string, unknown>[]): string 
 			out += t.value
 		} else if (t.type === 'var') {
 			const v = lookup(scopes, t.path)
-			out += v == null ? '' : String(v)
+			out += v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)
 		} else if (t.type === 'each') {
 			const arr = lookup(scopes, t.arg)
 			if (Array.isArray(arr)) {

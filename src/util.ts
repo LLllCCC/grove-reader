@@ -278,7 +278,7 @@ export function cleanBookTitle(fileName: string): string {
 	t = t.replace(/[@\s_-]*(?:clipboard[_\s-]?screenshot|pasted[_\s-]?image).*$/i, ' ')
 	// 下载站标记：全角/半角括号、方括号；含多站点列表
 	t = t.replace(/[（(]\s*(?:z[-_\s]?lib(?:rary)?(?:\.[a-z]+)?|1lib(?:\.[a-z]+)?)[^）)]*[）)]/gi, ' ')
-	t = t.replace(/[\[【]\s*(?:z[-_\s]?lib(?:rary)?|1lib)[^\]】]*[\]】]/gi, ' ')
+	t = t.replace(/[[【]\s*(?:z[-_\s]?lib(?:rary)?|1lib)[^\]】]*[\]】]/gi, ' ')
 	// OCR / layered / 时间戳
 	t = t.replace(/\.(layered|ocr)\b/gi, ' ')
 	t = t.replace(/\[\s*ocr\s*\]/gi, ' ')
@@ -305,7 +305,7 @@ export function stripTitleAuthor(title: string, author: string): string {
 	if (!core) return t
 	const variants = [rawAuthor]
 	const noCountry = rawAuthor
-		.replace(/^[\s\[【（(]*(?:\[[^\]]+\]|【[^】]+】|[（(][^）)]*[）)])?\s*/, '')
+		.replace(/^[\s[【（(]*(?:\[[^\]]+\]|【[^】]+】|[（(][^）)]*[）)])?\s*/, '')
 		.trim()
 	if (noCountry && noCountry !== rawAuthor) variants.push(noCountry)
 
@@ -318,7 +318,7 @@ export function stripTitleAuthor(title: string, author: string): string {
 
 	// 尾部括号：只删“括号内容能和作者对上”的那一段
 	for (let i = 0; i < 2; i++) {
-		const m = t.match(/[（(]\s*([^（）()]*?)\s*[）)]\s*$/) || t.match(/[\[【]\s*([^\[\]【】]*?)\s*[\]】]\s*$/)
+		const m = t.match(/[（(]\s*([^（）()]*?)\s*[）)]\s*$/) || t.match(/[[【]\s*([^[\]【】]*?)\s*[\]】]\s*$/)
 		if (!m) break
 		const inside = normalizeAuthor(m[1])
 		if (inside && (inside.includes(core) || core.includes(inside))) {
@@ -329,14 +329,14 @@ export function stripTitleAuthor(title: string, author: string): string {
 	}
 
 	// 去掉只剩国家/地区标记的尾巴，以及残留的连接符
-	t = t.replace(/[\s\-–—]*[\[【（(]\s*(?:日|美|英|法|德|俄|韩|加|澳|意|西|荷|瑞典|瑞士|以色列|印度|巴西|墨西哥|阿根廷|波兰|捷克|奥地利|土耳其|伊朗|南非|新西兰|新加坡|马来西亚|泰国|越南|菲律宾|印尼|丹麦|挪威|芬兰|希腊|葡萄牙|爱尔兰|比利时|匈牙利|罗马尼亚|乌克兰|俄罗斯)\s*[\]】）)]\s*$/u, '')
+	t = t.replace(/[\s\-–—]*[[【（(\s*(?:日|美|英|法|德|俄|韩|加|澳|意|西|荷|瑞典|瑞士|以色列|印度|巴西|墨西哥|阿根廷|波兰|捷克|奥地利|土耳其|伊朗|南非|新西兰|新加坡|马来西亚|泰国|越南|菲律宾|印尼|丹麦|挪威|芬兰|希腊|葡萄牙|爱尔兰|比利时|匈牙利|罗马尼亚|乌克兰|俄罗斯)\s*[\]】）)]\s*$/u, '')
 	t = t.replace(/[\s\-–—_.]+$/, '').trim()
 	return t || title
 }
 
 function normalizeAuthor(value: string): string {
 	return value
-		.replace(/^[\s\[【（(]+|[\s\]】）)]+$/g, '')
+		.replace(/^[\s[【（(]+|[\s\]】）)]+$/g, '')
 		.replace(/^\[[^\]]+\]\s*/, '')
 		.replace(/^【[^】]+】\s*/, '')
 		.replace(/[（(][^）)]*[）)]/g, '')

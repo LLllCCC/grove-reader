@@ -1011,7 +1011,8 @@ export default class GroveReaderPlugin extends Plugin {
 					let assigned = 0
 					let created = 0
 					for (const group of groups) {
-						const name = String(group?.name ?? '').trim().slice(0, 20)
+						const rawName = (group as { name?: unknown } | undefined)?.name
+						const name = (typeof rawName === 'string' ? rawName : '').trim().slice(0, 20)
 						if (!name) continue
 						const list = this.lists.lists().find(l => l.name === name) ?? this.lists.create(name)
 						created++
@@ -1071,7 +1072,7 @@ export default class GroveReaderPlugin extends Plugin {
 		try {
 			this.app.workspace.setActiveLeaf(leaf, { focus: true })
 		} catch {
-			this.app.workspace.revealLeaf(leaf)
+			void this.app.workspace.revealLeaf(leaf)
 		}
 	}
 
@@ -1083,7 +1084,7 @@ export default class GroveReaderPlugin extends Plugin {
 		}
 		const leaf = this.app.workspace.getLeaf('tab')
 		await leaf.setViewState({ type: VIEW_TYPE_GROVE_BOOKSHELF, active: true })
-		this.app.workspace.revealLeaf(leaf)
+		void this.app.workspace.revealLeaf(leaf)
 	}
 
 	/** 设置里改了书架显示项后，让已打开的书架立即重绘 */
@@ -1283,7 +1284,7 @@ export default class GroveReaderPlugin extends Plugin {
 			active: true,
 			state: { bookPath, cfi, fallback },
 		})
-		this.app.workspace.revealLeaf(leaf)
+		void this.app.workspace.revealLeaf(leaf)
 	}
 
 	/** PDF 等：库内文件用 Obsidian 原生视图打开，库外文件交给系统默认程序 */
@@ -1308,7 +1309,7 @@ export default class GroveReaderPlugin extends Plugin {
 		}
 		const leaf = this.app.workspace.getLeaf('tab')
 		await leaf.openFile(f)
-		this.app.workspace.revealLeaf(leaf)
+		void this.app.workspace.revealLeaf(leaf)
 	}
 
 	private async openByBookId(bookId: string, cfi: string): Promise<void> {

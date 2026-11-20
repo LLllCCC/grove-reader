@@ -310,7 +310,7 @@ export class ShelfCache {
 		if (url !== null && url.length > MAX_CACHED_COVER_CHARS) return
 		this.#deleteCoverCache(filename)
 		while (this.coverCache.size >= MAX_CACHED_COVERS || this.coverCacheChars + (url?.length ?? 0) > MAX_CACHED_COVER_CHARS) {
-			const oldest = this.coverCache.keys().next().value as string | undefined
+			const oldest = this.coverCache.keys().next().value
 			if (oldest === undefined) break
 			this.#deleteCoverCache(oldest)
 		}

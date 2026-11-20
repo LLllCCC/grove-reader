@@ -313,7 +313,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 	}
 
 	getState(): Record<string, unknown> {
-		const base = super.getState() as Record<string, unknown>
+		const base = super.getState()
 		return { ...base, bookPath: this.bookPath || undefined }
 	}
 
@@ -644,7 +644,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 					return readAsset(`${dir}/${filename}`)
 				}
 			}
-			const task = pdfjsLib.getDocument(docParams as Parameters<typeof pdfjsLib.getDocument>[0])
+			const task = pdfjsLib.getDocument(docParams)
 			this.pdfLoadingTask = task
 			const doc = (await task.promise) as unknown as PdfDocProxy
 			this.pdfDoc = doc
@@ -969,7 +969,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 		if (!this.pdfDoc) return
 		new PdfThumbnailsModal(
 			this.app,
-			this.pdfDoc as unknown as PdfThumbDoc,
+			this.pdfDoc,
 			this.currentPage,
 			n => this.#jumpToPageWithReturn(n),
 		).open()
@@ -1016,9 +1016,9 @@ export class PdfView extends ItemView implements ReaderEngine {
 		if (!ctx) throw new Error(tr('无法获取 2D 画布'))
 		const task = page.render({ canvasContext: ctx, viewport: vp })
 		const hidden = document.visibilityState === 'hidden'
-		const originalRaf = window.requestAnimationFrame
+		const originalRaf = window.requestAnimationFrame.bind(window)
 		if (hidden) {
-			window.requestAnimationFrame = ((cb: FrameRequestCallback) => window.setTimeout(() => cb(performance.now()), 16)) as typeof window.requestAnimationFrame
+			window.requestAnimationFrame = ((cb: FrameRequestCallback) => window.setTimeout(() => cb(performance.now()), 16))
 		}
 		let timer = 0
 		const timeout = new Promise<never>((_, reject) => {
@@ -1203,7 +1203,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 			this.searchTextCache.delete(n)
 		}
 		while (this.searchTextCacheChars + weight > MAX_SEARCH_CACHE_CHARS) {
-			const oldest = this.searchTextCache.keys().next().value as number | undefined
+			const oldest = this.searchTextCache.keys().next().value
 			if (oldest === undefined) break
 			const removed = this.searchTextCache.get(oldest)!
 			this.searchTextCacheChars -= removed.text.length + removed.items.reduce((sum, item) => sum + item.length, 0) + removed.offsets.length

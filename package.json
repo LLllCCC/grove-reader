@@ -13,15 +13,19 @@
 		"foliate:check": "node scripts/foliate-check.mjs",
 		"foliate:baseline": "node scripts/foliate-baseline.mjs",
 		"obsidian:eval": "node scripts/obsidian-eval.mjs",
-		"build:community": "tsc -noEmit -skipLibCheck && GROVE_COMMUNITY=1 node esbuild.config.mjs production"
+		"build:community": "tsc -noEmit -skipLibCheck && GROVE_COMMUNITY=1 node esbuild.config.mjs production",
+		"lint:obsidian": "eslint src"
 	},
 	"devDependencies": {
 		"@types/node": "^22.10.2",
 		"builtin-modules": "^4.0.0",
 		"esbuild": "^0.25.0",
+		"eslint": "^9.39.5",
+		"eslint-plugin-obsidianmd": "^0.6.0",
 		"fflate": "^0.8.2",
 		"obsidian": "^1.8.7",
-		"typescript": "^5.7.2"
+		"typescript": "^5.7.2",
+		"typescript-eslint": "^8.73.0"
 	},
 	"dependencies": {
 		"pdfjs-dist": "^5.7.284"

@@ -428,7 +428,8 @@ export class BookStore {
 	#normalize(data: BookData): void {
 		if (!Array.isArray(data.annotations)) data.annotations = []
 		for (const a of data.annotations) {
-			if (typeof a.text !== 'string') (a as unknown as { text: string }).text = String((a as unknown as { text?: unknown }).text ?? '')
+			const slot = a as unknown as { text?: unknown }
+			if (typeof slot.text !== 'string') slot.text = ''
 		}
 		// 书签是后加的字段：旧数据没有，补空数组；坏的条目直接丢掉
 		if (!Array.isArray(data.bookmarks)) data.bookmarks = []

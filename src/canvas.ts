@@ -46,14 +46,14 @@ export function parseCanvas(raw: string): CanvasDoc {
 	const parsed = JSON.parse(raw) as Partial<CanvasDoc>
 	if (!parsed || typeof parsed !== 'object') throw new Error(t('不是有效的画布文件'))
 	return {
-		nodes: Array.isArray(parsed.nodes) ? (parsed.nodes as CanvasNode[]) : [],
+		nodes: Array.isArray(parsed.nodes) ? (parsed.nodes) : [],
 		edges: Array.isArray(parsed.edges) ? parsed.edges : [],
 	}
 }
 
 /** 卡片抬头用短书名：遇到括号/冒号就截断，避免整段副标题挤满第一行 */
 export function shortTitle(title: string): string {
-	const cut = title.split(/[（(【\[:：|—]/)[0].trim()
+	const cut = title.split(/[（(【[:：|—]/)[0].trim()
 	const base = cut || title.trim()
 	return truncate(base, 24)
 }

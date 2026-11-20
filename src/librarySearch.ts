@@ -163,7 +163,7 @@ async function extractPdf(plugin: GroveReaderPlugin, bytes: ArrayBuffer): Promis
 				return plugin.readPdfjsAsset(`${dir}/${filename}`)
 			}
 		}
-		doc = (await lib.getDocument(params as Parameters<typeof lib.getDocument>[0]).promise) as unknown as PdfTextDoc
+		doc = (await lib.getDocument(params).promise) as unknown as PdfTextDoc
 		if (!doc) return { kind: 'pdf', sections: [] }
 		const sections: SectionText[] = []
 		for (let n = 1; n <= doc.numPages; n++) {

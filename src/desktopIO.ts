@@ -20,7 +20,7 @@ export class DesktopIO implements PlatformIO {
 
 	async readBinary(path: string): Promise<ArrayBuffer> {
 		const buf = await fsp.readFile(path)
-		return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
+		return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
 	}
 
 	write(path: string, data: string): Promise<void> {

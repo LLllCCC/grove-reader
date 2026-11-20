@@ -27,7 +27,7 @@ export interface PdfMarkupAnnotation {
 const MARKUP_SUBTYPES = new Set(['highlight', 'underline', 'squiggly', 'strikeout'])
 
 export function markupSubtype(a: PdfMarkupAnnotation): 'highlight' | 'underline' | 'squiggly' | 'strikeout' | null {
-	const s = String(a.subtype ?? '').toLowerCase()
+	const s = (typeof a.subtype === 'string' ? a.subtype : '').toLowerCase()
 	return MARKUP_SUBTYPES.has(s) ? (s as 'highlight' | 'underline' | 'squiggly' | 'strikeout') : null
 }
 

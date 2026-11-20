@@ -209,7 +209,7 @@ export class TextView extends ItemView implements ReaderEngine {
 	}
 
 	getState(): Record<string, unknown> {
-		const base = super.getState() as Record<string, unknown>
+		const base = super.getState()
 		return { ...base, bookPath: this.bookPath || undefined, page: this.page }
 	}
 
@@ -797,7 +797,7 @@ export class TextView extends ItemView implements ReaderEngine {
 				list.createDiv('grove-toc-more').setText(`只显示前 ${limit} 条，输入关键词继续筛选（共 ${items.length} 条）`)
 			}
 			if (activeEl) {
-				const el = activeEl as HTMLElement
+				const el = activeEl
 				window.setTimeout(() => el.scrollIntoView({ block: 'center' }), 20)
 			}
 		}
