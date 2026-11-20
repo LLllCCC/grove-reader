@@ -284,7 +284,7 @@ function evalTokens(tokens: Token[], scopes: Record<string, unknown>[]): string 
 			out += t.value
 		} else if (t.type === 'var') {
 			const v = lookup(scopes, t.path)
-			out += v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)
+			out += v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : typeof v === 'string' ? v : typeof v === 'number' || typeof v === 'boolean' ? String(v) : ''
 		} else if (t.type === 'each') {
 			const arr = lookup(scopes, t.arg)
 			if (Array.isArray(arr)) {

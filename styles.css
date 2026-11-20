@@ -4628,7 +4628,27 @@ body.grove-immersive .grove-toolbar[data-bar-open='1'] {
 /* 书架虚拟化的上下占位：撑出未渲染行的滚动高度 */
 .grove-shelf-spacer {
 	width: 100%;
+	grid-column: 1 / -1;
 	pointer-events: none;
+}
+
+/* 审核要求：静态样式走类，不写 element.style */
+.grove-pdf-annot-strike {
+	height: 0;
+}
+
+.grove-bar-flush {
+	transform: translateY(0) !important;
+}
+
+.grove-txt-gutter {
+	padding-left: 32px;
+	padding-right: 32px;
+}
+
+.grove-txt-flush {
+	padding: 0;
+	max-width: none;
 }
 
 /* 工具栏按钮顺序编辑器（设置 → 阅读） */

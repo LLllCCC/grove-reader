@@ -820,7 +820,7 @@ export default class GroveReaderPlugin extends Plugin {
 		const changed = adoptMigratedFolders({ vaultBase: this.vaultBase, settings: this.settings })
 		if (!changed) return
 		void this.saveSettings()
-		console.log(t('[Grove Reader] 已自动接管迁移后的书库目录'))
+		console.debug(t('[Grove Reader] 已自动接管迁移后的书库目录'))
 		this.debug('adopt', 'switched settings to current library root', { root: LIBRARY_ROOT })
 	}
 
@@ -1429,7 +1429,7 @@ export default class GroveReaderPlugin extends Plugin {
 
 	/** 从实时预览的链接节点反查它的 `路径#定位` 源码；不是链接节点返回 null */
 	#hrefFromLivePreview(target: HTMLElement): string | null {
-		const span = target.closest('.cm-hmd-internal-link') as HTMLElement | null
+		const span = target.closest<HTMLElement>('.cm-hmd-internal-link')
 		if (!span) return null
 		try {
 			const leaves = this.app.workspace.getLeavesOfType('markdown')

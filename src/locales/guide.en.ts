@@ -36,7 +36,7 @@ Grove Reader closes the loop **read → highlight and comment → generate a not
 - **Full-text search**: the annotation panel's search tab finds matches with context in EPUB, TXT and PDF; clicking a result jumps there and highlights the hit.
 - **Footnotes**: clicking a footnote marker pops the footnote in place without losing your position. "Go to source" jumps for real; click elsewhere or press Esc to dismiss. Handles \`epub:type="noteref"\` as well as plain \`[1]\` anchors pointing at \`note1\`/\`fn3\`.
 - Reading position is remembered across sessions.
-- **Title cleanup**: metadata inside the book wins. For PDFs the plugin strips suffixes such as "(Z-Library)", "[OCR]_", "\_OCR", timestamps, ".layered" and pasted-screenshot markers, and drops a trailing author name or bracketed author when it duplicates the author line. Use "Edit book info" for anything else.
+- **Title cleanup**: metadata inside the book wins. For PDFs the plugin strips suffixes such as "(Z-Library)", "[OCR]_", "_OCR", timestamps, ".layered" and pasted-screenshot markers, and drops a trailing author name or bracketed author when it duplicates the author line. Use "Edit book info" for anything else.
 - **Deleting books**: right-click → "Delete book…". Unchecked, the book only leaves the shelf (file and annotations kept, restorable in settings). Checked, the file, note, annotations and cover move to the plugin trash and can be restored for 30 days under Settings → Trash.
 
 ## 2. Highlights and annotations

@@ -76,7 +76,7 @@ export class AiPanel {
 
 	fill(content: string, isError = false): void {
 		if (!this.el) return
-		const body = this.el.querySelector('.grove-ai-body') as HTMLElement | null
+		const body = this.el.querySelector<HTMLElement>('.grove-ai-body')
 		if (!body) return
 		body.removeClass('is-loading')
 		body.toggleClass('is-error', isError)

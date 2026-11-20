@@ -203,7 +203,7 @@ export class StatsStore {
 
 	/** 全库按小时段合并的阅读秒数（24 项） */
 	hourTotals(): number[] {
-		const out = new Array(24).fill(0)
+		const out: number[] = new Array<number>(24).fill(0)
 		for (const book of Object.values(this.data.books)) {
 			for (const stat of Object.values(book.days ?? {})) {
 				if (!stat.hours) continue

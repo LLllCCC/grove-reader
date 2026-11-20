@@ -430,7 +430,7 @@ export class TextPromptModal extends Modal {
 		private titleText: string,
 		private placeholder: string,
 		private initial: string,
-		private onSubmit: (value: string) => void,
+		private onSubmit: (value: string) => void | Promise<void>,
 	) {
 		super(app)
 	}
@@ -447,7 +447,7 @@ export class TextPromptModal extends Modal {
 				new Notice(t('名称不能为空'))
 				return
 			}
-			this.onSubmit(v)
+			void this.onSubmit(v)
 			this.close()
 		}
 		input.addEventListener('keydown', e => {
@@ -802,7 +802,7 @@ export class FolderPromptModal extends Modal {
 		app: App,
 		private titleText: string,
 		private placeholder: string,
-		private onSubmit: (value: string) => void,
+		private onSubmit: (value: string) => void | Promise<void>,
 	) {
 		super(app)
 	}
@@ -823,7 +823,7 @@ export class FolderPromptModal extends Modal {
 				new Notice(t('请填写文件夹路径'))
 				return
 			}
-			this.onSubmit(v)
+			void this.onSubmit(v)
 			this.close()
 		}
 		input.addEventListener('keydown', e => {
@@ -1309,7 +1309,7 @@ export class TemplateEditModal extends Modal {
 		private titleText: string,
 		private initialName: string,
 		private initialPath: string,
-		private onSave: (name: string, path: string) => void,
+		private onSave: (name: string, path: string) => void | Promise<void>,
 	) {
 		super(app)
 	}
@@ -1343,7 +1343,7 @@ export class TemplateEditModal extends Modal {
 				new Notice(t('请填写模板文件路径'))
 				return
 			}
-			this.onSave(n, p)
+			void this.onSave(n, p)
 			this.close()
 		})
 	}
@@ -1358,7 +1358,7 @@ export class PromptModal extends Modal {
 		app: App,
 		private titleText: string,
 		private placeholder: string,
-		private onSubmit: (value: string) => void,
+		private onSubmit: (value: string) => void | Promise<void>,
 	) {
 		super(app)
 	}
@@ -1376,7 +1376,7 @@ export class PromptModal extends Modal {
 				new Notice(t('请输入关键词'))
 				return
 			}
-			this.onSubmit(value)
+			void this.onSubmit(value)
 			this.close()
 		}
 		input.addEventListener('keydown', e => {

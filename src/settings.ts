@@ -41,7 +41,7 @@ export class GroveSettingTab extends PluginSettingTab {
 			brand.createSpan('grove-settings-brand-name').setText(APP_NAME)
 		}
 
-		containerEl.createEl('h2', { text: t('{name} 设置', { name: APP_NAME }) })
+		new Setting(containerEl).setName(t('{name} 设置', { name: APP_NAME })).setHeading()
 		this.#renderTabs(containerEl)
 
 		const body = containerEl.createDiv('grove-settings-body')
@@ -106,7 +106,7 @@ export class GroveSettingTab extends PluginSettingTab {
 			})
 
 		// —— 标志 ——
-		containerEl.createEl('h3', { text: t('标志') })
+		new Setting(containerEl).setName(t('标志')).setHeading()
 		containerEl.createEl('p', {
 			cls: 'setting-item-description',
 			text: t('选一个显示在标签页、功能区和空书架上的标志。标签页图标会在重新打开书架后更新。'),
@@ -137,7 +137,7 @@ export class GroveSettingTab extends PluginSettingTab {
 		}
 
 		// —— 书架显示 ——
-		containerEl.createEl('h3', { text: t('书架显示') })
+		new Setting(containerEl).setName(t('书架显示')).setHeading()
 		containerEl.createEl('p', {
 			cls: 'setting-item-description',
 			text: t('卡片上显示哪些信息。默认只留最常用的几项，信息多时卡片会换行变高。'),
@@ -168,7 +168,7 @@ export class GroveSettingTab extends PluginSettingTab {
 
 	#renderShelf(containerEl: HTMLElement): void {
 		// —— 扫描文件夹 ——
-		containerEl.createEl('h3', { text: t('扫描文件夹') })
+		new Setting(containerEl).setName(t('扫描文件夹')).setHeading()
 		new Setting(containerEl)
 			.setName(t('扫描文件夹'))
 			.setDesc(t('书架从这些文件夹扫描书籍；支持库内文件夹或本机绝对路径（子文件夹会一并扫描）。PDF、TXT 也会被收纳进书架，点击用 Obsidian 原生视图或 Grove TXT 视图打开'))
@@ -200,7 +200,7 @@ export class GroveSettingTab extends PluginSettingTab {
 		}
 
 		// —— 隐藏的书 ——
-		containerEl.createEl('h3', { text: t('隐藏与恢复') })
+		new Setting(containerEl).setName(t('隐藏与恢复')).setHeading()
 		const hiddenBooks = this.plugin.settings.hiddenBooks ?? []
 		const hiddenCount = hiddenBooks.length
 		if (hiddenCount) {
@@ -228,7 +228,7 @@ export class GroveSettingTab extends PluginSettingTab {
 
 	#renderReading(containerEl: HTMLElement): void {
 		// —— 阅读 ——
-		containerEl.createEl('h3', { text: t('阅读') })
+		new Setting(containerEl).setName(t('阅读')).setHeading()
 		new Setting(containerEl)
 			.setName(t('打开书本时同时展开批注列表'))
 			.setDesc(t('关闭后，打开书时只显示正文；可随时点工具栏的「批注列表」按钮唤出侧栏。在正文中点击已批注的文段时，侧栏仍会自动展开并定位到对应批注'))
@@ -426,7 +426,7 @@ export class GroveSettingTab extends PluginSettingTab {
 				}))
 
 		// —— TXT 分页 ——
-		containerEl.createEl('h3', { text: t('TXT 阅读') })
+		new Setting(containerEl).setName(t('TXT 阅读')).setHeading()
 		new Setting(containerEl)
 			.setName(t('TXT 页面版式'))
 			.setDesc(t('单页＝一屏一页；双页＝左右两栏像翻书；自动＝窗口够宽时双页、变窄自动回到单页（与 EPUB 缩放时自动分栏的规律一致）'))
@@ -452,7 +452,7 @@ export class GroveSettingTab extends PluginSettingTab {
 					}))
 
 		// —— PDF 链接 ——
-		containerEl.createEl('h3', { text: t('PDF 链接') })
+		new Setting(containerEl).setName(t('PDF 链接')).setHeading()
 		new Setting(containerEl)
 			.setName(t('复制链接的格式'))
 			.setDesc(t('Grove 双链：[[书.pdf#grove-cfi=page:12&r=…]]，点击回到原句并标出框选；PDF++ 兼容：[[书.pdf#page=12&rect=…]]，供安装了 PDF++ 的库使用'))
@@ -477,7 +477,7 @@ export class GroveSettingTab extends PluginSettingTab {
 					}))
 
 		// —— AI 解释 ——
-		containerEl.createEl('h3', { text: t('AI 解释') })
+		new Setting(containerEl).setName(t('AI 解释')).setHeading()
 		containerEl.createEl('p', {
 			cls: 'setting-item-description',
 			text: t('划词后点「解释」按钮，让 AI 用中文说明这段文字的意思。走 OpenAI 兼容接口，默认填的是智谱 GLM-4-Flash（免费额度，注册即可用）。Key 只保存在本机插件配置里。'),
@@ -529,7 +529,7 @@ export class GroveSettingTab extends PluginSettingTab {
 				text.inputEl.rows = 3
 			})
 		// —— 语义检索（向量） ——
-		containerEl.createEl('h3', { text: t('语义检索（向量）') })
+		new Setting(containerEl).setName(t('语义检索（向量）')).setHeading()
 		const provider = (this.plugin.settings.aiEmbeddingProvider ?? 'local')
 		new Setting(containerEl)
 			.setName(t('向量服务'))
@@ -598,7 +598,7 @@ export class GroveSettingTab extends PluginSettingTab {
 		}
 
 		// —— 笔记 ——
-		containerEl.createEl('h3', { text: t('笔记') })
+		new Setting(containerEl).setName(t('笔记')).setHeading()
 		new Setting(containerEl)
 			.setName(t('新增/修改批注时自动更新笔记'))
 			.setDesc(t('仅更新已经点过「生成/更新阅读笔记」的书：加删批注、改评论后约 1.5 秒自动重写笔记的生成区（标记区外你手写的内容会保留）。关闭后需手动点按钮更新'))
@@ -711,7 +711,7 @@ export class GroveSettingTab extends PluginSettingTab {
 
 	#renderData(containerEl: HTMLElement): void {
 		// —— 数据安全 ——
-		containerEl.createEl('h3', { text: t('数据安全') })
+		new Setting(containerEl).setName(t('数据安全')).setHeading()
 		new Setting(containerEl)
 			.setName(t('数据文件夹'))
 			.setDesc(t('批注 JSON、封面、书单、阅读统计的存放位置（库内相对路径）。留空 = 插件目录下的 data/。直接改路径不会搬数据；请用右侧「迁移数据…」复制后重启'))
@@ -743,7 +743,8 @@ export class GroveSettingTab extends PluginSettingTab {
 						this.plugin.settings.backupFolder = value.trim() || BACKUP_FOLDER_NAME
 						await this.plugin.saveSettings()
 					})
-				text.inputEl.addEventListener('blur', async () => {
+				text.inputEl.addEventListener('blur', () => {
+					void (async () => {
 					const next = this.plugin.settings.backupFolder?.trim() || BACKUP_FOLDER_NAME
 					if (next === committed) return
 					if (isAbsolutePath(next)) {
@@ -756,6 +757,7 @@ export class GroveSettingTab extends PluginSettingTab {
 					const prev = committed
 					committed = next
 					await this.plugin.migrateBackupFolder(prev, next)
+				})()
 				})
 			})
 		new Setting(containerEl)
@@ -801,7 +803,7 @@ export class GroveSettingTab extends PluginSettingTab {
 					}))
 
 		// —— 检索与导出 ——
-		containerEl.createEl('h3', { text: t('检索与导出') })
+		new Setting(containerEl).setName(t('检索与导出')).setHeading()
 		new Setting(containerEl)
 			.setName(t('全局批注检索'))
 			.setDesc(t('跨书搜索划线与评论；结果可跳回原文；「导出…」可先按范围/书/章节/颜色/今天筛选、分组并实时预览，再写 Markdown / CSV 到笔记文件夹'))
@@ -821,7 +823,7 @@ export class GroveSettingTab extends PluginSettingTab {
 		// —— 回收站（走 PlatformIO，手机端同样可用）——
 		const trash = this.plugin.trash
 		if (trash) {
-			containerEl.createEl('h3', { text: t('回收站') })
+			new Setting(containerEl).setName(t('回收站')).setHeading()
 			const trashSetting = new Setting(containerEl)
 				.setName(t('已删除的书籍'))
 				.setDesc(t("删书时把原文件、笔记、批注和封面移到这里，保留 {p0} 天；可恢复或永久删除", { p0: trash.retentionDays() }))
@@ -833,7 +835,7 @@ export class GroveSettingTab extends PluginSettingTab {
 		}
 
 		// —— 操作记录 ——
-		containerEl.createEl('h3', { text: t('操作记录') })
+		new Setting(containerEl).setName(t('操作记录')).setHeading()
 		new Setting(containerEl)
 			.setName(t('关键操作记录'))
 			.setDesc(t('只记录删除书籍、清空批注、恢复隐藏、备份等低频但重要的动作，最多 200 条；翻页、搜索不记录。'))
@@ -850,7 +852,7 @@ export class GroveSettingTab extends PluginSettingTab {
 				}))
 
 		// —— 维护 ——
-		containerEl.createEl('h3', { text: t('维护') })
+		new Setting(containerEl).setName(t('维护')).setHeading()
 		new Setting(containerEl)
 			.setName(t('数据体检'))
 			.setDesc(t('检查批注 JSON、笔记、书架缓存、书单、统计之间的引用是否还对得上；只读，不会删除书籍或批注'))

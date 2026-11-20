@@ -520,9 +520,9 @@ export class PdfView extends ItemView implements ReaderEngine {
 					this.#renderSidebar()
 				},
 				onToggleMultiSelect: () => this.#setSelectMode(!this.selectMode),
-				onDeleteSelected: () => this.#deleteSelected(),
+				onDeleteSelected: () => { void this.#deleteSelected() },
 				onCancelSelect: () => this.#setSelectMode(false),
-				onRunFullTextSearch: () => this.#runContentSearch(),
+				onRunFullTextSearch: () => { void this.#runContentSearch() },
 				onClearFullTextSearch: () => this.#clearContentSearch(),
 			},
 		})
@@ -1307,7 +1307,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 					el.style.opacity = String(markupOpacity(a))
 				} else if (subtype === 'strikeout') {
 					el.style.borderTop = `2px solid ${color}`
-					el.style.height = '0'
+					el.addClass('grove-pdf-annot-strike')
 					el.style.top = `${(r.t + r.h / 2) * 100}%`
 				} else {
 					el.style.borderBottom = subtype === 'squiggly' ? `2px dotted ${color}` : `2px solid ${color}`
@@ -1602,7 +1602,7 @@ export class PdfView extends ItemView implements ReaderEngine {
 		if (!this.data) return
 		const t = e.target
 		if (!(t instanceof Element)) return
-		const wrap = t.closest('.grove-pdf-page') as HTMLElement | null
+		const wrap = t.closest<HTMLElement>('.grove-pdf-page')
 		if (!wrap) return
 		const page = Number(wrap.dataset.page)
 		const rect = wrap.getBoundingClientRect()

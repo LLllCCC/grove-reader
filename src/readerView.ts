@@ -962,7 +962,7 @@ export class ReaderView extends ItemView implements ReaderEngine {
 				const start = this.touchStart
 				this.touchStart = null
 				const touch = event.changedTouches[0]
-				const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
+				const bar = this.contentEl.querySelector<HTMLElement>('.grove-toolbar')
 				if (!start || !touch || bar?.dataset.barOpen !== '1') return
 				const dy = touch.clientY - start.y
 				if (dy < -44 && Math.abs(dy) > Math.abs(touch.clientX - start.x) * 1.2) this.#setMobileBarOpen(false)
@@ -1017,7 +1017,7 @@ export class ReaderView extends ItemView implements ReaderEngine {
 		if (moved) this.#closeFootnote()
 		if (moved) this.#hidePendingMarker()
 		if (moved && this.plugin.isMobile && !this.sliderActive) {
-			const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
+			const bar = this.contentEl.querySelector<HTMLElement>('.grove-toolbar')
 			if (bar?.dataset.barOpen === '1') this.#setMobileBarOpen(false)
 		}
 		const fraction = d.fraction ?? 0
@@ -1659,7 +1659,7 @@ export class ReaderView extends ItemView implements ReaderEngine {
 	 * 状态只认 dataset.barOpen 一处，class / 文案 / 内联样式都由它派生，避免两套状态打架。
 	 */
 	#setMobileBarOpen(open: boolean): void {
-		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
+		const bar = this.contentEl.querySelector<HTMLElement>('.grove-toolbar')
 		if (!bar) return
 		bar.dataset.barOpen = open ? '1' : '0'
 		const handle = this.mobileToolbarHandle
@@ -1668,7 +1668,7 @@ export class ReaderView extends ItemView implements ReaderEngine {
 			handle.setAttribute('aria-label', open ? t('收起阅读工具栏') : t('展开阅读工具栏'))
 		}
 		// 高度由 CSS 的 [data-bar-open] 决定；这里压掉主题可能加的位移，保证两种状态都贴顶
-		bar.style.setProperty('transform', 'translateY(0)', 'important')
+		bar.addClass('grove-bar-flush')
 		if (open) {
 			bar.scrollLeft = 0
 			// 展开动作本身会让 iframe 失焦，选区被清掉；补回可视选区

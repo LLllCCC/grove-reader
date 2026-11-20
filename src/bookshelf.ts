@@ -713,14 +713,13 @@ export class BookshelfView extends ItemView {
 	#createSpacer(top: boolean): void {
 		const rows = top ? this.topRows : this.bottomRows
 		const spacer = this.gridEl.createDiv('grove-shelf-spacer')
-		spacer.style.gridColumn = '1 / -1'
 		spacer.style.height = `${spacerHeight(rows, this.rowHeight)}px`
 		if (top) this.topSpacer = spacer
 		else this.bottomSpacer = spacer
 	}
 
 	#remeasureRow(): void {
-		const cards = Array.from(this.gridEl.querySelectorAll('.grove-shelf-card')) as HTMLElement[]
+		const cards = Array.from(this.gridEl.querySelectorAll<HTMLElement>('.grove-shelf-card'))
 		if (!cards.length) return
 		const first = cards[0].getBoundingClientRect()
 		// 用相邻两行的 top 差算真实行距，避免只测一张卡时漏掉行高差异
@@ -736,7 +735,7 @@ export class BookshelfView extends ItemView {
 
 	#observeFirstCard(): void {
 		this.cardObserver?.disconnect()
-		const first = this.gridEl.querySelector('.grove-shelf-card') as HTMLElement | null
+		const first = this.gridEl.querySelector<HTMLElement>('.grove-shelf-card')
 		if (!first) return
 		this.cardObserver = new ResizeObserver(() => this.#remeasureRow())
 		this.cardObserver.observe(first)
@@ -1471,7 +1470,7 @@ export class BookshelfView extends ItemView {
 		if (!url) return
 		for (const media of waiting) {
 			if (!media.isConnected) continue
-			const card = media.closest('.grove-shelf-card') as HTMLElement | null
+			const card = media.closest<HTMLElement>('.grove-shelf-card')
 			this.#fillCover(media, url, card?.dataset.title ?? '')
 		}
 	}
@@ -1614,7 +1613,10 @@ export class BookshelfView extends ItemView {
 
 		try {
 			const bytes = await plugin.readBookBytes(path)
-			const book = await makeBook(new File([bytes], basenameOf(path)))
+			const book = (await makeBook(new File([bytes], basenameOf(path)))) as {
+				metadata?: { title?: string; author?: string; publisher?: string }
+				getCover?: () => Promise<Blob | null>
+			}
 			let title = cleanBookTitle(stripNumericTitlePrefix(formatLanguageMap(book.metadata?.title)))
 			let author = formatAuthor(book.metadata?.author)
 			let publisher = formatAuthor(book.metadata?.publisher)
@@ -1650,7 +1652,7 @@ export class BookshelfView extends ItemView {
 
 	#updateCard(card: HTMLElement, info: ShelfTitleParts & { coverName?: string }): void {
 		const display = this.plugin.settings.shelfDisplay
-		const media = card.querySelector('.grove-shelf-cover-media') as HTMLElement | null
+		const media = card.querySelector<HTMLElement>('.grove-shelf-cover-media')
 		// coverName 为 undefined 表示本次没解析出封面：保留现有显示，不要清空
 		if (media && info.coverName !== undefined) {
 			this.#fillCover(media, this.plugin.shelfCache.coverDataUrl(info.coverName), info.title || card.dataset.title || '')
@@ -1709,12 +1711,6 @@ export class BookshelfView extends ItemView {
 		}).open()
 	}
 
-	async #removeFolder(folder: string): Promise<void> {
-		const i = this.plugin.settings.scanFolders.indexOf(folder)
-		if (i >= 0) this.plugin.settings.scanFolders.splice(i, 1)
-		await this.plugin.saveSettings()
-		await this.refresh({ rescan: true })
-	}
 
 	/**
 	 * 导入书籍：选中的文件复制进库内第一个扫描文件夹（没有就用 Grove Reader/书籍），

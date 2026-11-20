@@ -471,7 +471,7 @@ export class TextView extends ItemView implements ReaderEngine {
 				// Android 触摸事件的 target 有时被 Obsidian 的 mobile-tap 换成正文容器，
 				// 用坐标反查一次真实元素
 				const hit = (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null) ?? target
-				const mark = hit?.closest('mark.grove-txt-mark') as HTMLElement | null
+				const mark = hit?.closest<HTMLElement>('mark.grove-txt-mark')
 				if (!mark) return
 				if (window.getSelection()?.toString()) return
 				const a = mark.dataset.annId ? this.data?.annotations.find(x => x.id === mark.dataset.annId) : null
@@ -1248,15 +1248,6 @@ export class TextView extends ItemView implements ReaderEngine {
 		return this.#offsetAtX(this.scrollEl ? this.scrollEl.scrollLeft : 0)
 	}
 
-	#domOffset(node: Node, offset: number): number {
-		const walker = document.createTreeWalker(this.textEl, NodeFilter.SHOW_TEXT)
-		let total = 0
-		for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-			if (n === node) return total + offset
-			total += (n.textContent ?? '').length
-		}
-		return total
-	}
 
 	#findTextPos(target: number): { node: Text; offset: number } | null {
 		const walker = document.createTreeWalker(this.textEl, NodeFilter.SHOW_TEXT)
@@ -1398,7 +1389,7 @@ export class TextView extends ItemView implements ReaderEngine {
 		const id = this.flashAnnId
 		this.flashAnnId = null
 		if (!id) return
-		const mark = this.textEl.querySelector(`mark[data-ann-id="${id}"]`) as HTMLElement | null
+		const mark = this.textEl.querySelector<HTMLElement>(`mark[data-ann-id="${id}"]`)
 		if (!mark) return
 		mark.addClass('is-flash')
 		window.setTimeout(() => mark.removeClass('is-flash'), 1400)
@@ -1528,16 +1519,6 @@ export class TextView extends ItemView implements ReaderEngine {
 		}
 	}
 
-	#goPage(page: number): void {
-		const next = Math.max(0, Math.min(this.pages.length - 1, page))
-		// 真的换了页才算一次翻页（重排/重绘也会走这里，同页不算）
-		if (next !== this.page && this.bookPath) this.plugin.statsPageTurn(this.bookPath)
-		this.page = next
-		this.screen = 0
-		this.gotoLastScreen = false
-		this.pendingOffset = null
-		this.#renderPage()
-	}
 
 	// ------------------------------------------------------------------
 	// 翻页
@@ -1593,7 +1574,7 @@ export class TextView extends ItemView implements ReaderEngine {
 	/** 手机端：翻页后自动收起工具栏，避免一直挡住正文 */
 	#collapseMobileBar(): void {
 		if (!this.plugin.isMobile) return
-		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
+		const bar = this.contentEl.querySelector<HTMLElement>('.grove-toolbar')
 		if (bar?.dataset.barOpen === '1') this.#setMobileBarOpen(false)
 	}
 
@@ -1973,7 +1954,7 @@ export class TextView extends ItemView implements ReaderEngine {
 	}
 
 	#setMobileBarOpen(open: boolean): void {
-		const bar = this.contentEl.querySelector('.grove-toolbar') as HTMLElement | null
+		const bar = this.contentEl.querySelector<HTMLElement>('.grove-toolbar')
 		if (!bar) return
 		bar.dataset.barOpen = open ? '1' : '0'
 		const handle = this.mobileToolbarHandle
@@ -1981,7 +1962,7 @@ export class TextView extends ItemView implements ReaderEngine {
 			handle.setText(open ? t('收起') : t('工具栏'))
 			handle.setAttribute('aria-label', open ? t('收起阅读工具栏') : t('展开阅读工具栏'))
 		}
-		bar.style.setProperty('transform', 'translateY(0)', 'important')
+		bar.addClass('grove-bar-flush')
 		if (open) bar.scrollLeft = 0
 	}
 
@@ -1989,7 +1970,7 @@ export class TextView extends ItemView implements ReaderEngine {
 		// pointerup 已经弹过菜单（手机短按路径），别让补发的 click 再弹一次
 		if (Date.now() < this.textClickGuard) return
 		const target = e.target as HTMLElement | null
-		const mark = target?.closest('mark.grove-txt-mark') as HTMLElement | null
+		const mark = target?.closest<HTMLElement>('mark.grove-txt-mark')
 		if (!mark) return
 		const id = mark.dataset.annId
 		if (!id) return
@@ -2459,10 +2440,8 @@ export class TextView extends ItemView implements ReaderEngine {
 		// 分栏分页下版心就是可视宽度，留白放在视口上；宽高由 #layout() 计算
 		this.scrollEl.style.paddingTop = `${a.pageMargin}px`
 		this.scrollEl.style.paddingBottom = `${a.pageMargin}px`
-		this.scrollEl.style.paddingLeft = '32px'
-		this.scrollEl.style.paddingRight = '32px'
-		this.textEl.style.padding = '0'
-		this.textEl.style.maxWidth = 'none'
+		this.scrollEl.addClass('grove-txt-gutter')
+		this.textEl.addClass('grove-txt-flush')
 		this.readerEl.style.setProperty(
 			'--text-selection',
 			isDarkColor(bg) ? 'rgba(120,160,255,0.35)' : 'rgba(64,120,255,0.25)',
