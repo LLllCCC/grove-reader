@@ -571,9 +571,9 @@ export class TextView extends ItemView implements ReaderEngine {
 
 	#showEmpty(message: string): void {
 		if (!this.textEl) return
-		this.textEl.style.width = ''
-		this.textEl.style.height = ''
-		this.textEl.style.columnCount = ''
+		this.textEl.style.removeProperty('width')
+		this.textEl.style.removeProperty('height')
+		this.textEl.style.removeProperty('column-count')
 		this.textEl.setText(message)
 		this.metaEl.setText('')
 		this.progressLabel.setText('—')

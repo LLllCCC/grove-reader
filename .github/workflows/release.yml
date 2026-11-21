@@ -14,7 +14,10 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      # foliate-js 已拆为 submodule（lib/foliate-js），必须递归拉取才能构建
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Use Node.js
         uses: actions/setup-node@v4
