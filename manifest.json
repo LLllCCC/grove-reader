@@ -1,7 +1,7 @@
 {
 	"id": "grove-reader",
 	"name": "Grove Reader",
-	"version": "0.36.11",
+	"version": "0.36.12",
 	"minAppVersion": "1.8.7",
 	"description": "Read EPUB, MOBI, AZW3, FB2, CBZ, PDF and TXT, highlight and comment, and generate Markdown notes that link back to the source.",
 	"author": "LLllCCC",
