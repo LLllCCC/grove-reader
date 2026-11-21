@@ -4,6 +4,13 @@
 
 在 Obsidian 里读书、划线和写笔记：支持 epub / mobi / azw3 / fb2 / cbz、PDF 与 TXT，完成「阅读 → 划线批注 → 生成 Markdown 笔记 → 一键回跳原文」的闭环。插件在设置里提供一组字标（彩叶 / 森林 / 灰绿 / 印章），可切换标签页与功能区图标。
 
+<p align="center">
+  <img src="docs/screenshots/bookshelf.png" alt="Bookshelf" width="32%">
+  <img src="docs/screenshots/highlights.png" alt="Highlight styles &amp; annotation sidebar" width="32%">
+  <img src="docs/screenshots/footnotes.png" alt="Reading view with footnote links" width="32%">
+</p>
+
+
 电子书渲染引擎为 [foliate-js](https://github.com/johnfactotum/foliate-js)（MIT，已内置于 `lib/foliate-js`）；PDF 阅读与批注基于 pdfjs-dist 独立实现（划选高亮按页存储）。
 
 ## 安装

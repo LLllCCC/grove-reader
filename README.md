@@ -4,6 +4,13 @@
 
 An e-book reader for Obsidian: read, highlight and take notes without leaving your vault, then generate one Markdown note per book that links back to the exact passage.
 
+<p align="center">
+  <img src="docs/screenshots/bookshelf.png" alt="Bookshelf" width="32%">
+  <img src="docs/screenshots/highlights.png" alt="Highlight styles &amp; annotation sidebar" width="32%">
+  <img src="docs/screenshots/footnotes.png" alt="Reading view with footnote links" width="32%">
+</p>
+
+
 Supported formats: **EPUB / MOBI / AZW3 / FB2 / CBZ**, **PDF** and **TXT**. The plugin also ships four wordmarks (autumn / forest / sage / seal) for the tab and ribbon icon.
 
 - Highlights, comments and bookmarks, grouped by chapter, with a collapsible sidebar.
