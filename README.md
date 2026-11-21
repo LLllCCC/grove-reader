@@ -5,9 +5,17 @@
 An e-book reader for Obsidian: read, highlight and take notes without leaving your vault, then generate one Markdown note per book that links back to the exact passage.
 
 <p align="center">
-  <img src="docs/screenshots/bookshelf.png" alt="Bookshelf" width="32%">
-  <img src="docs/screenshots/highlights.png" alt="Highlight styles &amp; annotation sidebar" width="32%">
-  <img src="docs/screenshots/footnotes.png" alt="Reading view with footnote links" width="32%">
+  <img src="docs/screenshots/shelf.jpg" alt="Bookshelf" width="49%">
+  <img src="docs/screenshots/reading-annotations.jpg" alt="Select to highlight &amp; annotate" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/reading-toolbar.jpg" alt="Reading toolbar" width="32%">
+  <img src="docs/screenshots/settings-appearance.jpg" alt="Settings · appearance" width="32%">
+  <img src="docs/screenshots/settings-shelf.jpg" alt="Settings · shelf" width="32%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/settings-reading.jpg" alt="Settings · reading &amp; notes" width="32%">
+  <img src="docs/screenshots/settings-data.jpg" alt="Settings · data &amp; maintenance" width="32%">
 </p>
 
 
